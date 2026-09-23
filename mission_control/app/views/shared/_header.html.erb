@@ -5,6 +5,14 @@
       <%= link_to "Projects", root_path, class: ("is-current" if controller_name == "projects") %>
     </nav>
     <span class="topbar__spacer"></span>
+    <% if Setup.next_step.nil? %>
+      <% tunnel = SystemStatus.tunnel %>
+      <div class="mono status">
+        <span>TUNNEL <%= status_word(tunnel.go?) %></span>
+        <span>REGISTRY <%= status_word(SystemStatus.registry_up?) %></span>
+        <span class="status__clock"><%= Time.now.utc.strftime("%H:%M UTC") %></span>
+      </div>
+    <% end %>
     <%= button_to "Sign out", session_path, method: :delete, class: "topbar__signout" %>
   <% end %>
 </header>

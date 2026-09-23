@@ -15,8 +15,9 @@ module Cloudflare
   class Client
     API = "https://api.cloudflare.com/client/v4"
 
-    def initialize(token)
+    def initialize(token, timeout: 10)
       @token = token
+      @timeout = timeout
     end
 
     def get(path, **query) = request(Net::HTTP::Get, path, query:)
@@ -33,7 +34,7 @@ module Cloudflare
         request["Content-Type"] = "application/json"
         request.body = body.to_json if body
 
-        response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 10) { |http| http.request(request) }
+        response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: @timeout, read_timeout: @timeout) { |http| http.request(request) }
         json = JSON.parse(response.body.presence || "{}") rescue {}
         unless response.is_a?(Net::HTTPSuccess) && json["success"]
           messages = Array(json["errors"]).filter_map { |e| e["message"] }

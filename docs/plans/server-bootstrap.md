@@ -235,6 +235,38 @@ Never: delete or re-init a repository; show the password after acknowledgement
 - **Review, fixed test-first:** the password page and download now send `Cache-Control: no-store`, and the "doesn't open it" message includes restic's own words (so a network error isn't passed off as a wrong password).
 - **Deferred:** a way to pick a different location before finishing (today: finish, then change it in Settings, build step 5); an NFS version choice (fixed at `nfsvers=4`); a real NFS check against your UNAS.
 
+## Batch 5: the empty Projects landing and system status
+
+(Done before Batch 4, which needs your OK to create OrbStack test machines. Nothing in it depends on the installer.)
+
+### Design (short)
+- **`/`, once setup is complete (design ProjectsEmpty):**
+  - "FLIGHT BOARD · <BASE>" and the stat strip (projects 0, in flight 0, no-go 0, next backup —).
+  - The empty state with the two paths. **A**'s copy becomes "repo has an x-houston block", and its Add project button shows as unavailable ("Coming soon") until build step 4 adds the page. **B** has the `houston init` commands with Copy.
+  - The pre-flight check.
+- **LAN banner:** "Setup complete. Mission Control now lives at admin.<base>…" shows unless the request's host is `admin.<base>`.
+- **Pre-flight check:**
+  - Admin login (GO).
+  - **Tunnel `houston-<label>`:** GO "N connections to Cloudflare", HOLD "cloudflared isn't connected yet", or a "can't check" state with Cloudflare's reason.
+  - **`*.<base>`:** GO.
+  - **Backup storage `<name>`:** GO, "default · password saved".
+  - **Cloudflare Access:** OPTIONAL.
+- **Header system strip** on signed-in pages: `TUNNEL` (GO when there are connections), `REGISTRY` (GO when `GET <registry>/v2/` answers, default `http://registry:5000`), and the UTC time. **RUNNERS stays out until runners exist** (build step 4).
+- **Status is cached for 30 s** (`Rails.cache`), so the Cloudflare API isn't called on every page view. Every probe has a 2 s timeout.
+
+### AC ↔ test map (Batch 5)
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | The home page shows the flight board, the zero stats, both paths (A with an unavailable Add project, B with the commands) | `controllers/projects_controller_test.rb` `test "the empty flight board"` | Contract, Honest surface |
+| 2 | The LAN banner shows on `localhost` and is hidden on `admin.svnmns.com` | `test "the banner points LAN visitors at admin.<base>"` | Contract |
+| 3 | The tunnel row: 4 connections → GO "4 connections to Cloudflare"; none → HOLD; Cloudflare error → "Can't check" with the reason | `test "the pre-flight tunnel row"` (table) | Signals |
+| 4 | The header strip: TUNNEL/REGISTRY GO or NO-GO from the probes; no RUNNERS | `test "the header shows tunnel and registry status"` | Signals, Honest surface |
+| 5 | Two page views within 30 s call Cloudflare once | `test "status checks are cached"` | Scale |
+
+### Done (Batch 5)
+- Red: 5 failures. Green: 44 runs. Two test fixes: the eyebrow is upper case (pattern made case-insensitive), and the registry probe now has a default stub in `test_helper`, because WebMock blocks real connections suite-wide.
+- Real render in dev (curl, signed in): strip "TUNNEL NO-GO REGISTRY NO-GO", pre-flight tunnel "? Can't check: not connected to Cloudflare" (dev has no real tunnel), storage "mac-local · Default · password saved", the LAN banner pointing at admin.<base>. RUNNERS isn't shown.
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?
