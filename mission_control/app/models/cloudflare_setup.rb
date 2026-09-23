@@ -148,15 +148,7 @@ class CloudflareSetup
       File.rename(tmp, path)
     end
 
-    def ingress
-      mission_control = ENV.fetch("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:80")
-      [
-        { hostname: "admin.#{base_domain}", service: mission_control },
-        { hostname: "hooks.#{base_domain}", path: "^/[a-z0-9-]+$", service: mission_control },
-        { hostname: "hooks.#{base_domain}", service: "http_status:404" },
-        { service: ENV.fetch("HOUSTON_APPS_URL", "http://kamal-proxy:80") }
-      ]
-    end
+    def ingress = TunnelRoutes.rules(base_domain)
 
     # denied: what to tell the admin when Cloudflare refuses for lack of
     # permission (the read-only token check can't prove edit rights).

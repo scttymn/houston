@@ -86,7 +86,7 @@ func Parse(path string, data []byte) (*Project, error) {
 	hosts := serviceHosts(model, &ps)
 	vars := collectVariables(raw, hosts, &ps)
 
-	h, xPort, hasXPort := parseHouston(raw, &ps)
+	h, xPort, hasXPort := parseHouston(raw, filepath.Dir(path), &ps)
 	port := appPort(model, app, xPort, hasXPort, &ps)
 
 	if len(ps) > 0 {

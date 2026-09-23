@@ -68,7 +68,7 @@ out=$(houston deploy --server --project "$app" --follow 2>&1); code=$?
 [ "$code" = 1 ] && printf '%s' "$out" | grep -q 'HOLD: .*houston secrets set' && ok "deploy before the secrets: NO-GO, HOLD, with the command to fix it" || bad "deploy before secrets: exit $code: $(printf '%s' "$out" | tail -2)"
 printf 'set by an agent, $HOME stays literal\n' | houston secrets set HOSTILE --project "$app" >/dev/null && ok "secrets set HOSTILE (from stdin)" || bad "secrets set"
 houston secrets generate POSTGRES_PASSWORD --project "$app" >/dev/null && ok "secrets generate POSTGRES_PASSWORD" || bad "secrets generate"
-houston secrets list --project "$app" | grep -q 'HOSTILE .*required *set' && ok "secrets list shows them set" || bad "secrets list: $(houston secrets list --project "$app")"
+houston secrets list --project "$app" | grep 'HOSTILE .*required *set' >/dev/null && ok "secrets list shows them set" || bad "secrets list: $(houston secrets list --project "$app")"
 
 echo "== houston deploy --server --follow"
 out=$(houston deploy --server --project "$app" --follow 2>&1); code=$?
@@ -76,11 +76,11 @@ out=$(houston deploy --server --project "$app" --follow 2>&1); code=$?
 printf '%s' "$out" | grep -qE "$app-test-[0-9a-f]{8}" && ok "the followed log includes step 00's tests" || bad "no tests in the followed log"
 settle 200 "https://$app.$base/up"
 [ "$(curl -s --max-time 10 "https://$app.$base/env/HOSTILE")" = 'set by an agent, $HOME stays literal' ] && ok "https://$app.$base serves the secret byte-exact" || bad "the app through Cloudflare"
-houston status --project "$app" | grep -q "^$app  GO" && ok "status: GO" || bad "status: $(houston status --project "$app")"
+houston status --project "$app" | grep "^$app  GO" >/dev/null && ok "status: GO" || bad "status: $(houston status --project "$app")"
 json=$(houston status --project "$app" --json)
 printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="go" and all(s["set"] for s in d["secrets"])' &&
   ! printf '%s' "$json" | grep -q 'set by an agent' && ok "status --json: go, every secret set, no values" || bad "status --json: $json"
-houston logs --server --project "$app" --tail 20 | grep -q 'spike ready' && ok "logs --server: the app's output" || bad "logs --server"
+houston logs --server --project "$app" --tail 20 | grep 'spike ready' >/dev/null && ok "logs --server: the app's output" || bad "logs --server"
 
 echo "== houston console --server, over SSH on the LAN"
 # The agent's own key, authorized for houston@ as the login hint says; an ssh

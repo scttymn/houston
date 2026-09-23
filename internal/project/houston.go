@@ -1,9 +1,14 @@
 package project
 
 import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Houston is the parsed x-houston block, with defaults applied.
@@ -14,6 +19,9 @@ type Houston struct {
 	Commands Commands
 	Hooks    Hooks
 	Backups  Backups
+	// MaintenancePage is the project's own maintenance page (the file
+	// x-houston.maintenance names), or "" for Houston's default.
+	MaintenancePage string
 }
 
 type Deploy struct {
@@ -51,7 +59,8 @@ var (
 
 // parseHouston walks x-houston strictly. It also returns x-houston.port, which
 // isn't kept on Houston: Project.AppPort is the resolved port.
-func parseHouston(raw map[string]any, ps *problems) (h Houston, port int, hasPort bool) {
+// dir is compose.yml's directory: x-houston.maintenance is relative to it.
+func parseHouston(raw map[string]any, dir string, ps *problems) (h Houston, port int, hasPort bool) {
 	h = Houston{
 		Deploy:  Deploy{On: "commit", Branch: "main", Tags: "v*"},
 		Backups: Backups{Schedule: "daily 03:00", KeepAuto: 14, KeepDeploy: 10},
@@ -87,8 +96,10 @@ func parseHouston(raw map[string]any, ps *problems) (h Houston, port int, hasPor
 			parseHooks(path, x[k], &h.Hooks, ps)
 		case "backups":
 			parseBackups(path, x[k], &h.Backups, ps)
+		case "maintenance":
+			h.MaintenancePage = parseMaintenancePage(path, x[k], dir, ps)
 		default:
-			ps.add(path, "unknown key; x-houston takes health, port, domains, deploy, commands, hooks, backups")
+			ps.add(path, "unknown key; x-houston takes health, port, domains, deploy, commands, hooks, backups, maintenance")
 		}
 	}
 	return h, port, hasPort
@@ -347,4 +358,64 @@ func shellCommand(path, s string, ps *problems) string {
 		ps.add(path, "write `$$%s`: compose reads this file too and would replace `$%s` with a value from your shell or .env", u.name, u.name)
 	}
 	return strings.ReplaceAll(s, "$$", "$")
+}
+
+// MaxMaintenancePage is the most a project's maintenance page may weigh.
+const MaxMaintenancePage = 512 * 1024
+
+// parseMaintenancePage reads the maintenance page x-houston.maintenance names:
+// a file inside compose.yml's directory, at most 512 KB of UTF-8.
+func parseMaintenancePage(path string, v any, dir string, ps *problems) string {
+	rel, ok := v.(string)
+	if !ok || rel == "" {
+		ps.add(path, "must be a path to an HTML file, like public/maintenance.html")
+		return ""
+	}
+	if filepath.IsAbs(rel) {
+		ps.add(path, "must be relative to compose.yml's directory, not %s", rel)
+		return ""
+	}
+	clean := filepath.Clean(rel)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		ps.add(path, "must be inside the repo (next to compose.yml or below), not %s", rel)
+		return ""
+	}
+	full := filepath.Join(dir, clean)
+	// Symlinks are followed, but the file they reach must be inside the repo
+	// too: on a runner, the checkout sits next to its deploy keys, and the
+	// page is served to anyone.
+	if real, err := filepath.EvalSymlinks(full); err == nil {
+		root, rootErr := filepath.EvalSymlinks(dir)
+		if within, relErr := filepath.Rel(root, real); rootErr != nil || relErr != nil ||
+			within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+			ps.add(path, "must be inside the repo; %s leads outside it", rel)
+			return ""
+		}
+		full = real
+	}
+	info, err := os.Stat(full)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		ps.add(path, "%s doesn't exist", rel)
+		return ""
+	case err != nil:
+		ps.add(path, "can't read %s: %v", rel, err)
+		return ""
+	case !info.Mode().IsRegular():
+		ps.add(path, "%s must be a file", rel)
+		return ""
+	case info.Size() > MaxMaintenancePage:
+		ps.add(path, "%s is larger than 512 KB", rel)
+		return ""
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		ps.add(path, "can't read %s: %v", rel, err)
+		return ""
+	}
+	if !utf8.Valid(data) {
+		ps.add(path, "%s must be UTF-8 text", rel)
+		return ""
+	}
+	return string(data)
 }

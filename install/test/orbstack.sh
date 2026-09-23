@@ -133,6 +133,8 @@ elif [ -f "$cf_file" ]; then
     "$repo/install/test/push-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
     echo "== an agent on this Mac, with only HOUSTON_SERVER and HOUSTON_API_TOKEN"
     "$repo/install/test/agent-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
+    echo "== Houston's maintenance page, through the tunnel"
+    "$repo/install/test/maintenance-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
     # hooks.<base> answers only the webhook and /ping (build step 4); /up is a 404 there.
     through 200 "https://hooks.$base/ping"
     through 404 "https://hooks.$base/up"

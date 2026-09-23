@@ -20,6 +20,13 @@
     <% end %>
   </div>
 
+  <% if @project.maintenance? %>
+    <div class="notice notice--hold">
+      <span class="mono">MAINTENANCE</span>
+      <span class="notice__text"><%= @project.name %> shows a maintenance page since <%= l(@project.maintenance_since, format: :short) %> (<%= @project.maintenance_by %>)<% if @project.maintenance_message.present? %>: “<%= @project.maintenance_message %>”<% end %>. It stays up until you turn it off.</span>
+      <%= button_to "Turn it off", project_maintenance_path(@project.name), method: :patch, params: { on: "0" }, class: "button button--small" %>
+    </div>
+  <% end %>
   <% if notice %>
     <div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div>
   <% end %>
@@ -110,6 +117,19 @@
           </div>
         <% end %>
         <p class="panel__row panel__row--muted">Where each volume lives is chosen before Houston makes it (at the next deploy). Postgres data always stays on local disk.</p>
+      </section>
+    <% end %>
+    <% unless @project.maintenance? %>
+      <section class="panel maintenance">
+        <h2 class="disp panel__title">Maintenance page</h2>
+        <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
+        <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
+        <p class="panel__row panel__row--muted"><%= @project.maintenance_page.present? ? "The project's own page (x-houston.maintenance)." : "Houston's default page. Set x-houston.maintenance in compose.yml to use your own." %></p>
+        <%= form_with url: project_maintenance_path(@project.name), method: :patch, class: "panel__row secret__form" do |f| %>
+          <%= hidden_field_tag :on, "1" %>
+          <%= f.text_field :message, placeholder: "Message (optional)", maxlength: 500 %>
+          <%= f.submit "Show maintenance page", class: "button button--small", data: { turbo_confirm: "Visitors to #{@project.name} will see the maintenance page within seconds. Show it?" } %>
+        <% end %>
       </section>
     <% end %>
     <section class="panel backup-plan">

@@ -11,6 +11,8 @@ class Project < ApplicationRecord
 
   encrypts :deploy_key_private, :webhook_secret
 
+  validates :maintenance_message, length: { maximum: 500 }
+
   # <name>.<base>, the app's default host.
   def host(installation = Installation.current)
     "#{name}.#{installation.base_domain}"
@@ -34,6 +36,11 @@ class Project < ApplicationRecord
   end
 
   def accessories = services - [ app_service ]
+
+  # Every hostname the app answers on: <name>.<base> and its custom domains.
+  def hostnames(installation = Installation.current) = [ host(installation) ] + domains
+
+  def maintenance? = maintenance_since.present?
 
   belongs_to :chosen_backup_location, class_name: "StorageLocation", foreign_key: :backup_location_id, optional: true
 

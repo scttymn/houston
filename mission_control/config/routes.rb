@@ -1,4 +1,11 @@
 Rails.application.routes.draw do
+  # A project's hostnames reach Mission Control only for its maintenance page;
+  # nothing else answers on them, before any other route.
+  constraints(AppHost) do
+    match "/", to: "maintenance_pages#show", via: :all
+    match "*path", to: "maintenance_pages#show", via: :all, format: false
+  end
+
   # hooks.<base> answers only the webhook and the ping; everything else there
   # is an empty 404, before any other route.
   constraints(HooksHost) do
@@ -49,6 +56,7 @@ Rails.application.routes.draw do
         resources :backups, only: %i[ create show ]
         resources :volumes, only: %i[ index update ], param: :name
         resource :backup_target, only: :update
+        resource :maintenance, only: :update
         resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
@@ -76,6 +84,9 @@ Rails.application.routes.draw do
     resources :snapshots, only: :index, controller: "project_snapshots"
     resources :volumes, only: :update, param: :name, controller: "project_volumes"
     resource :backup_target, only: :update, controller: "project_backup_targets"
+    resource :maintenance, only: :update, controller: "project_maintenance" do
+      get :preview
+    end
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end

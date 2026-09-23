@@ -13,6 +13,7 @@ class ProjectSync
   # A container path for docker -v: absolute, and no ":" (the separator).
   MOUNT_PATH = %r{\A/[^:\0\n]{0,4095}\z}
   MAX_VOLUMES = 50
+  MAX_MAINTENANCE_PAGE = 512.kilobytes
 
   attr_reader :errors, :project
 
@@ -42,6 +43,7 @@ class ProjectSync
                        databases: @payload["databases"].to_a.map { |d| d.slice("service", "image") },
                        keep_auto: @payload.dig("backups", "keep_auto") || 14, keep_deploy: @payload.dig("backups", "keep_deploy") || 10,
                        backup_schedule: @payload.dig("backups", "schedule") || "daily 03:00",
+                       maintenance_page: @payload["maintenance_page"],
                        synced_at: Time.current, **link.to_h)
       claim_hosts
     end
@@ -125,6 +127,11 @@ class ProjectSync
       unless volumes.is_a?(Array) && volumes.size <= MAX_VOLUMES &&
              volumes.all? { |v| v.is_a?(Hash) && v["name"].is_a?(String) && v["name"].match?(SERVICE) && v["path"].is_a?(String) && v["path"].match?(MOUNT_PATH) }
         errors["volumes"] << "must be a list of at most #{MAX_VOLUMES} {name, path} with absolute paths"
+      end
+
+      page = @payload["maintenance_page"]
+      unless page.nil? || (page.is_a?(String) && page.bytesize <= MAX_MAINTENANCE_PAGE && page.valid_encoding?)
+        errors["maintenance_page"] << "must be the page's HTML, at most 512 KB of UTF-8"
       end
 
       backups = @payload["backups"]

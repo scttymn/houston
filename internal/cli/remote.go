@@ -108,6 +108,13 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		}
 		fmt.Fprintf(stdout, "last      %s\n", line)
 	}
+	if m := p.Maintenance; m.On {
+		line := fmt.Sprintf("maintenance ON since %s (%s)", maintenanceSince(m), m.By)
+		if m.Message != "" {
+			line += ": " + m.Message
+		}
+		fmt.Fprintln(stdout, line)
+	}
 	fmt.Fprintf(stdout, "backup    %s\n", backupLine(p.LastBackup))
 	if p.BackupSchedule != "" {
 		fmt.Fprintf(stdout, "schedule  %s (%s)\n", p.BackupSchedule, p.TimeZone)

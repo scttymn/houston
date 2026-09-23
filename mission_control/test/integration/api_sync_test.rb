@@ -119,6 +119,50 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_not plain.calls.any? { |c| c.args[0..1] == %w[volume create] }
   end
 
+  test "maintenance follows the domains" do
+    Installation.current.update!(cloudflare_account_id: ACCOUNT, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+    # The custom domains' zones aren't in Cloudflare: looked up, left alone.
+    stub_request(:get, %r{\A#{API}/zones}).to_return(status: 200, headers: { "Content-Type" => "application/json" }, body: { success: true, errors: [], result: [] }.to_json)
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, domains: [ "equipping.com" ]))
+    Project.find_by!(name: "equip").update!(maintenance_since: Time.current)
+    pushed = []
+    stub_request(:put, "#{API}/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/configurations").to_return do |request|
+      pushed << JSON.parse(request.body).dig("config", "ingress").filter_map { |r| r["hostname"] }
+      { status: 200, headers: { "Content-Type" => "application/json" }, body: { success: true, errors: [], messages: [], result: {} }.to_json }
+    end
+
+    sync(equip_payload(variables: optional, domains: [ "www.equipping.com" ]))
+    assert_includes pushed.last, "www.equipping.com"
+    assert_not_includes pushed.last, "equipping.com"
+  end
+
+  test "sync records the maintenance page" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, maintenance_page: "<h1>{{project}}</h1>"))
+    assert_response :success
+    project = Project.find_by!(name: "equip")
+    assert_equal "<h1>{{project}}</h1>", project.maintenance_page
+
+    # The largest page, all tags: JSON escapes each < and > to six bytes,
+    # so the body is ~3 MB, and it still syncs.
+    worst = "<>" * (512.kilobytes / 2)
+    sync(equip_payload(variables: optional, maintenance_page: worst))
+    assert_response :success
+    assert_equal worst, project.reload.maintenance_page
+    project.update!(maintenance_page: "<h1>{{project}}</h1>")
+
+    [ "x" * (512.kilobytes + 1), 42 ].each do |page|
+      sync(equip_payload(variables: optional, maintenance_page: page))
+      assert_response :unprocessable_entity
+      assert_includes json["errors"].keys, "maintenance_page"
+    end
+    assert_equal "<h1>{{project}}</h1>", project.reload.maintenance_page
+
+    sync(equip_payload(variables: optional))
+    assert_nil project.reload.maintenance_page, "no page in the file: the default again"
+  end
+
   test "sync rejects what the CLI would never send" do
     {
       "name" => [ { name: "Equip" }, { name: "admin" }, { name: "hooks" }, { name: "-x" }, { name: nil } ],
@@ -139,7 +183,7 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     sync("{not json")
     assert_response :bad_request
 
-    sync(equip_payload(domains: Array.new(3000) { |i| "d#{i}.example-domain.com" }))
+    sync(equip_payload(domains: Array.new(200_000) { |i| "d#{i}.example-domain.com" }))
     assert_response :content_too_large
 
     assert_equal 0, Project.count

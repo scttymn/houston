@@ -225,6 +225,7 @@ type Project struct {
 	WebhookVerified bool            `json:"webhook_verified"`
 	Secrets         []SecretSummary `json:"secrets"`
 	LastBackup      *Backup         `json:"last_backup"`
+	Maintenance     Maintenance     `json:"maintenance"`
 	BackupSchedule  string          `json:"backup_schedule"`
 	TimeZone        string          `json:"time_zone"`
 }
@@ -268,6 +269,32 @@ func (cl *Client) PlaceVolume(ctx context.Context, project, volume, location str
 		return v, fmt.Errorf("%s", message(body))
 	}
 	return v, json.Unmarshal(body, &v)
+}
+
+// Maintenance is Houston's maintenance page for a project: the admin's switch.
+type Maintenance struct {
+	On      bool       `json:"on"`
+	Since   *time.Time `json:"since"`
+	By      string     `json:"by"`
+	Message string     `json:"message"`
+}
+
+// SetMaintenance turns a project's maintenance page on (with an optional
+// message) or off.
+func (cl *Client) SetMaintenance(ctx context.Context, project string, on bool, text string) (Maintenance, error) {
+	body := map[string]any{"on": on}
+	if on && text != "" {
+		body["message"] = text
+	}
+	var m Maintenance
+	status, resp, err := cl.do(ctx, http.MethodPut, "/api/v1/projects/"+url.PathEscape(project)+"/maintenance", body)
+	if err != nil {
+		return m, err
+	}
+	if status != http.StatusOK {
+		return m, fmt.Errorf("%s", message(resp))
+	}
+	return m, json.Unmarshal(resp, &m)
 }
 
 // Location is a storage location, as the API lists it: never a password or

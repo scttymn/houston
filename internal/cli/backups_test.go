@@ -243,3 +243,57 @@ func TestStorage(t *testing.T) {
 		t.Errorf("use --default: exit %d, body %s", code, body)
 	}
 }
+
+func TestMaintenance(t *testing.T) {
+	var body string
+	on := false
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/equip": func(w http.ResponseWriter, r *http.Request) {
+			m := `{"on":false}`
+			if on {
+				m = `{"on":true,"since":"2026-09-23T10:00:00Z","by":"token agent","message":"Back soon"}`
+			}
+			w.Write([]byte(strings.Replace(garageJSON, `"name":"garage"`, `"maintenance":`+m+`,"name":"equip"`, 1)))
+		},
+		"/api/v1/projects/equip/maintenance": func(w http.ResponseWriter, r *http.Request) {
+			body = readBody(r)
+			if strings.Contains(body, "refuse") {
+				w.WriteHeader(http.StatusBadGateway)
+				w.Write([]byte(`{"error":"Cloudflare said no: Tunnel configuration is invalid"}`))
+				return
+			}
+			on = strings.Contains(body, `"on":true`)
+			if on {
+				w.Write([]byte(`{"on":true,"since":"2026-09-23T10:00:00Z","by":"token agent","message":"Back soon"}`))
+			} else {
+				w.Write([]byte(`{"on":false}`))
+			}
+		},
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, _ := run(&fakeDocker{}, "maintenance", "--project", "equip")
+	if code != 0 || !strings.Contains(out, "equip: no maintenance page") {
+		t.Errorf("show off: exit %d\n%s", code, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "maintenance", "on", "--message", "Back soon", "--project", "equip")
+	if code != 0 || body != `{"message":"Back soon","on":true}` || !strings.Contains(out, "equip shows a maintenance page (since 2026-09-23 10:00 UTC, token agent): Back soon") {
+		t.Errorf("on: exit %d, body %s\n%s", code, body, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "status", "--project", "equip")
+	if code != 0 || !strings.Contains(out, "maintenance ON since 2026-09-23 10:00 UTC (token agent): Back soon\n") {
+		t.Errorf("status: exit %d\n%s", code, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "maintenance", "off", "--project", "equip")
+	if code != 0 || body != `{"on":false}` || !strings.Contains(out, "equip: no maintenance page") {
+		t.Errorf("off: exit %d, body %s\n%s", code, body, out)
+	}
+	code, _, errOut := run(&fakeDocker{}, "maintenance", "on", "--message", "refuse", "--project", "equip")
+	if code != 1 || !strings.Contains(errOut, "Tunnel configuration is invalid") {
+		t.Errorf("refused: exit %d, %q", code, errOut)
+	}
+	code, _, errOut = run(&fakeDocker{}, "maintenance", "sideways", "--project", "equip")
+	if code != 2 || !strings.Contains(errOut, "on or off") {
+		t.Errorf("bad arg: exit %d, %q", code, errOut)
+	}
+}

@@ -51,7 +51,7 @@
           <% @projects.each do |project| %>
             <% latest, running = project.latest_deploy, project.running_deploy %>
             <tr data-project="<%= project.name %>">
-              <td><%= state_chip(project.status) %><% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %></td>
+              <td><%= state_chip(project.status) %><% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %><% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %></td>
               <td>
                 <%= link_to project.name, project_path(project.name), class: "flight__name" %>
                 <small class="mono"><%= project.accessories.presence&.join(" · ") || "no services" %></small>

@@ -261,6 +261,20 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		},
 	})
 	root.AddCommand(storage)
+
+	var maintenanceMessage string
+	maintenance := &cobra.Command{
+		Use:   "maintenance [on|off]",
+		Short: "Houston's maintenance page for a project: see it, or turn it on or off (it stays until turned off)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runMaintenance(file, projectFlag, args, maintenanceMessage, stdout, stderr)
+			return nil
+		},
+	}
+	maintenance.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	maintenance.Flags().StringVar(&maintenanceMessage, "message", "", "with on: a message on the page")
+	root.AddCommand(maintenance)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

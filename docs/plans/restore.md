@@ -153,11 +153,105 @@ Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` s
 | 8 | API: on/off with a message, the project view's `maintenance` (by = the token's name); unknown project 404; the runner token 401; Cloudflare refusing → 502 with its words | `integration/api_v1_maintenance_test.rb` | Authz, Contract |
 | 9 | CLI: `houston maintenance` shows; `on --message`/`off`; errors → exit 1; `status` shows it | `internal/cli` `TestMaintenance` | Contract |
 
-## Batch 2: The page from the repo (titles until Batch 1 is green)
-- **`x-houston.maintenance`:** a path relative to compose.yml, inside the repo. The file must exist, be at most 512 KB and be valid UTF-8; otherwise it's refused with the key path and why. `houston init` can write a starter page.
-- **Sync and inspect** send its contents (`maintenance_page`); Mission Control stores them per project (absent → the default).
-- **Serving:** `{{project}}` and `{{message}}` are replaced, HTML-escaped; nothing else is interpreted. 503, `Retry-After`, `no-store`.
-- **Preview** on the project page: the page as it would be served, in a sandboxed iframe, without turning maintenance on.
+### Done (Batch 1)
+- **Red:** Mission Control had 3 failures and 14 errors, all new; the Go CLI failed. **Green:** Mission Control 230 runs and the Go suite. The migration runs down and up. rubocop and gofmt are clean.
+- **The real run** (`maintenance-through-tunnel.sh`, a stage of `orbstack.sh` on svnmns.com):
+  - `houston maintenance on`, and Cloudflare routed the app's hostname to Houston's page with **no measurable delay** (0 s). Ten answers in a row settled within 12 s.
+  - The page showed the name and the message. Mission Control's sign-in never answered on the app's hostname. The page stayed up with the app's containers stopped.
+  - `off`, and the app was back, again at once.
+- **Found on the way:**
+  - **The race test didn't race at first.** Both toggles committed before either computed its rules, so "no lock" survived. The test now starts the second toggle only once the first push is on its way to Cloudflare. Without the lock it fails (twice in a row); with it, it passes (three times). A first version of that test deadlocked on its own signal, which was my mistake.
+  - **CSRF on the page (from the review, red first):** production checks CSRF tokens and tests don't, so a POST to an app hostname would have got Rails' 422 page instead of the maintenance page. `skip_forgery_protection` fixes it: there's no session or state there. The test turns forgery protection on.
+  - Setup's ingress comes from `TunnelRoutes` now; the first-run tests pass unchanged.
+- **Mutations, each caught:**
+  - no rollback when Cloudflare refuses
+  - the push ignoring other projects
+  - custom domains not routed
+  - an app host not in maintenance reaching Mission Control
+  - the message unescaped
+  - sync never repushing
+  - no lock (after the test fix)
+- **Also fixed in the tunnel tests** (they had become flaky):
+  - `grep -q` on `houston status` died of SIGPIPE under `pipefail` once status printed more lines.
+  - The push stage now also settles `hooks/ping` from the machine, where Forgejo delivers from.
+  - `deploy-through-tunnel.sh` uses the shared `settle` (its single-200 wait let a stale edge's 404 through).
+- **Second full run:** 79 checks green, including the maintenance stage again. The one failure was that single-200 wait, fixed above.
+
+## Batch 2: The page from the repo
+
+### Design (short)
+- **`x-houston.maintenance`:** a path relative to compose.yml's directory, e.g. `public/maintenance.html`. The loader (`internal/project`) reads it and refuses, with the key path and why:
+  - a value that isn't a string
+  - an absolute path, or one that leaves the directory (`..` after cleaning)
+  - a file that's missing or not a regular file
+  - one over 512 KB
+  - one that isn't valid UTF-8
+  The content is kept on the project (`Houston.MaintenancePage`).
+- **Sync** sends `maintenance_page` (omitted when there's none). So does `houston inspect --json`, which feeds Add project's read.
+  - Mission Control stores it on the project (`projects.maintenance_page`, text). Absent means the default; a string over 512 KB or not UTF-8 → 422.
+  - A push that changes the file changes the page at the next deploy's sync.
+- **Serving:** the project's page if it has one, else the default.
+  - `{{project}}` and `{{message}}` are replaced, HTML-escaped (the message is empty without one). Nothing else is interpreted.
+  - 503, `Retry-After: 60`, `Cache-Control: no-store`, as for the default.
+- **Preview** (`GET /projects/:name/maintenance/preview`, admin): the page exactly as it would be served, with the message placeholder filled as "(your message)", answering 200.
+  - It carries `Content-Security-Policy: sandbox`, and the project page shows it in `<iframe sandbox>`. A repo's page can have scripts, and they must never run on Mission Control's own origin, even if the preview is opened directly.
+- **Named, not now:** `houston init` writing a starter page (a later init batch).
+
+### AC ↔ test map (Batch 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The loader reads `maintenance` relative to compose.yml; refuses non-string, absolute, `../`, missing, a directory, >512 KB, invalid UTF-8, each naming `x-houston.maintenance` | `internal/project` `TestLoad_MaintenancePage` | Contract (hostile input) |
+| 2 | Sync sends `maintenance_page`, omitted when there's none | `internal/mission` `TestRequestForData` | Contract |
+| 3 | Mission Control stores it; absent → none (the default again); >512 KB or not a string → 422, nothing saved | `integration/api_sync_test.rb` `test "sync records the maintenance page"` | Contract |
+| 4 | Serving the project's page with `{{project}}` and `{{message}}` filled and escaped (a `<script>` message stays text); 503 and the headers; the default without one | `integration/maintenance_page_test.rb` `test "a project's own page"` | Contract (hostile input) |
+| 5 | Preview: admin only; `Content-Security-Policy: sandbox`; the project page's `<iframe sandbox>` (no `allow-scripts`, no `allow-same-origin`); the default shown without a page | `controllers/project_maintenance_test.rb` `test "previewing the page"` | Authz, Security |
+
+### Done (Batch 2)
+- **Red:** the Go packages failed to build; the Rails rows failed. **Green:** Mission Control 234 runs and the Go suite. The migration runs down and up. rubocop, gofmt and go vet are clean.
+- **Found on the way, each red first:**
+  - **The sync API capped bodies at 64 KiB,** so any page over about 60 KB would have made every deploy's sync fail with 413. JSON escapes `<`, `>` and `&` to six bytes each, so the largest page (512 KB of tags) is about 3 MB on the wire. The sync limit is 4 MiB now, with that worst case tested, and the old "too large" test now sends more than 4 MiB.
+  - **HIGH (from the review): the loader followed symlinks out of the repo.** On a runner the checkout sits next to its deploy keys, and the page is served to anyone. Symlinks are still followed, but only to a file inside the repo: a link or a linked directory that leads outside is refused.
+- **Mutations, each caught:**
+  - Rails: the message unescaped in a project's page; no sandbox CSP on the preview; the page's size unchecked; the default always.
+  - Go: `../` allowed; invalid UTF-8 allowed; symlinks followed out.
+- **The real proof of a project's own page through the tunnel** is part of Batch 7's run.
+
+## Batch 3: Data generations
+
+### Spike first (on OrbStack, before the code)
+`install/test/generations-spike.sh`: the spike fixture deployed by hand, then, with Houston's generated Kamal config edited as generation 2 would write it:
+- accessory `db-g2` (container `spike-db-g2`, volume `spike.g2_pgdata`) boots while `spike-db` serves
+- the app deployed with `DB_HOST=spike-db-g2` and volume `spike.g2_data` reaches it and mounts it
+- `kamal accessory remove db` removes only generation 1's container
+- the host's image of the first SHA removed, `docker pull 127.0.0.1:5000/spike:<sha>` gets it back, and whether `kamal deploy --skip-push` pulls it by itself
+
+### Design (short)
+- **The names** (one function in Go, `kamal.Names`, and one in Mission Control, `Generation`):
+
+  | | generation 1 (today) | generation g ≥ 2 |
+  |---|---|---|
+  | app volume | `<name>_<volume>` | `<name>.g<g>_<volume>` |
+  | accessory (Kamal) | `<service>` | `<service>-g<g>` |
+  | its container, `<SERVICE>_HOST` | `<name>-<service>` | `<name>-<service>-g<g>` |
+  | accessory volume | `<name>_<volume>` | `<name>.g<g>_<volume>` |
+  | location directory | `volumes/<name>/<volume>` | `volumes/<name>.g<g>/<volume>` |
+
+- **`projects.data_generation`** (default 1). Sync's result carries it, and `houston deploy` writes the Kamal config for it: `kamal.Target.Generation`, the release hook's volumes, and the changed-accessory reboot's names.
+- **Mission Control** uses the project's generation in `VolumePlacement` (it takes a generation), `Backup` (which volumes and containers it reads), and `Project#host_names`.
+  - **Container names are claimed per generation.** A project named `equip-db-g2` can't take a name generation 2 of `equip` needs, and the other way round. Batch 6 claims g+1's names when a restore allocates it.
+- **The loader reserves** service names ending in `-g<digits>`: "reserved for Houston's data generations".
+- **Generation 1 is unchanged:** the golden Kamal configs are byte-identical, and the step 3–5 suites pass untouched.
+
+### AC ↔ test map (Batch 3)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Generation 1's Kamal configs are byte-identical to today's (the phoenix and rails goldens); generation 2's golden: `phoenixapp.g2_media`, accessory `db-g2`, `DB_HOST=phoenixapp-db-g2`, `phoenixapp.g2_pgdata` | `internal/kamal` `TestGenerate*` (the golden files) | Contract, Migrate |
+| 2 | The release hook's volumes and the changed-accessory reboot use the generation's names | `internal/deploy` `TestDeployGeneration2` | Contract |
+| 3 | Sync's result carries the generation, and the deploy uses it | `internal/mission` client test, `internal/deploy` | Contract |
+| 4 | A service named `db-g2` → refused, naming the reservation | `internal/project` `TestLoad_ReservedGenerationNames` | Contract |
+| 5 | Mission Control: generation 1 names as today; generation 2's for placement (the volume and its directory), backups (mounts, the Postgres container) and claimed container names | `models/generation_test.rb`, `volume_placement_test.rb`, `backup_test.rb` | Contract |
+| 6 | A project named `equip-db-g2` and project `equip`'s generation 2 can't both claim `equip-db-g2` | `models/project_host_test.rb` | Concurrency |
+| 7 | The migration: every existing project is generation 1 | `models/project_test.rb` | Migrate |
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.

@@ -22,11 +22,8 @@ gitc='git -c user.name=houston-test -c user.email=test@houston.invalid'
 code_of() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
 # Cloudflare's edge can take a while to move a name off the other server's
 # wildcard onto the new record, so every first look waits up to 5 minutes.
-wait_for() {
-  local want="$1" url="$2" got="" start=$SECONDS
-  for _ in $(seq 1 60); do got=$(code_of "$url"); [ "$got" = "$want" ] && break; sleep 5; done
-  [ "$got" = "$want" ] && ok "$url answers $got through Cloudflare (after $((SECONDS - start))s)" || bad "$url answered $got after 5 minutes (wanted $want)"
-}
+# shellcheck source=install/test/settle.sh
+. "$repo/install/test/settle.sh"
 
 # Never deploy over a name something already answers on: equip.svnmns.com is
 # a live app on the other server, which is why the test names are these.
@@ -50,7 +47,7 @@ vm env HOSTILE_VALUE="$hostile" docker compose -f /opt/houston/compose.yml exec 
   p.secrets.create!(key: "HOSTILE", value: ENV.fetch("HOSTILE_VALUE"))
   p.secrets.create!(key: "POSTGRES_PASSWORD", value: SecureRandom.hex(16))' >/dev/null
 if as_houston 'cd ~/spike && houston deploy' >/tmp/houston-spike-2.log 2>&1; then ok "GO"; else bad "deploy"; tail -20 /tmp/houston-spike-2.log; fi
-wait_for 200 "https://houston-spike-test.$base/up"
+settle 200 "https://houston-spike-test.$base/up"
 got=$(curl -s --max-time 10 "https://houston-spike-test.$base/env/HOSTILE"; printf x); got="${got%x}"
 [ "$got" = "$hostile"$'\n' ] && ok "HOSTILE arrives byte-exact through Cloudflare" || bad "HOSTILE through Cloudflare: $(printf %q "$got")"
 
@@ -75,7 +72,7 @@ grep -q 'HOLD' /tmp/houston-equip-1.log && ok "the first deploy holds for RAILS_
 runner "V=\$(cat '$stage/master.key') docker compose -f /opt/houston/compose.yml exec -T -e V mission-control bin/rails runner 'Project.find_by!(name: \"houston-equip-test\").secrets.create!(key: \"RAILS_MASTER_KEY\", value: ENV.fetch(\"V\"))'" >/dev/null
 rm -f "$stage/master.key"
 if as_houston 'cd ~/equip && houston deploy' >/tmp/houston-equip-2.log 2>&1; then ok "GO"; else bad "deploy"; tail -30 /tmp/houston-equip-2.log; fi
-wait_for 200 "https://houston-equip-test.$base/up"
+settle 200 "https://houston-equip-test.$base/up"
 
 echo "== equip redeploy, polled through Cloudflare"
 as_houston "cd ~/equip && date > .houston-test-marker && git add -A && $gitc commit -qm redeploy" >/dev/null

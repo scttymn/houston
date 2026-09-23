@@ -70,6 +70,13 @@ ok "Forgejo's webhook points at https://hooks.$base/$app"
 
 echo "== a push → Forgejo's webhook through Cloudflare → a runner deploys it"
 settle 200 "https://hooks.$base/ping" # Forgejo doesn't retry a delivery the wildcard answered
+# Forgejo delivers from inside the machine: settle from there too.
+streak=0 start=$SECONDS
+while [ "$streak" -lt 10 ] && [ $((SECONDS - start)) -lt 300 ]; do
+  if [ "$(vm curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://hooks.$base/ping")" = 200 ]; then streak=$((streak + 1)); else streak=0; fi
+  sleep 1
+done
+[ "$streak" = 10 ] && ok "hooks.$base/ping: 10 200s in a row from the machine (after $((SECONDS - start))s)" || bad "hooks.$base never settled from the machine"
 first=$(push 'echo one > version.txt' 'one')
 result=$(wait_for_deploy 1)
 case "$result" in go\|houston-runner-*) ok "deploy #1 GO, run by ${result#go|}" ;; *) bad "deploy #1: $result"; rails "puts Project.find_by(name: '$app')&.deploys&.last&.log.to_s" 2>/dev/null | tail -20 | sed 's/^/      /' ;; esac

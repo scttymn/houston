@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_220000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -124,6 +124,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_200000) do
     t.integer "keep_deploy", default: 10, null: false
     t.string "last_check_error"
     t.datetime "last_checked_at"
+    t.string "maintenance_by"
+    t.string "maintenance_message", limit: 500
+    t.text "maintenance_page"
+    t.datetime "maintenance_since"
     t.string "name", null: false
     t.integer "port", null: false
     t.string "repo_url"

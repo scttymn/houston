@@ -219,4 +219,15 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
       assert_no_match(/backup NO-GO/, row.text)
     end
   end
+
+  test "a project in maintenance" do
+    stub_tunnel
+    make_project("equip").update!(maintenance_since: 10.minutes.ago, maintenance_by: "admin@example.com")
+    make_project("other")
+    get root_path
+    assert_select "[data-project='equip']", /MAINTENANCE/
+    assert_select "[data-project='other']" do |row|
+      assert_no_match(/MAINTENANCE/, row.text)
+    end
+  end
 end

@@ -1,8 +1,10 @@
 package mission
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sevenmoons/houston/internal/project"
@@ -76,6 +78,16 @@ x-houston:
 	}
 	if !reflect.DeepEqual(got.Databases, want) {
 		t.Errorf("Databases = %#v, want %#v", got.Databases, want)
+	}
+	if got.MaintenancePage != "" {
+		t.Errorf("MaintenancePage = %q without the key", got.MaintenancePage)
+	}
+	if data, _ := json.Marshal(got); strings.Contains(string(data), "maintenance_page") {
+		t.Errorf("maintenance_page is sent without a page: %s", data)
+	}
+	p.Houston.MaintenancePage = "<h1>{{project}}</h1>"
+	if RequestFor(p).MaintenancePage != "<h1>{{project}}</h1>" {
+		t.Error("the page isn't sent")
 	}
 	if want := (&Backups{Schedule: "daily 22:15", KeepAuto: 3, KeepDeploy: 5}); !reflect.DeepEqual(got.Backups, want) {
 		t.Errorf("Backups = %#v, want %#v", got.Backups, want)

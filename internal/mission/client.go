@@ -95,6 +95,8 @@ type SyncRequest struct {
 	Volumes    []Volume   `json:"volumes,omitempty"`
 	Databases  []Database `json:"databases,omitempty"`
 	Backups    *Backups   `json:"backups,omitempty"`
+	// MaintenancePage is the project's own maintenance page, if it has one.
+	MaintenancePage string `json:"maintenance_page,omitempty"`
 }
 
 // Backups are x-houston.backups: when to back up, and what to keep.

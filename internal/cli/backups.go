@@ -248,3 +248,47 @@ func runStorageUse(file, projectFlag string, args []string, useDefault bool, std
 	fmt.Fprintf(stdout, "%s backs up to %s.\n", name, where)
 	return 0
 }
+
+// runMaintenance shows a project's maintenance page state; "on" or "off"
+// sets it (Houston's page, on every hostname of the project).
+func runMaintenance(file, projectFlag string, args []string, message string, stdout, stderr io.Writer) int {
+	if len(args) > 1 || (len(args) == 1 && args[0] != "on" && args[0] != "off") {
+		fmt.Fprintln(stderr, "houston maintenance [on|off]: on or off, or nothing to see it")
+		return exitUsage
+	}
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	ctx := context.Background()
+	var m server.Maintenance
+	if len(args) == 1 {
+		var err error
+		if m, err = client.SetMaintenance(ctx, name, args[0] == "on", message); err != nil {
+			return remoteFailed(err, stderr)
+		}
+	} else {
+		p, err := client.Project(ctx, name)
+		if err != nil {
+			return remoteFailed(err, stderr)
+		}
+		m = p.Maintenance
+	}
+	if !m.On {
+		fmt.Fprintf(stdout, "%s: no maintenance page.\n", name)
+		return 0
+	}
+	line := fmt.Sprintf("%s shows a maintenance page (since %s, %s)", name, maintenanceSince(m), m.By)
+	if m.Message != "" {
+		line += ": " + m.Message
+	}
+	fmt.Fprintln(stdout, line+". It stays up until you turn it off.")
+	return 0
+}
+
+func maintenanceSince(m server.Maintenance) string {
+	if m.Since == nil {
+		return "—"
+	}
+	return utc(*m.Since)
+}
