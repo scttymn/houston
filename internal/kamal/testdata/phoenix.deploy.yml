@@ -41,9 +41,13 @@ volumes:
   - phoenixapp_media:/media
 accessories:
   cache:
+    labels:
+      houston.config: da535771bcde5dd9bd0e93e1f64dcb128ccd9a2d9ab4577ac4ca29317f987a4b
     image: redis:7
     host: 127.0.0.1
   db:
+    labels:
+      houston.config: 1d77635b836e4eca228fe1c1f859e023637bbfe47cd9518e11f60a9183f1be83
     image: postgres:17
     host: 127.0.0.1
     env:

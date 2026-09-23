@@ -5,6 +5,8 @@
 package kamal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -96,6 +98,7 @@ type env struct {
 }
 
 type accessory struct {
+	Labels  map[string]string `yaml:"labels,omitempty"`
 	Image   string            `yaml:"image"`
 	Host    string            `yaml:"host"`
 	Cmd     string            `yaml:"cmd,omitempty"`
@@ -226,7 +229,7 @@ func (g *generator) config(t Target) deployYAML {
 		if cfg.Accessories == nil {
 			cfg.Accessories = map[string]accessory{}
 		}
-		cfg.Accessories[name] = accessory{
+		acc := accessory{
 			Image:   g.plain(path+".image", svc.Image, true),
 			Host:    host,
 			Cmd:     cmd,
@@ -234,8 +237,21 @@ func (g *generator) config(t Target) deployYAML {
 			Volumes: volumes,
 			Options: g.healthOptions(path+".healthcheck", svc.HealthCheck),
 		}
+		// Kamal skips booting an accessory whose container exists (spike
+		// S10); houston deploy compares this label to spot a changed config.
+		acc.Labels = map[string]string{ConfigLabel: configHash(acc)}
+		cfg.Accessories[name] = acc
 	}
 	return cfg
+}
+
+func configHash(a accessory) string {
+	data, err := yaml.Marshal(a)
+	if err != nil {
+		panic(err) // plain structs of strings always marshal
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func sortedServices(p *project.Project) []string {
@@ -622,4 +638,19 @@ func AppEnv(p *project.Project, secrets map[string]string) (map[string]string, e
 func AppVolumes(p *project.Project) []string {
 	var ps problems
 	return newGenerator(p, &ps).volumes(p.Compose.Services[p.AppService])
+}
+
+// ConfigLabel is the label on each accessory holding its config's hash.
+const ConfigLabel = "houston.config"
+
+// AccessoryLabels returns each accessory's config hash (see ConfigLabel), by
+// service name, as deploy.yml labels them.
+func AccessoryLabels(p *project.Project) map[string]string {
+	var ps problems
+	cfg := newGenerator(p, &ps).config(Target{})
+	out := map[string]string{}
+	for name, a := range cfg.Accessories {
+		out[name] = a.Labels[ConfigLabel]
+	}
+	return out
 }

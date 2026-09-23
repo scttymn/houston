@@ -562,3 +562,44 @@ func TestAppEnv(t *testing.T) {
 		t.Errorf("AppVolumes = %v", got)
 	}
 }
+
+// houston deploy compares this label with the running accessory's and
+// reboots it when they differ: Kamal's own boot skips an accessory whose
+// container exists, so a changed image would never apply.
+func TestAccessoryConfigLabel(t *testing.T) {
+	label := func(compose string) string {
+		t.Helper()
+		labels := AccessoryLabels(parse(t, compose))
+		return labels["db"]
+	}
+	base := `name: shop
+services:
+  app:
+    build: .
+    ports: ["80:80"]
+    environment:
+      MODE: one
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes: { pgdata: {} }
+x-houston:
+  health: /up
+`
+	first := label(base)
+	if len(first) != 64 {
+		t.Fatalf("label = %q, want a sha256 hex digest", first)
+	}
+	if got := label(strings.Replace(base, "MODE: one", "MODE: two", 1)); got != first {
+		t.Error("an app-only change changed the accessory's label")
+	}
+	if got := label(strings.Replace(base, "postgres:17", "postgres:18", 1)); got == first {
+		t.Error("a new image didn't change the accessory's label")
+	}
+	m := config(t, parse(t, base), target)
+	if got := dig(m, "accessories", "db", "labels", "houston.config"); got != first {
+		t.Errorf("deploy.yml's label = %v, want %s", got, first)
+	}
+}

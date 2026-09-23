@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sevenmoons/houston/internal/kamal"
 	"github.com/sevenmoons/houston/internal/mission"
@@ -51,9 +55,18 @@ x-houston:
 
 // fakeDocker records docker calls; exit decides each one's exit code.
 type fakeDocker struct {
+	mu       sync.Mutex
 	calls    []dockerCall
+	outputs  [][]string
+	labels   map[string]string // container → its houston.config label
 	exit     func(what string) int
 	onStream func(what string, args []string)
+	// block, when it says so, holds a call until its context ends.
+	block func(what string) bool
+	// hold keeps a call running this long (without watching the context).
+	hold func(what string) time.Duration
+	// emit is extra output a call writes.
+	emit func(what string) string
 }
 
 type dockerCall struct {
@@ -63,15 +76,36 @@ type dockerCall struct {
 }
 
 func (f *fakeDocker) Output(args ...string) ([]byte, error) {
-	return nil, errors.New("unexpected Output")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.outputs = append(f.outputs, args)
+	switch args[0] {
+	case "inspect":
+		return []byte(f.labels[args[len(args)-1]] + "\n"), nil
+	case "rm":
+		return nil, nil
+	}
+	return nil, errors.New("unexpected docker " + strings.Join(args, " "))
 }
 
 func (f *fakeDocker) Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error) {
 	what := describe(args)
+	f.mu.Lock()
 	f.calls = append(f.calls, dockerCall{what: what, args: args, env: env})
+	f.mu.Unlock()
 	io.WriteString(out, "output of "+what+"\n")
+	if f.emit != nil {
+		io.WriteString(out, f.emit(what))
+	}
 	if f.onStream != nil {
 		f.onStream(what, args)
+	}
+	if f.hold != nil {
+		time.Sleep(f.hold(what))
+	}
+	if f.block != nil && f.block(what) {
+		<-ctx.Done()
+		return 1, ctx.Err()
 	}
 	if f.exit != nil {
 		return f.exit(what), nil
@@ -79,7 +113,21 @@ func (f *fakeDocker) Stream(ctx context.Context, dir string, env []string, out i
 	return 0, nil
 }
 
+func (f *fakeDocker) removed() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][]string
+	for _, o := range f.outputs {
+		if o[0] == "rm" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 func (f *fakeDocker) whats() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []string
 	for _, c := range f.calls {
 		out = append(out, c.what)
@@ -135,12 +183,14 @@ func (g *fakeGit) Output(dir string, args ...string) (string, error) {
 }
 
 type fakeMission struct {
-	calls    []string
-	syncErr  error
-	secrets  map[string]string
-	startErr error
-	deploy   mission.Deploy
-	reports  []mission.Progress
+	mu        sync.Mutex
+	calls     []string
+	syncErr   error
+	secrets   map[string]string
+	startErr  error
+	deploy    mission.Deploy
+	reports   []mission.Progress
+	reportErr func(p mission.Progress) error
 }
 
 func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error) {
@@ -165,11 +215,32 @@ func (m *fakeMission) StartDeploy(ctx context.Context, project, sha, ref string)
 }
 
 func (m *fakeMission) Report(ctx context.Context, d mission.Deploy, p mission.Progress) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.reportErr != nil {
+		if err := m.reportErr(p); err != nil {
+			return err
+		}
+	}
 	m.reports = append(m.reports, p)
 	return nil
 }
 
+func (m *fakeMission) heartbeats() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, r := range m.reports {
+		if r.Step == "" && r.Status == "" {
+			n++
+		}
+	}
+	return n
+}
+
 func (m *fakeMission) final() mission.Progress {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i := len(m.reports) - 1; i >= 0; i-- {
 		if m.reports[i].Status != "" {
 			return m.reports[i]
@@ -179,6 +250,8 @@ func (m *fakeMission) final() mission.Progress {
 }
 
 func (m *fakeMission) log() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var b strings.Builder
 	for _, r := range m.reports {
 		b.WriteString(r.Log)
@@ -194,6 +267,7 @@ type harness struct {
 	stdout  bytes.Buffer
 	stderr  bytes.Buffer
 	ref     string
+	timing  Options // Timeout, HeartbeatEvery, FenceAfter; zero means the defaults
 }
 
 func newHarness(t *testing.T, compose string) *harness {
@@ -202,9 +276,18 @@ func newHarness(t *testing.T, compose string) *harness {
 	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(compose), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The accessories' running labels match deploy.yml unless a test says not.
+	p, err := project.Load(filepath.Join(dir, "compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]string{}
+	for name, label := range kamal.AccessoryLabels(p) {
+		labels[p.Name+"-"+name] = label
+	}
 	return &harness{
 		dir:     dir,
-		docker:  &fakeDocker{},
+		docker:  &fakeDocker{labels: labels},
 		git:     &fakeGit{head: sha, branch: "refs/heads/main", refs: map[string]string{"refs/heads/main": sha}},
 		mission: &fakeMission{secrets: map[string]string{"POSTGRES_PASSWORD": "pw", "SECRET_KEY_BASE": "skb"}, deploy: mission.Deploy{ID: 9, Number: 4, Token: "t"}},
 	}
@@ -212,13 +295,16 @@ func newHarness(t *testing.T, compose string) *harness {
 
 func (h *harness) run() int {
 	return Run(context.Background(), Options{
-		File:    filepath.Join(h.dir, "compose.yml"),
-		Ref:     h.ref,
-		Arch:    "arm64",
-		SSHDir:  "/home/houston/.ssh",
-		Environ: []string{"PATH=/usr/bin", "HOME=/home/houston"},
-		Stdout:  &h.stdout,
-		Stderr:  &h.stderr,
+		File:           filepath.Join(h.dir, "compose.yml"),
+		Ref:            h.ref,
+		Arch:           "arm64",
+		SSHDir:         "/home/houston/.ssh",
+		Environ:        []string{"PATH=/usr/bin", "HOME=/home/houston"},
+		Stdout:         &h.stdout,
+		Stderr:         &h.stderr,
+		Timeout:        h.timing.Timeout,
+		HeartbeatEvery: h.timing.HeartbeatEvery,
+		FenceAfter:     h.timing.FenceAfter,
 	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission})
 }
 
@@ -507,5 +593,168 @@ func TestDeployNeedsTheRunnerToken(t *testing.T) {
 	}
 	if !strings.Contains(h.stderr.String(), "refused the runner token") {
 		t.Errorf("stderr:\n%s", h.stderr.String())
+	}
+}
+
+func TestDeployStopsWhenTakenOver(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	// The deadline only bounds the test if the takeover goes unnoticed.
+	h.timing = Options{HeartbeatEvery: 5 * time.Millisecond, Timeout: 2 * time.Second}
+	building := make(chan struct{})
+	h.docker.onStream = func(what string, args []string) {
+		if what == "build" {
+			close(building)
+		}
+	}
+	h.docker.block = func(what string) bool { return what == "build" }
+	h.mission.reportErr = func(p mission.Progress) error {
+		select {
+		case <-building:
+			return fmt.Errorf("%w: deploy #4 is no longer in flight (abandoned)", mission.ErrTakenOver)
+		default:
+			return nil
+		}
+	}
+
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if !strings.Contains(h.stderr.String(), "taken over") {
+		t.Errorf("stderr:\n%s", h.stderr.String())
+	}
+	if got := h.docker.whats(); !reflect.DeepEqual(got, []string{"build"}) {
+		t.Errorf("docker calls = %v; nothing may run after the takeover", got)
+	}
+	if got := h.docker.removed(); len(got) != 1 || !slices.Contains(got[0], "houston-kamal-shop") || !slices.Contains(got[0], "shop-release-0123456") {
+		t.Errorf("containers removed = %v", got)
+	}
+	if final := h.mission.final(); final.Status != "" {
+		t.Errorf("reported %q on a deploy that isn't ours anymore", final.Status)
+	}
+}
+
+func TestDeployFencesItselfWhenMissionControlIsGone(t *testing.T) {
+	if FenceAfter >= 120*time.Second {
+		t.Fatalf("FenceAfter = %s; it must be shorter than Mission Control's takeover threshold (Deploy::STALE_AFTER, 2 minutes)", FenceAfter)
+	}
+	h := newHarness(t, shopCompose)
+	h.timing = Options{HeartbeatEvery: 5 * time.Millisecond, FenceAfter: 40 * time.Millisecond, Timeout: 2 * time.Second}
+	h.docker.block = func(what string) bool { return what == "build" }
+	var gone atomic.Bool
+	h.docker.onStream = func(what string, args []string) {
+		if what == "build" {
+			gone.Store(true)
+		}
+	}
+	h.mission.reportErr = func(p mission.Progress) error {
+		if gone.Load() {
+			return errors.New("can't reach Mission Control: connection refused")
+		}
+		return nil
+	}
+
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if !strings.Contains(h.stderr.String(), "lost touch with Mission Control") {
+		t.Errorf("stderr:\n%s", h.stderr.String())
+	}
+	if got := h.docker.whats(); !reflect.DeepEqual(got, []string{"build", "kamal lock release --version " + sha}) {
+		t.Errorf("docker calls = %v", got)
+	}
+	if len(h.docker.removed()) != 1 {
+		t.Errorf("containers removed = %v", h.docker.removed())
+	}
+}
+
+func TestDeployDeadline(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.timing = Options{Timeout: 60 * time.Millisecond}
+	h.docker.block = func(what string) bool { return strings.HasPrefix(what, "kamal deploy") }
+
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	whats := h.docker.whats()
+	if whats[len(whats)-1] != "kamal lock release --version "+sha {
+		t.Errorf("docker calls = %v; want Kamal's lock released last", whats)
+	}
+	if len(h.docker.removed()) != 1 {
+		t.Errorf("containers removed = %v", h.docker.removed())
+	}
+	if final := h.mission.final(); final.Status != "no_go" || !strings.Contains(final.Error, "timed out after") {
+		t.Errorf("final report = %+v", final)
+	}
+}
+
+func TestDeployHeartbeats(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.timing = Options{HeartbeatEvery: 10 * time.Millisecond}
+	h.docker.hold = func(what string) time.Duration {
+		if what == "build" {
+			return 80 * time.Millisecond
+		}
+		return 0
+	}
+
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if n := h.mission.heartbeats(); n < 3 {
+		t.Errorf("%d heartbeats during an 80 ms step at 10 ms; want at least 3", n)
+	}
+}
+
+func TestDeployLogChunks(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	big := strings.Repeat("0123456789abcdef", 700<<10/16)
+	h.docker.emit = func(what string) string {
+		if what == "build" {
+			return big
+		}
+		return ""
+	}
+
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	for i, r := range h.mission.reports {
+		if len(r.Log) > 200<<10 {
+			t.Errorf("report %d carries %d bytes of log; want ≤ 200 KiB", i, len(r.Log))
+		}
+	}
+	if !strings.Contains(h.mission.log(), "output of build\n"+big) {
+		t.Error("the chunks don't add up to the step's output")
+	}
+}
+
+func TestDeployRebootsAChangedAccessory(t *testing.T) {
+	p, err := project.Parse(filepath.Join(t.TempDir(), "compose.yml"), []byte(shopCompose))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := kamal.AccessoryLabels(p)["db"]
+
+	h := newHarness(t, shopCompose)
+	h.docker.labels = map[string]string{"shop-db": current}
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if slices.Contains(h.docker.whats(), "kamal accessory reboot db --version "+sha) {
+		t.Error("rebooted an accessory whose config didn't change")
+	}
+
+	h = newHarness(t, shopCompose)
+	h.docker.labels = map[string]string{"shop-db": "an-older-config"}
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	whats := h.docker.whats()
+	boot, reboot := slices.Index(whats, "kamal accessory boot all --version "+sha), slices.Index(whats, "kamal accessory reboot db --version "+sha)
+	if boot < 0 || reboot != boot+1 {
+		t.Errorf("docker calls = %v; want the reboot right after boot", whats)
+	}
+	if !strings.Contains(h.mission.log(), "db's config changed") {
+		t.Errorf("log:\n%s", h.mission.log())
 	}
 }

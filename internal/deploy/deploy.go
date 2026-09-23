@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sevenmoons/houston/internal/kamal"
 	"github.com/sevenmoons/houston/internal/mission"
@@ -22,6 +24,12 @@ import (
 // KamalImage is the Kamal houston deploy runs, pinned (spike: Kamal 2.12.0).
 const KamalImage = "ghcr.io/basecamp/kamal:v2.12.0"
 
+const (
+	DefaultTimeout = 30 * time.Minute
+	HeartbeatEvery = 15 * time.Second
+	FenceAfter     = 60 * time.Second
+)
+
 // Exit codes, as the rest of the CLI uses them.
 const (
 	exitFailure = 1 // the deploy didn't happen or didn't finish
@@ -29,6 +37,7 @@ const (
 )
 
 type Docker interface {
+	Output(args ...string) ([]byte, error)
 	Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error)
 }
 
@@ -51,6 +60,10 @@ type Options struct {
 	Environ []string  // the environment for docker; secrets are added to it
 	Stdout  io.Writer // step output, as it happens
 	Stderr  io.Writer
+
+	Timeout        time.Duration // the whole deploy; zero: DefaultTimeout
+	HeartbeatEvery time.Duration // zero: HeartbeatEvery
+	FenceAfter     time.Duration // zero: FenceAfter
 }
 
 type Deps struct {
@@ -109,10 +122,22 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
 		return exitFailure
 	}
-	r := &run{ctx: ctx, o: o, d: d, p: p, dir: dir, sha: sha, config: config, secretsFile: secretsFile,
+	// Every docker command runs under runCtx. It ends when the deadline
+	// passes, when the deploy is taken over, or when Mission Control has been
+	// unreachable for FenceAfter (see stop). Reports use ctx, so the final one
+	// still goes out after a timeout.
+	timeout, every, fence := orDefault(o.Timeout, DefaultTimeout), orDefault(o.HeartbeatEvery, HeartbeatEvery), orDefault(o.FenceAfter, FenceAfter)
+	deadlineCtx, cancelDeadline := context.WithTimeout(ctx, timeout)
+	defer cancelDeadline()
+	runCtx, cancel := context.WithCancelCause(deadlineCtx)
+	defer cancel(nil)
+
+	r := &run{ctx: runCtx, o: o, d: d, p: p, dir: dir, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
-		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout}}
+		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now()}}
+	stopHeartbeat := r.report.heartbeat(every)
+	defer stopHeartbeat()
 	r.report.logf("Deploy #%d of %s: %s (%s)\n", dep.Number, p.Name, sha[:7], ref)
 	if dep.TookOver > 0 {
 		r.report.logf("Took over deploy #%d, which had gone silent.\n", dep.TookOver)
@@ -203,6 +228,7 @@ type run struct {
 	kamalDir    string
 	config      []byte
 	secretsFile []byte
+	timeout     time.Duration
 	kamalEnv    []string // Environ plus HOUSTON_S_<NAME>=<carrier>
 	kamalArgs   []string // -e HOUSTON_S_<NAME> for each
 	appEnv      map[string]string
@@ -253,6 +279,9 @@ func (r *run) deploy(tookOver bool) int {
 		if code, err := r.kamal("accessory", "boot", "all", "--version", r.sha); err != nil || code != 0 {
 			return r.fail(fmt.Sprintf("the accessories didn't boot (exit %d%s)", code, errText(err)))
 		}
+		if msg := r.rebootChangedAccessories(); msg != "" {
+			return r.fail(msg)
+		}
 	}
 
 	if hook := r.p.Houston.Hooks.Release; hook != "" {
@@ -275,6 +304,9 @@ func (r *run) deploy(tookOver bool) int {
 		}
 	}
 
+	if r.ctx.Err() != nil {
+		return r.stop()
+	}
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
 	r.report.finish("go", "")
 	return 0
@@ -373,13 +405,40 @@ func (r *run) release(hook string) string {
 // kamal runs Kamal in its container on the host network, with the generated
 // files, the Docker socket, the houston user's SSH key, and the secrets in
 // its environment (never its arguments).
+// rebootChangedAccessories reboots each accessory whose running container
+// carries a different config label than deploy.yml's: Kamal's boot skips
+// an accessory whose container exists (spike S10). Volumes are kept.
+func (r *run) rebootChangedAccessories() string {
+	labels := kamal.AccessoryLabels(r.p)
+	names := make([]string, 0, len(labels))
+	for name := range labels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		out, err := r.d.Docker.Output("inspect", "-f", `{{index .Config.Labels "`+kamal.ConfigLabel+`"}}`, r.p.Name+"-"+name)
+		if err == nil && strings.TrimSpace(string(out)) == labels[name] {
+			continue
+		}
+		r.report.logf("%s's config changed; rebooting it (its volumes are kept).\n", name)
+		if code, err := r.kamal("accessory", "reboot", name, "--version", r.sha); err != nil || code != 0 {
+			return fmt.Sprintf("the %s accessory didn't reboot (exit %d%s)", name, code, errText(err))
+		}
+	}
+	return ""
+}
+
 func (r *run) kamal(args ...string) (int, error) {
+	return r.kamalWith(r.ctx, args...)
+}
+
+func (r *run) kamalWith(ctx context.Context, args ...string) (int, error) {
 	full := []string{"run", "--rm", "--name", "houston-kamal-" + r.p.Name, "--network", "host",
 		"-v", r.kamalDir + ":/workdir", "-v", "/var/run/docker.sock:/var/run/docker.sock", "-v", r.o.SSHDir + ":/ssh:ro"}
 	full = append(full, r.kamalArgs...)
 	full = append(full, KamalImage)
 	full = append(full, args...)
-	return r.d.Docker.Stream(r.ctx, r.dir, r.kamalEnv, r.report, full...)
+	return r.d.Docker.Stream(ctx, r.dir, r.kamalEnv, r.report, full...)
 }
 
 func (r *run) docker(failure string, args ...string) string {
@@ -391,10 +450,54 @@ func (r *run) docker(failure string, args ...string) string {
 }
 
 func (r *run) fail(msg string) int {
+	if r.ctx.Err() != nil {
+		return r.stop() // the failure is the run being stopped
+	}
 	r.report.logf("NO-GO: %s\n", msg)
 	r.report.finish("no_go", msg)
 	fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
 	return exitFailure
+}
+
+var (
+	errTakenOver = errors.New("taken over")
+	errLostTouch = errors.New("lost touch with Mission Control")
+)
+
+// stop ends a run whose context ended. Cancelling kills the docker CLI, not
+// its container, so houston's own containers go first. A taken-over deploy
+// isn't ours to report on or unlock; otherwise we held Kamal's lock, so we
+// release it and report NO-GO.
+func (r *run) stop() int {
+	cause := context.Cause(r.ctx)
+	r.d.Docker.Output("rm", "-f", "houston-kamal-"+r.p.Name, r.p.Name+"-release-"+r.sha[:7])
+	if errors.Is(cause, errTakenOver) {
+		fmt.Fprintf(r.o.Stderr, "houston deploy: deploy #%d was taken over by a newer deploy; stopped without touching it further\n", r.report.deploy.Number)
+		return exitFailure
+	}
+	var msg string
+	switch {
+	case errors.Is(cause, errLostTouch):
+		msg = fmt.Sprintf("lost touch with Mission Control for over %s; stopped so another deploy can safely take over", r.report.fenceAfter)
+	case errors.Is(cause, context.DeadlineExceeded):
+		msg = fmt.Sprintf("timed out after %s; stopped (Kamal only switches traffic to a healthy new version)", r.timeout)
+	default:
+		msg = fmt.Sprintf("stopped: %v", cause)
+	}
+	r.report.logf("NO-GO: %s\nReleasing Kamal's deploy lock.\n", msg)
+	if code, err := r.kamalWith(context.Background(), "lock", "release", "--version", r.sha); err != nil || code != 0 {
+		r.report.logf("kamal lock release: exit %d%s\n", code, errText(err))
+	}
+	r.report.finish("no_go", msg)
+	fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
+	return exitFailure
+}
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
 }
 
 func errText(err error) string {
@@ -405,19 +508,30 @@ func errText(err error) string {
 }
 
 // reporter tees step output to the terminal and the deploy's log in Mission
-// Control, sent with each step and at the end.
+// Control, sent with each step, every heartbeat, and at the end. A 409 means
+// the deploy was taken over, and a long stretch of failed reports means
+// Mission Control is gone: either cancels the run.
 type reporter struct {
-	ctx     context.Context
-	mission Mission
-	deploy  mission.Deploy
-	out     io.Writer
-	buf     strings.Builder
+	ctx        context.Context
+	mission    Mission
+	deploy     mission.Deploy
+	out        io.Writer
+	fenceAfter time.Duration
+	cancel     context.CancelCauseFunc
+
+	mu     sync.Mutex // buf, lastOK, closed
+	buf    strings.Builder
+	lastOK time.Time
+	closed bool
+	sendMu sync.Mutex // one report at a time, in order
 }
 
 // A log chunk may be at most 256 KiB (Deploy::CHUNK_CAP); stay well under.
 const chunkSize = 200 << 10
 
 func (r *reporter) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.out.Write(p)
 	r.buf.Write(p)
 	return len(p), nil
@@ -432,16 +546,79 @@ func (r *reporter) finish(status, msg string) {
 		msg = msg[:1000]
 	}
 	r.send(mission.Progress{Status: status, Error: msg})
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
 }
 
-// send attaches the log written since the last report, in chunks.
+// heartbeat sends progress every interval (the log so far, or nothing), so
+// Mission Control knows this deploy is alive. It returns a stop function.
+func (r *reporter) heartbeat(every time.Duration) func() {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				r.send(mission.Progress{})
+			}
+		}
+	}()
+	return func() { close(done) }
+}
+
+// send attaches the log written since the last report, in chunks. A chunk
+// that doesn't get through goes back in the buffer for the next report.
 func (r *reporter) send(p mission.Progress) {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
 	log := r.buf.String()
 	r.buf.Reset()
+	r.mu.Unlock()
+
 	for len(log) > chunkSize {
-		r.mission.Report(r.ctx, r.deploy, mission.Progress{Log: log[:chunkSize]})
+		if !r.post(mission.Progress{Log: log[:chunkSize]}) {
+			r.requeue(log)
+			return
+		}
 		log = log[chunkSize:]
 	}
 	p.Log = log
-	r.mission.Report(r.ctx, r.deploy, p)
+	if !r.post(p) {
+		r.requeue(log)
+	}
+}
+
+func (r *reporter) post(p mission.Progress) bool {
+	err := r.mission.Report(r.ctx, r.deploy, p)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case err == nil:
+		r.lastOK = time.Now()
+		return true
+	case errors.Is(err, mission.ErrTakenOver):
+		r.closed = true
+		r.cancel(errTakenOver)
+	case time.Since(r.lastOK) > r.fenceAfter:
+		r.cancel(errLostTouch)
+	}
+	return false
+}
+
+func (r *reporter) requeue(log string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rest := r.buf.String()
+	r.buf.Reset()
+	r.buf.WriteString(log)
+	r.buf.WriteString(rest)
 }

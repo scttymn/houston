@@ -350,6 +350,43 @@ Stuck-alive: Batch 4's deadline in houston deploy
   - The first attempt at the dirty-worktree mutation didn't compile (an unused variable) and falsely read as "0 failing". Mutations must compile to count.
 - **`docker.Runner.Stream`** tees a command's output to the terminal and the deploy log. **`houston deploy [--ref]`** is wired into the CLI.
 
+## Batch 5: `houston deploy` under pressure
+
+### Design (short)
+- **One run context.** Every docker command runs under it. It ends on:
+  - **taken over:** any report answered 409, meaning another deploy owns the record
+  - **lost touch:** no report has succeeded for **60 s** (`FenceAfter`)
+  - **the deadline:** `--timeout`, default 30 min
+- **Heartbeat:** every **15 s** (`HeartbeatEvery`), the reporter sends whatever log has built up, or an empty progress report, so Mission Control's `heartbeat_at` moves during a long step.
+  - Log chunks are ≤ 200 KiB (Mission Control takes up to 256 KiB).
+  - The reporter is safe for the step output and the heartbeat to use at once (a mutex).
+- **Self-fencing** closes the race where Mission Control is unreachable but the deploy is still working. A takeover needs **120 s** of silence (`Deploy::STALE_AFTER`); the old process stops itself at **60 s** of failed reports. So the new owner's `kamal lock release` never frees a lock that a live Kamal still holds. A test pins `FenceAfter < 120 s`.
+- **Stopping:** cancelling kills the docker CLI process, but not its container. So houston removes its own containers (`houston-kamal-<name>`, `<name>-release-<sha7>`), with a fresh context. Then, by cause:
+  - **taken over:** exit 1 with "taken over"; no final report (it isn't ours) and no lock release (the new owner releases it).
+  - **lost touch / deadline:** `kamal lock release` (we held it), a best-effort final `no_go` report, and exit 1.
+- **Accessory drift (spike S10):** the generator labels each accessory `houston.config=<sha256 of its config>`, covering image, cmd, env (clear values and secret names), volumes, and options.
+  - After `kamal accessory boot all`, houston inspects each accessory's label. A mismatch → `kamal accessory reboot <svc> --version <sha>` (its volumes are kept), logged.
+  - A changed secret value alone doesn't reboot a database; changing a database's password needs work inside the database anyway.
+
+### AC ↔ test map (Batch 5)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | A report answered 409 during Build → the run stops: no later step, its containers removed, exit 1 "taken over", no final report, no lock release | `internal/deploy` `TestDeployStopsWhenTakenOver` | At-least-once & ownership |
+| 2 | Reports failing for longer than `FenceAfter` → the run stops: containers removed, `kamal lock release`, exit 1 "lost touch with Mission Control"; `FenceAfter` < 120 s | `TestDeployFencesItselfWhenMissionControlIsGone` | At-least-once (TOCTOU) |
+| 3 | The deadline passes during `kamal deploy` → the Kamal container is removed, `kamal lock release`, final `no_go` "timed out after …", exit 1 | `TestDeployDeadline` | Stuck-alive |
+| 4 | During a long step, heartbeats reach Mission Control at the interval | `TestDeployHeartbeats` | Contract |
+| 5 | 700 KiB of step output → every report's log ≤ 200 KiB, and together they equal the output | `TestDeployLogChunks` | Scale |
+| 6 | The generator labels each accessory with its config hash: present, changes with the image, unchanged by an app-only change | `internal/kamal` `TestAccessoryConfigLabel` | Re-entry |
+| 7 | A drifted label → `kamal accessory reboot db --version <sha>` after boot; a matching label → no reboot | `TestDeployRebootsAChangedAccessory` | Re-entry |
+| 8 | The reporter under `-race`, with step output and the heartbeat writing at once | `TestDeployHeartbeats` run with `go test -race` | Concurrency |
+
+### Done (Batch 5)
+- **Red:** row 6 failed against a stub. The blocking tests (rows 1–3) hung until the 10-minute test timeout, which is a red that shows nothing cancels a run. **Green:** the whole Go suite.
+- **Row 8:** `go test -race -count=3 ./internal/deploy/ ./internal/mission/` is clean (CGO in the toolchain container). The timing-based tests passed 30 runs in a row.
+- **Mutations, each caught:** a 409 not stopping the run; no self-fencing; containers left running after a stop (3 failures); no heartbeat (3); drift never rebooted; a taken-over deploy still unlocking and reporting.
+  - The first round caught three of these only by hanging until the test timeout. The blocking tests now carry their own 2 s deadline, so they fail in seconds.
+- **The expected configs** (`phoenix.deploy.yml`, `spike.deploy.yml`) now include each accessory's `houston.config` label.
+
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:
 - **What "localhost only" means for the runner's secrets route.** Mission Control runs in a container, so its callers show up as Docker addresses, and cloudflared sits on the same network as the runners.

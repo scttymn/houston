@@ -42,6 +42,8 @@ volumes:
   - spike_data:/data
 accessories:
   db:
+    labels:
+      houston.config: 3a4709b73db49a663d1f9e65788c984e7819fe4da2b93b14ec5c829e9a451e0f
     image: postgres:17
     host: 127.0.0.1
     env:
