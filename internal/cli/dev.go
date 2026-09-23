@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
-	"github.com/sevenmoons/houston/internal/docker"
-	"github.com/sevenmoons/houston/internal/project"
-	"github.com/sevenmoons/houston/internal/variant"
+	"github.com/scttymn/houston/internal/docker"
+	"github.com/scttymn/houston/internal/project"
+	"github.com/scttymn/houston/internal/variant"
 )
 
 // runDev implements `houston dev`: compose.yml plus a generated override that

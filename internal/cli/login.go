@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/sevenmoons/houston/internal/server"
+	"github.com/scttymn/houston/internal/server"
 )
 
 // runLogin implements houston login [url]: checks the token against the

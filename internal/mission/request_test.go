@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 func TestRequestFor(t *testing.T) {

@@ -13,7 +13,7 @@ esac
 version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 out=".houston/houston-$os-$arch"
 docker compose --progress quiet run --rm -e GOOS="$os" -e GOARCH="$arch" cli \
-  go build -trimpath -ldflags "-X github.com/sevenmoons/houston/internal/cli.version=$version" -o "$out" ./cmd/houston
+  go build -trimpath -ldflags "-X github.com/scttymn/houston/internal/cli.version=$version" -o "$out" ./cmd/houston
 mkdir -p "$prefix/bin"
 mv "$out" "$prefix/bin/houston"
 ln -sf houston "$prefix/bin/hou"

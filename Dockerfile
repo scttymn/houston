@@ -17,7 +17,7 @@ COPY . .
 ARG VERSION=dev
 RUN for os in darwin linux; do for arch in arm64 amd64; do \
       GOOS=$os GOARCH=$arch go build -trimpath \
-        -ldflags "-s -w -X github.com/sevenmoons/houston/internal/cli.version=${VERSION}" \
+        -ldflags "-s -w -X github.com/scttymn/houston/internal/cli.version=${VERSION}" \
         -o /dist/houston-$os-$arch ./cmd/houston || exit 1; \
     done; done
 

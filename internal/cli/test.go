@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sevenmoons/houston/internal/docker"
-	"github.com/sevenmoons/houston/internal/project"
-	"github.com/sevenmoons/houston/internal/variant"
+	"github.com/scttymn/houston/internal/docker"
+	"github.com/scttymn/houston/internal/project"
+	"github.com/scttymn/houston/internal/variant"
 )
 
 // runTest implements `houston test`: commands.test in a throwaway copy of the

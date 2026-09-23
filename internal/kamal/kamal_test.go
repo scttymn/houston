@@ -12,7 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 var target = Target{BaseDomain: "svnmns.com", Arch: "amd64"}

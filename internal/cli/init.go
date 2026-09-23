@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // change is one file init will write, with the line it prints afterwards.

@@ -3,7 +3,7 @@ package variant
 import (
 	"testing"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 func TestDevOverride_ForcesDevTarget(t *testing.T) {

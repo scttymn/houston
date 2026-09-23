@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/humanize"
-	"github.com/sevenmoons/houston/internal/kamal"
-	"github.com/sevenmoons/houston/internal/mission"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/humanize"
+	"github.com/scttymn/houston/internal/kamal"
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // KamalImage is the Kamal houston deploy runs, pinned (spike: Kamal 2.12.0).

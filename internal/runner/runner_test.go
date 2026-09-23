@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/deploy"
-	"github.com/sevenmoons/houston/internal/mission"
+	"github.com/scttymn/houston/internal/deploy"
+	"github.com/scttymn/houston/internal/mission"
 )
 
 const sha = "0123456789abcdef0123456789abcdef01234567"

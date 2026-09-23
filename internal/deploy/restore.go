@@ -12,8 +12,8 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/types"
 
-	"github.com/sevenmoons/houston/internal/kamal"
-	"github.com/sevenmoons/houston/internal/mission"
+	"github.com/scttymn/houston/internal/kamal"
+	"github.com/scttymn/houston/internal/mission"
 )
 
 // restore is a claimed restore (docs/plans/restore.md, Batch 6): the

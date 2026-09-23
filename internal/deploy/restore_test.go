@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/kamal"
-	"github.com/sevenmoons/houston/internal/mission"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/kamal"
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // A claimed restore (docs/plans/restore.md, Batch 6): generation 2 is built

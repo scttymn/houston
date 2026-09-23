@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sevenmoons/houston/internal/mission"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/project"
 )
 
 const inspectable = `name: phoenixapp

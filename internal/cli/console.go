@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/sevenmoons/houston/internal/docker"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/docker"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // runConsole implements `houston console`: the dev console command inside the

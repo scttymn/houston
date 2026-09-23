@@ -1,4 +1,4 @@
-module github.com/sevenmoons/houston
+module github.com/scttymn/houston
 
 go 1.26.0
 

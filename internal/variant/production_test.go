@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 func TestProductionOverride(t *testing.T) {

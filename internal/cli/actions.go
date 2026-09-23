@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/server"
+	"github.com/scttymn/houston/internal/server"
 )
 
 // How often houston link --wait checks access, and for how long.

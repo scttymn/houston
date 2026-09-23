@@ -12,10 +12,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/sevenmoons/houston/internal/deploy"
-	"github.com/sevenmoons/houston/internal/docker"
-	"github.com/sevenmoons/houston/internal/mission"
-	"github.com/sevenmoons/houston/internal/runner"
+	"github.com/scttymn/houston/internal/deploy"
+	"github.com/scttymn/houston/internal/docker"
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/runner"
 )
 
 // runDeploy implements `houston deploy` on a Houston server, as the houston

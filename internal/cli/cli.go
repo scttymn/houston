@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/sevenmoons/houston/internal/docker"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/docker"
+	"github.com/scttymn/houston/internal/project"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

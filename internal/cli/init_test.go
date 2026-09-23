@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // `houston init` is generic (docs/plans/init-generic.md): it upserts the

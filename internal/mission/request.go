@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // RequestFor is what Mission Control is told about a project: exactly what

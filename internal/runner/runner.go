@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/deploy"
-	"github.com/sevenmoons/houston/internal/mission"
+	"github.com/scttymn/houston/internal/deploy"
+	"github.com/scttymn/houston/internal/mission"
 )
 
 // ClaimWait is how long one claim waits for work (Mission Control's cap).

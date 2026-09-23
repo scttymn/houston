@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/humanize"
-	"github.com/sevenmoons/houston/internal/server"
+	"github.com/scttymn/houston/internal/humanize"
+	"github.com/scttymn/houston/internal/server"
 )
 
 // runSnapshots lists a project's snapshots on the server, newest first.

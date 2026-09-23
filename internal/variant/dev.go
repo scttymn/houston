@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	"github.com/compose-spec/compose-go/v2/types"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/project"
 	"go.yaml.in/yaml/v3"
 )
 

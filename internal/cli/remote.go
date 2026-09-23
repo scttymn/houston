@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sevenmoons/houston/internal/server"
+	"github.com/scttymn/houston/internal/server"
 )
 
 // followEvery is how often deploys show --follow asks for more. Tests shorten it.

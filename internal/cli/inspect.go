@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sevenmoons/houston/internal/mission"
-	"github.com/sevenmoons/houston/internal/project"
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/project"
 )
 
 // inspection is houston inspect --json: what Mission Control is told

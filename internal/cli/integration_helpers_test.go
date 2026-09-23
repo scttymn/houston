@@ -44,7 +44,7 @@ func fixtureProject(t *testing.T, testCommand string) (dir, composeFile, name st
 func buildHouston(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "houston")
-	if out, err := exec.Command("go", "build", "-o", bin, "github.com/sevenmoons/houston/cmd/houston").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", bin, "github.com/scttymn/houston/cmd/houston").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	return bin
