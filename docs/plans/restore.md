@@ -148,5 +148,5 @@ The notes go into this file before Batch 1's code.
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
-2. **A restore needs a linked repo:** the runner fetches the snapshot's commit to build or run it. A project that was only ever deployed by hand (`houston deploy` on the server) has to be linked first (`houston link`), and the Restore button says so. OK?
+2. **A restore uses the project's linked repo.** Answered: "Every app will have a linked repo, so I assume it would use the same repo." The runner fetches the snapshot's commit from it with the project's deploy key, as a deploy does. A project without a repo (only ever deployed by hand) can't be restored until it's linked, and the Restore button says so. That's an edge, not the normal path.
 3. ~~One setting or two~~. **Answered:** no setting. The maintenance page is the admin's out-of-band switch, and deploys and restores never change it.
