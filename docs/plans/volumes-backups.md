@@ -444,7 +444,7 @@ The snapshot goes **after Build and before Accessories**, not just before Releas
   - `PATCH /api/v1/projects/:name/backup_target {location | null}` → `houston storage use NAME` / `--default` (with `--project`).
 - **Adding a location stays on the Settings page for now** (a question for you, below).
 
-### Question (for you)
+### Question (answered: "keep add in Settings only")
 **Adding a storage location from the CLI or API.** Adding one generates its restic password, which has to be shown once and saved. The remote API's rule so far is "never returns a secret value"; the one exception is the webhook secret, until its first delivery. A CLI `houston storage add` would print the backup password into an agent's terminal and transcript. I've kept adding on the Settings page, and made list, make default and per-project target available from the CLI. Should the CLI also add locations (printing the password once, with a `confirm` step)?
 
 ### AC ↔ test map (Batch 7)
@@ -470,7 +470,7 @@ The snapshot goes **after Build and before Accessories**, not just before Releas
 - **scotty-review (cold pass):** nothing to fix.
   - The restic password shows only on an unconfirmed location's page (admin, `no-store`), and never in the API.
   - **For step 6 (restore):** after a project's target or the default changes, its earlier snapshots stay where they were written, and the page says so. Restore will need to list across the locations the project's runs used (each run records its location).
-- **Open question** (above): whether the CLI should add locations too.
+- **Decided:** adding a location stays in Settings only ("keep add in Settings only").
 
 ## Batch 8: The real run
 
