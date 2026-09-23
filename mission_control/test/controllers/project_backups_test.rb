@@ -78,6 +78,10 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     get project_path("equip")
     assert_select "turbo-frame#snapshots[src='/projects/equip/snapshots'][loading=lazy]"
     assert_select ".backup-plan", /7 scheduled · 3 pre-deploy/
+    Installation.current.update!(time_zone: "Europe/Berlin")
+    @project.update!(backup_schedule: "daily 22:15")
+    get project_path("equip")
+    assert_select ".backup-plan", %r{Daily at 22:15 \(Europe/Berlin\)}
     assert_select ".backup-plan", /unas-nfs/
     assert_select ".backup-plan", %r{storage.*/rails/storage}m
     assert_select ".backup-plan", /db.*pg_dump/m

@@ -1,0 +1,19 @@
+<% content_for :title, "General · Settings" %>
+<main class="page board">
+  <%= render "settings/nav" %>
+  <div class="board__title">
+    <h1 class="disp">General</h1>
+  </div>
+
+  <% if notice %><div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div><% end %>
+
+  <section class="panel">
+    <h2 class="disp panel__title">Time zone</h2>
+    <p class="panel__row">Backup schedules run in it: <span class="mono">daily 03:00</span> means 03:00 here.</p>
+    <%= form_with url: settings_general_path, method: :patch, class: "panel__row secret__form" do |f| %>
+      <%= f.select :time_zone, TZInfo::Timezone.all_identifiers, { selected: @installation.time_zone }, class: "mono" %>
+      <%= f.submit "Save", class: "button button--small" %>
+    <% end %>
+    <% if @error %><p class="panel__row"><span class="field__error"><%= @error %></span></p><% end %>
+  </section>
+</main>

@@ -179,7 +179,7 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
 1. **A failed pre-deploy snapshot stops the deploy** ("1 yes"): NO-GO "pre-deploy snapshot failed: …", and the old version keeps serving.
 2. **The pre-deploy snapshot runs just before the release hook** ("move it"), after the build and the accessories, instead of the design's step 03. Writes during the build are in it, and it's still before any migration.
 3. **sftp stays deferred** ("defer"), to spec §12 "later".
-4. **The schedule uses Houston's configured time zone, UTC by default** ("based on whatever houston is configured to use with UTC as the default"). Batch 4 adds `time_zone` to the installation (an IANA name, default `UTC`), a Settings field, and `houston settings --server` shows it. `daily 03:00` means 03:00 there, DST included: a skipped hour runs at the next valid time, and a repeated one runs once.
+4. **The schedule uses Houston's configured time zone, UTC by default** ("based on whatever houston is configured to use with UTC as the default"). Batch 4 adds `time_zone` to the installation (an IANA name, default `UTC`), a Settings field (Settings › General), and `houston settings [--time-zone NAME]` shows and sets it (remote-only, like `status`). `daily 03:00` means 03:00 there, DST included: a skipped hour runs at the next valid time, and a repeated one runs once.
 
 ## Batch 2: Retention and the project page
 
@@ -270,3 +270,56 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
 - **The CLI is remote-only, as `status` and `deploys` are:** `houston snapshots` and `houston backup`, with no `--server` flag. A NO-GO result is printed on stdout, like `deploys show`.
 - **scotty-review (cold pass):** no findings to fix.
   - **Noted:** like `deploys show --follow`, `backup --follow` waits on a run stuck in "queued" for as long as it stays there. That happens only if the job worker itself is down; Ctrl-C ends it. A running run that goes silent reads as NO-GO after 2 minutes.
+
+## Batch 4: The schedule
+
+### Design (short)
+- **Sync sends `backups.schedule`** ("daily HH:MM"). It's stored as `projects.backup_schedule` (default `daily 03:00`); anything else → 422.
+- **Houston's time zone:** `installations.time_zone`, an IANA name, default `UTC`.
+  - Set on **Settings › General** (`/settings/general`, a select of IANA zones). The header's Settings link goes there, and a small sub-nav joins General and API tokens.
+  - Also set over `PATCH /api/v1/settings` and read with `GET /api/v1/settings` (`{base_domain, time_zone}`). The CLI is `houston settings [--time-zone NAME]`.
+  - An unknown name → 422, nothing saved.
+- **`BackupSchedule`** (pure, given a project, a zone and a time):
+  - `due_at(date)`: HH:MM on that local date. It's `ActiveSupport::TimeZone#local`, so a time in a spring-forward gap becomes the first valid time after it, and a repeated hour picks the first.
+  - `due?(now)`: `now >= due_at(today)`, and no scheduled run has `scheduled_for = today` (both in the local date).
+  - `next_at(now)`: today's due time if today's hasn't run, else tomorrow's.
+- **`BackupScheduleJob`,** every minute (production `recurring.yml`, `default` queue: it only queues):
+  - For each project with a running deploy, something to back up, and a backup location, it queues `request!(reason: "schedule", scheduled_for: today)` when due.
+  - **Once per project per local day:** a unique index on `(project_id, scheduled_for)`. A duplicate tick (two processes, a retry) hits it and is a no-op.
+  - **Catch-up:** if Mission Control was down at 03:00, the first tick after it comes back runs the day's backup. A whole day missed is skipped, not doubled up.
+- **The flight board:**
+  - NEXT BACKUP is the soonest `next_at` across projects, in Houston's zone ("03:00 CEST"), or "—" with none.
+  - A project whose last backup is NO-GO shows "backup NO-GO" under its status.
+- **The project page:** the Snapshots rule reads "Daily at 03:00 (Europe/Berlin), plus Back up now…", and the Backup plan gets a SCHEDULE row.
+- **The API and CLI:** `GET /projects/:name` has `backup_schedule` and `time_zone`, and `houston status` shows `schedule  daily 03:00 (Europe/Berlin)`.
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Sync sends `schedule` (default and the file's) | `internal/mission` `TestRequestFor`, `TestRequestForData` | Contract |
+| 2 | Mission Control stores it; absent → `daily 03:00`; `daily 3:00`, `hourly`, `daily 24:00` → 422 | `integration/api_sync_test.rb` `test "sync records the schedule"` | Contract |
+| 3 | `BackupSchedule`: `due_at` in UTC and in Europe/Berlin; New York's spring-forward gap (02:30 on 2026-03-08 → 03:30 EDT) and fall-back (01:30 on 2026-11-01 → once, the first); `due?` before and after, and after today's run; `next_at` today and tomorrow | `models/backup_schedule_test.rb` `test "when a project is due"` | Contract |
+| 4 | The tick queues due projects once per local day, even ticked twice. It skips a project that's not yet due, never deployed, has nothing to back up, or has no storage. It catches up the same day, not a missed one. Production's recurring entry exists | `jobs/backup_schedule_job_test.rb` `test "the schedule tick"` | At-least-once, Preconditions |
+| 5 | The database refuses a second scheduled run for a project and date | `models/backup_run_test.rb` `test "one scheduled backup per project per day"` | Concurrency |
+| 6 | Settings › General: set a zone (then shown); an unknown one → 422, nothing saved; signed out → sign-in | `controllers/settings/general_controller_test.rb` `test "the time zone"` | Contract, Authz |
+| 7 | `/api/v1/settings` GET and PATCH (unknown zone → 422); `houston settings` shows and sets | `integration/api_v1_settings_test.rb`, `internal/cli` `TestSettings` | Contract |
+| 8 | The flight board shows NEXT BACKUP in the zone and "backup NO-GO"; the project page's schedule row and rule; `houston status` shows the schedule | `controllers/projects_controller_test.rb` `test "the next backup"`, `project_backups_test.rb`, `TestStatusShowsTheLastBackup` | Contract, Signals |
+
+### Done (Batch 4)
+- **Red:** the Go tests failed; Mission Control had 2 failures and 10 errors in the new tests. **Green:** Mission Control 194 runs and the Go suite. The migration runs down and up. rubocop and gofmt are clean.
+- **Found on the way:**
+  - **A test bug:** the DST test changed the schedule after building the `BackupSchedule`, which reads HH:MM when it's created.
+  - **A real bug:** UTC showed as `Etc/UTC` (`tzinfo.name`). `zone.name` keeps the configured name.
+- **Behaviour checked in Rails before pinning it:** `ActiveSupport::TimeZone#local` gives 02:30 on 2026-03-08 in New York as 03:30 EDT, and 01:30 on 2026-11-01 as the first (EDT).
+- **Mutations, each caught:**
+  - `due?` ignoring today's run
+  - scheduled runs deduped like manual ones
+  - the tick in UTC
+  - the tick backing up never-deployed projects
+  - any time zone accepted
+  - the schedule unchecked in sync
+  - the next backup ignoring today's run
+- **scotty-review (cold pass):** nothing to fix. Two behaviours noted:
+  - **A failed scheduled backup doesn't run again the same day** (once per local day, by design). It shows as "backup NO-GO" on the flight board, and Back up now is there.
+  - **Changing the time zone mid-day** can make that day's scheduled backup run twice or not at all, because the local date moves.
+- Settings › General is where the header's Settings link goes now, with a sub-nav to API tokens.

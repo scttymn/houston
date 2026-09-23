@@ -225,6 +225,33 @@ type Project struct {
 	WebhookVerified bool            `json:"webhook_verified"`
 	Secrets         []SecretSummary `json:"secrets"`
 	LastBackup      *Backup         `json:"last_backup"`
+	BackupSchedule  string          `json:"backup_schedule"`
+	TimeZone        string          `json:"time_zone"`
+}
+
+// Settings are Houston's own: its base domain, and the time zone backup
+// schedules run in.
+type Settings struct {
+	BaseDomain string `json:"base_domain"`
+	TimeZone   string `json:"time_zone"`
+}
+
+func (cl *Client) Settings(ctx context.Context) (Settings, error) {
+	var s Settings
+	return s, cl.getJSON(ctx, "/api/v1/settings", &s)
+}
+
+// SetTimeZone changes Houston's time zone (an IANA name).
+func (cl *Client) SetTimeZone(ctx context.Context, zone string) (Settings, error) {
+	var s Settings
+	status, body, err := cl.do(ctx, http.MethodPatch, "/api/v1/settings", map[string]string{"time_zone": zone})
+	if err != nil {
+		return s, err
+	}
+	if status != http.StatusOK {
+		return s, fmt.Errorf("%s", message(body))
+	}
+	return s, json.Unmarshal(body, &s)
 }
 
 // Snapshot is one restic snapshot of a project (code and data together).

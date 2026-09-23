@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -110,7 +111,8 @@ func TestBackup(t *testing.T) {
 }
 
 func TestStatusShowsTheLastBackup(t *testing.T) {
-	withBackup := strings.Replace(garageJSON, `"last_deploy":`, `"last_backup":{"id":3,"status":"go","snapshot_id":"5c5edd4c00000000000000000000000000000000000000000000000000000000","bytes":410000000,"finished_at":"2026-09-22T03:00:41Z"},"last_deploy":`, 1)
+	withBackup := strings.Replace(garageJSON, `"last_deploy":`, `"backup_schedule":"daily 03:00","time_zone":"Europe/Berlin","last_deploy":`, 1)
+	withBackup = strings.Replace(withBackup, `"last_deploy":`, `"last_backup":{"id":3,"status":"go","snapshot_id":"5c5edd4c00000000000000000000000000000000000000000000000000000000","bytes":410000000,"finished_at":"2026-09-22T03:00:41Z"},"last_deploy":`, 1)
 	failed := strings.Replace(garageJSON, `"last_deploy":`, `"last_backup":{"id":4,"status":"no_go","error":"restic backup failed"},"last_deploy":`, 1)
 	body := withBackup
 	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
@@ -120,6 +122,7 @@ func TestStatusShowsTheLastBackup(t *testing.T) {
 
 	for _, c := range []struct{ body, want string }{
 		{withBackup, "backup    GO 2026-09-22 03:00 UTC · 5c5edd4c · 391 MB"},
+		{withBackup, "schedule  daily 03:00 (Europe/Berlin)"},
 		{failed, "backup    NO-GO: restic backup failed"},
 		{garageJSON, "backup    none yet"},
 	} {
@@ -129,4 +132,41 @@ func TestStatusShowsTheLastBackup(t *testing.T) {
 			t.Errorf("want %q in\n%s", c.want, out)
 		}
 	}
+}
+
+func TestSettings(t *testing.T) {
+	var patched string
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/settings": func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPatch && strings.Contains(readBody(r), "Mars/Olympus"):
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				w.Write([]byte(`{"error":"no time zone Mars/Olympus (use an IANA name, like Europe/Berlin)"}`))
+			case r.Method == http.MethodPatch:
+				patched = "yes"
+				w.Write([]byte(`{"base_domain":"svnmns.com","time_zone":"Europe/Berlin"}`))
+			default:
+				w.Write([]byte(`{"base_domain":"svnmns.com","time_zone":"UTC"}`))
+			}
+		},
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, _ := run(&fakeDocker{}, "settings")
+	if code != 0 || !strings.Contains(out, "base domain  svnmns.com\n") || !strings.Contains(out, "time zone    UTC\n") || patched != "" {
+		t.Errorf("show: exit %d\n%s", code, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "settings", "--time-zone", "Europe/Berlin")
+	if code != 0 || !strings.Contains(out, "time zone    Europe/Berlin\n") || patched != "yes" {
+		t.Errorf("set: exit %d\n%s", code, out)
+	}
+	code, _, errOut := run(&fakeDocker{}, "settings", "--time-zone", "Mars/Olympus")
+	if code != 1 || !strings.Contains(errOut, "no time zone Mars/Olympus") {
+		t.Errorf("unknown zone: exit %d, %q", code, errOut)
+	}
+}
+
+func readBody(r *http.Request) string {
+	b, _ := io.ReadAll(r.Body)
+	return string(b)
 }

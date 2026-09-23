@@ -24,6 +24,7 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
       assert_select "[data-snapshot]", 2
       assert_select "[data-snapshot]:first-child", /Back up now.*385 MB/m
       assert_select ".snapshots", %r{kept 2 / 14}
+      assert_select ".snapshots", %r{Daily at 03:00 \(UTC\), plus Back up now}
       assert_select "a[href=?]", "/projects/equip/snapshots?kind=deploy", text: "Pre-deploy"
 
       get project_snapshots_path("equip", kind: "deploy")

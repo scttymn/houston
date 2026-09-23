@@ -41,6 +41,7 @@ class ProjectSync
                        volumes: @payload["volumes"].to_a.map { |v| v.slice("name", "path") },
                        databases: @payload["databases"].to_a.map { |d| d.slice("service", "image") },
                        keep_auto: @payload.dig("backups", "keep_auto") || 14, keep_deploy: @payload.dig("backups", "keep_deploy") || 10,
+                       backup_schedule: @payload.dig("backups", "schedule") || "daily 03:00",
                        synced_at: Time.current, **link.to_h)
       claim_hosts
     end
@@ -127,8 +128,9 @@ class ProjectSync
       end
 
       backups = @payload["backups"]
-      unless backups.nil? || (backups.is_a?(Hash) && %w[keep_auto keep_deploy].all? { |k| backups[k].is_a?(Integer) && backups[k].between?(1, 1000) })
-        errors["backups"] << "must be {keep_auto, keep_deploy}, whole numbers from 1 to 1000"
+      unless backups.nil? || (backups.is_a?(Hash) && %w[keep_auto keep_deploy].all? { |k| backups[k].is_a?(Integer) && backups[k].between?(1, 1000) } &&
+                              (backups["schedule"].nil? || (backups["schedule"].is_a?(String) && backups["schedule"].match?(BackupSchedule::FORMAT))))
+        errors["backups"] << "must be {schedule: \"daily HH:MM\", keep_auto, keep_deploy}, keeps from 1 to 1000"
       end
 
       databases = @payload.fetch("databases", [])

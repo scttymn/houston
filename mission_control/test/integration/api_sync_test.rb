@@ -71,6 +71,23 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_equal [ 14, 10 ], [ project.reload.keep_auto, project.keep_deploy ]
   end
 
+  test "sync records the schedule" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, backups: { schedule: "daily 22:15", keep_auto: 14, keep_deploy: 10 }))
+    assert_response :success
+    project = Project.find_by!(name: "equip")
+    assert_equal "daily 22:15", project.backup_schedule
+
+    sync(equip_payload(variables: optional))
+    assert_equal "daily 03:00", project.reload.backup_schedule
+
+    [ "daily 3:00", "hourly", "daily 24:00", 300 ].each do |schedule|
+      sync(equip_payload(variables: optional, backups: { schedule:, keep_auto: 14, keep_deploy: 10 }))
+      assert_response :unprocessable_entity, schedule.inspect
+      assert_includes json["errors"].keys, "backups"
+    end
+  end
+
   test "sync rejects what the CLI would never send" do
     {
       "name" => [ { name: "Equip" }, { name: "admin" }, { name: "hooks" }, { name: "-x" }, { name: nil } ],

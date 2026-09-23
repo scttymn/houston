@@ -109,6 +109,9 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		fmt.Fprintf(stdout, "last      %s\n", line)
 	}
 	fmt.Fprintf(stdout, "backup    %s\n", backupLine(p.LastBackup))
+	if p.BackupSchedule != "" {
+		fmt.Fprintf(stdout, "schedule  %s (%s)\n", p.BackupSchedule, p.TimeZone)
+	}
 	var missing []string
 	for _, s := range p.Secrets {
 		if s.Required && !s.Set {

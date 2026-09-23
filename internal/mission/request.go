@@ -28,7 +28,7 @@ func RequestFor(p *project.Project) SyncRequest {
 		Health: p.Houston.Health, Port: p.AppPort,
 		DeployRule: DeployRule{On: p.Houston.Deploy.On, Branch: p.Houston.Deploy.Branch, Tags: p.Houston.Deploy.Tags},
 		Volumes:    appVolumes(p), Databases: databases(p, services),
-		Backups: &Backups{KeepAuto: p.Houston.Backups.KeepAuto, KeepDeploy: p.Houston.Backups.KeepDeploy},
+		Backups: &Backups{Schedule: p.Houston.Backups.Schedule, KeepAuto: p.Houston.Backups.KeepAuto, KeepDeploy: p.Houston.Backups.KeepDeploy},
 	}
 }
 

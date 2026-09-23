@@ -197,4 +197,26 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-project=equip] a[href='/projects/equip']"
     assert_select "h2", { text: /Nothing on the pad yet/i, count: 0 }
   end
+
+  test "the next backup" do
+    stub_tunnel
+    Installation.current.update!(time_zone: "Europe/Berlin")
+    equip = make_project("equip")
+    equip.update!(volumes: [ { "name" => "storage", "path" => "/rails/storage" } ], backup_schedule: "daily 03:00")
+    make_deploy(equip, 1, "go")
+    later = make_project("later")
+    later.update!(databases: [ { "service" => "db", "image" => "postgres:17" } ], backup_schedule: "daily 22:15")
+    make_deploy(later, 1, "go")
+
+    travel_to Time.utc(2026, 9, 23, 12, 0) do # 14:00 in Berlin; equip ran today
+      equip.backup_runs.create!(location: storage_locations(:unas), kind: "auto", reason: "schedule", status: "no_go", error: "restic backup failed",
+                                scheduled_for: Date.new(2026, 9, 23), heartbeat_at: Time.current)
+      get root_path
+    end
+    assert_select ".stat", /NEXT BACKUP\s*22:15 CEST/
+    assert_select "[data-project='equip']", /backup NO-GO/
+    assert_select "[data-project='later']" do |row|
+      assert_no_match(/backup NO-GO/, row.text)
+    end
+  end
 end

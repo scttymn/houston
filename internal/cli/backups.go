@@ -129,3 +129,24 @@ func humanSize(n int64) string {
 	}
 	return ""
 }
+
+// runSettings shows Houston's settings; with a time zone, sets it first.
+func runSettings(timeZone string, stdout, stderr io.Writer) int {
+	client, _, code := remote("", "", false, stderr)
+	if code != 0 {
+		return code
+	}
+	ctx := context.Background()
+	var s server.Settings
+	var err error
+	if timeZone != "" {
+		s, err = client.SetTimeZone(ctx, timeZone)
+	} else {
+		s, err = client.Settings(ctx)
+	}
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	fmt.Fprintf(stdout, "base domain  %s\ntime zone    %s\n", s.BaseDomain, s.TimeZone)
+	return 0
+}

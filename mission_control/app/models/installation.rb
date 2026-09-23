@@ -20,4 +20,9 @@ class Installation < ApplicationRecord
   def connected?
     cloudflare_connected_at.present?
   end
+
+  # Houston's time zone (an IANA name): backup schedules run in it.
+  validates :time_zone, inclusion: { in: ->(_) { TZInfo::Timezone.all_identifiers }, message: "%{value} isn't a time zone (use an IANA name, like Europe/Berlin)" }
+
+  def zone = ActiveSupport::TimeZone[time_zone] || ActiveSupport::TimeZone["UTC"]
 end

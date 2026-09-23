@@ -32,7 +32,7 @@ x-houston:
 		Health:    "/up", Port: 80,
 		DeployRule: DeployRule{On: "tag", Branch: p.Houston.Deploy.Branch, Tags: "release-*"},
 		Volumes:    []Volume{}, Databases: []Database{{Service: "db", Image: "postgres:17"}},
-		Backups: &Backups{KeepAuto: 14, KeepDeploy: 10},
+		Backups: &Backups{Schedule: "daily 03:00", KeepAuto: 14, KeepDeploy: 10},
 	}
 	if got := RequestFor(p); !reflect.DeepEqual(got, want) {
 		t.Errorf("RequestFor =\n%#v\nwant\n%#v", got, want)
@@ -59,7 +59,7 @@ services:
 volumes: { media: {}, storage: {} }
 x-houston:
   health: /up
-  backups: { keep: { auto: 3, deploy: 5 } }
+  backups: { schedule: "daily 22:15", keep: { auto: 3, deploy: 5 } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ x-houston:
 	if !reflect.DeepEqual(got.Databases, want) {
 		t.Errorf("Databases = %#v, want %#v", got.Databases, want)
 	}
-	if want := (&Backups{KeepAuto: 3, KeepDeploy: 5}); !reflect.DeepEqual(got.Backups, want) {
+	if want := (&Backups{Schedule: "daily 22:15", KeepAuto: 3, KeepDeploy: 5}); !reflect.DeepEqual(got.Backups, want) {
 		t.Errorf("Backups = %#v, want %#v", got.Backups, want)
 	}
 }

@@ -211,6 +211,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	backup.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
 	backup.Flags().BoolVar(&backupFollow, "follow", false, "wait for the result; exit 0 on GO (or nothing to back up), 1 on NO-GO")
 	root.AddCommand(snapshots, backup)
+	var timeZone string
+	settings := command("settings", "Houston's settings on the server; --time-zone sets the zone backup schedules run in", func() int {
+		return runSettings(timeZone, stdout, stderr)
+	})
+	settings.Flags().StringVar(&timeZone, "time-zone", "", "an IANA name, like Europe/Berlin")
+	root.AddCommand(settings)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

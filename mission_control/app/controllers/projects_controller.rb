@@ -9,11 +9,23 @@ class ProjectsController < ApplicationController
     @on_lan = request.host != "admin.#{@installation.base_domain}"
     @admin_route = SystemStatus.admin_route(@installation, on_admin: !@on_lan)
     @hooks_route = SystemStatus.route(@installation, "hooks")
+    @next_backup = next_backup
+    @failed_backups = BackupRun.where(id: BackupRun.group(:project_id).select("MAX(id)")).where(status: "no_go").pluck(:project_id).to_set
   end
 
   def show
     prepare_project_page(Project.find_by!(name: params[:name]))
   end
+
+  private
+    # The soonest scheduled backup across projects that will run one.
+    def next_backup
+      zone = @installation.zone
+      @projects.select { |p| (p.volumes.any? || p.databases.any?) && p.running_deploy && p.backup_location }
+               .map { |p| BackupSchedule.new(p, zone).next_at(Time.current) }.min&.in_time_zone(zone)
+    end
+
+  public
 
   # Check for changes, now (the webhook does the same through a job).
   def check

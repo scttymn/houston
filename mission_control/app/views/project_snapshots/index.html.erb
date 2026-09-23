@@ -12,7 +12,7 @@
       </nav>
       <p class="panel__row panel__row--muted">
         <% if @kind == "auto" %>
-          Back up now makes these. One per day is kept for <%= @project.keep_auto %> days
+          <%= BackupSchedule.new(@project, Installation.current.zone).words %>, plus Back up now. One per day is kept for <%= @project.keep_auto %> days
         <% else %>
           Taken right before every deploy and restore. The last <%= @project.keep_deploy %> are kept
         <% end %>

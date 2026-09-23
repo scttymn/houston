@@ -1,6 +1,6 @@
 <% content_for :title, "API tokens · Settings" %>
 <main class="page board">
-  <nav class="mono eyebrow crumbs">Settings / API tokens</nav>
+  <%= render "settings/nav" %>
   <div class="board__title">
     <h1 class="disp">API tokens</h1>
     <p>For the houston CLI with <span class="mono">--server</span>, and for agents. A token can see and change projects and write secrets; it can never read a secret's value.</p>

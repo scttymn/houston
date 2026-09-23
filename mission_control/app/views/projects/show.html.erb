@@ -92,6 +92,7 @@
     <section class="panel backup-plan">
       <h2 class="disp panel__title">Backup plan</h2>
       <dl class="facts">
+        <dt class="mono">SCHEDULE</dt><dd><%= BackupSchedule.new(@project, @installation.zone).words %>, plus Back up now</dd>
         <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
         <dt class="mono">STORAGE</dt><dd class="mono"><%= @storage&.name || "none yet" %></dd>
         <dt class="mono">VOLUMES</dt>

@@ -97,10 +97,11 @@ type SyncRequest struct {
 	Backups    *Backups   `json:"backups,omitempty"`
 }
 
-// Backups are the retention rules from x-houston.backups.keep.
+// Backups are x-houston.backups: when to back up, and what to keep.
 type Backups struct {
-	KeepAuto   int `json:"keep_auto"`
-	KeepDeploy int `json:"keep_deploy"`
+	Schedule   string `json:"schedule"`
+	KeepAuto   int    `json:"keep_auto"`
+	KeepDeploy int    `json:"keep_deploy"`
 }
 
 // Volume is one of the app's named volumes: what a backup copies as files.

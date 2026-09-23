@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_170000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -34,6 +34,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
     t.text "log"
     t.integer "project_id", null: false
     t.string "reason", null: false
+    t.date "scheduled_for"
     t.string "sha"
     t.string "snapshot_id"
     t.datetime "started_at"
@@ -42,6 +43,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
     t.datetime "updated_at", null: false
     t.index ["location_id"], name: "index_backup_runs_on_location_id"
     t.index ["project_id", "created_at"], name: "index_backup_runs_on_project_id_and_created_at"
+    t.index ["project_id", "scheduled_for"], name: "index_backup_runs_one_scheduled_per_day", unique: true, where: "scheduled_for IS NOT NULL"
     t.index ["project_id"], name: "index_backup_runs_on_project_id"
     t.index ["project_id"], name: "index_backup_runs_one_queued_manual", unique: true, where: "status = 'queued' AND reason = 'manual'"
     t.index ["project_id"], name: "index_backup_runs_one_running", unique: true, where: "status = 'running'"
@@ -76,6 +78,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
     t.string "cloudflare_zone_id"
     t.datetime "created_at", null: false
     t.string "dns_mode"
+    t.string "time_zone", default: "UTC", null: false
     t.string "tunnel_id"
     t.text "tunnel_token"
     t.datetime "updated_at", null: false
@@ -92,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
 
   create_table "projects", force: :cascade do |t|
     t.string "app_service", null: false
+    t.string "backup_schedule", default: "daily 03:00", null: false
     t.string "branch"
     t.string "compose_path"
     t.datetime "created_at", null: false

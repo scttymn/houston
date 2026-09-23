@@ -39,6 +39,7 @@ Rails.application.routes.draw do
           post :save
         end
       end
+      resource :settings, only: %i[ show update ]
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
         resources :snapshots, only: :index
@@ -74,6 +75,7 @@ Rails.application.routes.draw do
   end
 
   namespace :settings do
+    resource :general, only: %i[ show update ], controller: "general"
     resources :tokens, only: %i[ index create destroy ]
   end
 

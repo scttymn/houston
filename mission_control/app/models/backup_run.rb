@@ -25,19 +25,22 @@ class BackupRun < ApplicationRecord
 
   # Queues a backup of project to the default location and enqueues its job.
   # A manual one already queued is returned as it is (a double click).
-  def self.request!(project, reason: "manual")
+  # scheduled_for: the local date a scheduled backup is for; that day's run
+  # (whatever its status) is returned instead of a second one.
+  def self.request!(project, reason: "manual", scheduled_for: nil)
     raise Refused, "nothing deployed yet" unless project.running_deploy
     location = project.backup_location
     raise Refused, "no backup storage yet (finish setup's storage step)" unless location
 
+    same = scheduled_for ? { scheduled_for: } : { status: "queued", reason: }
     run = transaction do
-      project.backup_runs.find_by(status: "queued", reason:) ||
-        project.backup_runs.create!(location:, kind: "auto", reason:, status: "queued", heartbeat_at: Time.current)
+      project.backup_runs.find_by(same) ||
+        project.backup_runs.create!(location:, kind: "auto", reason:, scheduled_for:, status: "queued", heartbeat_at: Time.current)
     end
     BackupJob.perform_later(run) if run.previously_new_record?
     run
   rescue ActiveRecord::RecordNotUnique
-    project.backup_runs.find_by!(status: "queued", reason:)
+    project.backup_runs.find_by!(same)
   end
 
   # Flips run from queued to running with a new token, only if it's still

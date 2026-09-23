@@ -16,7 +16,7 @@
       <% no_go = @projects.count { |p| p.status == :no_go } %>
       <div class="stat"><span class="mono eyebrow">IN FLIGHT</span> <span class="disp stat__value <%= "stat__value--none" if in_flight.zero? %>"><%= in_flight %></span></div>
       <div class="stat"><span class="mono eyebrow">NO-GO</span> <span class="disp stat__value <%= "stat__value--none" if no_go.zero? %>"><%= no_go %></span></div>
-      <div class="stat"><span class="mono eyebrow">NEXT BACKUP</span> <span class="disp stat__value stat__value--none">—</span></div>
+      <div class="stat"><span class="mono eyebrow">NEXT BACKUP</span> <span class="disp stat__value <%= "stat__value--none" unless @next_backup %>"><%= @next_backup ? @next_backup.strftime("%H:%M %Z") : "—" %></span></div>
     </div>
   </div>
 
@@ -51,7 +51,7 @@
           <% @projects.each do |project| %>
             <% latest, running = project.latest_deploy, project.running_deploy %>
             <tr data-project="<%= project.name %>">
-              <td><%= state_chip(project.status) %></td>
+              <td><%= state_chip(project.status) %><% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %></td>
               <td>
                 <%= link_to project.name, project_path(project.name), class: "flight__name" %>
                 <small class="mono"><%= project.accessories.presence&.join(" · ") || "no services" %></small>

@@ -67,4 +67,15 @@ class BackupRunTest < ActiveSupport::TestCase
     assert first.finished_at
     assert_equal "running", second.reload.status
   end
+
+  test "one scheduled backup per project per day" do
+    row = ->(status, date) { { project_id: @project.id, location_id: storage_locations(:unas).id, kind: "auto", reason: "schedule", status:, scheduled_for: date, token_digest: "", heartbeat_at: Time.current } }
+    BackupRun.insert!(row.("go", Date.new(2026, 9, 22)))
+    assert_raises(ActiveRecord::RecordNotUnique) { BackupRun.insert!(row.("queued", Date.new(2026, 9, 22))) }
+    BackupRun.insert!(row.("queued", Date.new(2026, 9, 23)))
+
+    # request! with a date already taken returns that day's run, queueing nothing.
+    taken = BackupRun.find_by!(scheduled_for: Date.new(2026, 9, 22))
+    assert_no_enqueued_jobs { assert_equal taken, BackupRun.request!(@project, reason: "schedule", scheduled_for: Date.new(2026, 9, 22)) }
+  end
 end
