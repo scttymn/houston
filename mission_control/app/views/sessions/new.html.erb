@@ -1,0 +1,18 @@
+<% content_for :title, "Sign in · Mission Control" %>
+
+<main class="signin">
+  <%= form_with url: session_path, class: "signin__form" do |form| %>
+    <h1 class="disp">Sign in</h1>
+    <% if flash[:alert] %><div class="notice notice--nogo" role="alert"><%= flash[:alert] %></div><% end %>
+    <% if flash[:notice] %><div class="notice notice--go"><%= flash[:notice] %></div><% end %>
+    <div class="field">
+      <%= form.label :email_address, "Email" %>
+      <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username", value: params[:email_address] %>
+    </div>
+    <div class="field">
+      <%= form.label :password %>
+      <%= form.password_field :password, required: true, autocomplete: "current-password", maxlength: 72 %>
+    </div>
+    <div><%= form.submit "Sign in", class: "button button--primary" %></div>
+  <% end %>
+</main>

@@ -1,0 +1,22 @@
+# Rails' standard ignores (rails new --skip-git leaves them out).
+/.bundle
+/.env*
+
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/tmp/pids/*
+!/tmp/pids/
+!/tmp/pids/.keep
+
+/storage/*
+!/storage/.keep
+/tmp/storage/*
+!/tmp/storage/
+!/tmp/storage/.keep
+
+/public/assets
+
+# Never commit the credentials key.
+/config/*.key

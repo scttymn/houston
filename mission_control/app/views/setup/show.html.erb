@@ -1,0 +1,64 @@
+<% content_for :title, "First-run setup · Mission Control" %>
+<% content_for :setup_step, "1" %>
+
+<main class="setup">
+  <%= form_with model: @form, scope: :setup, url: setup_path, class: "setup__form" do |form| %>
+    <div class="setup__intro">
+      <span class="mono eyebrow eyebrow--signal">STEP 01 OF 03</span>
+      <h1 class="disp">Create the admin login</h1>
+      <p>This is the one account that signs in to Mission Control. You can change the email and password later in Settings.</p>
+    </div>
+
+    <% if @form.errors[:base].any? %>
+      <div class="notice notice--nogo" role="alert"><%= @form.errors[:base].to_sentence %></div>
+    <% end %>
+
+    <div class="field">
+      <%= form.label :code, "Setup code" %>
+      <%= form.text_field :code, class: "mono field__code", autocomplete: "off", autocapitalize: "characters", spellcheck: false, required: true, autofocus: true,
+            aria: { describedby: "code-hint" }, "aria-invalid": @form.errors[:code].any? %>
+      <% if @form.errors[:code].any? %>
+        <span class="field__error">Setup code <%= @form.errors[:code].to_sentence %>.</span>
+      <% end %>
+      <span class="field__hint" id="code-hint">Printed by the install script, next to this LAN address.</span>
+    </div>
+
+    <div class="field">
+      <%= form.label :email_address, "Email" %>
+      <%= form.email_field :email_address, autocomplete: "username", required: true, "aria-invalid": @form.errors[:email_address].any? %>
+      <% if @form.errors[:email_address].any? %>
+        <span class="field__error">Email <%= @form.errors[:email_address].to_sentence %>.</span>
+      <% end %>
+    </div>
+
+    <div class="field-pair">
+      <div class="field">
+        <%= form.label :password %>
+        <%= form.password_field :password, autocomplete: "new-password", required: true, "aria-invalid": @form.errors[:password].any? %>
+      </div>
+      <div class="field">
+        <%= form.label :password_confirmation, "Confirm password" %>
+        <%= form.password_field :password_confirmation, autocomplete: "new-password", required: true, "aria-invalid": @form.errors[:password_confirmation].any? %>
+      </div>
+    </div>
+    <% password_errors = @form.errors[:password] + @form.errors[:password_confirmation] %>
+    <% if password_errors.any? %>
+      <span class="field__error">Password <%= password_errors.to_sentence %>.</span>
+    <% end %>
+    <span class="field__hint field__hint--tight">At least 12 characters. A password manager is the easy way.</span>
+
+    <div><%= form.submit "Create login and continue", class: "button button--primary" %></div>
+  <% end %>
+
+  <aside class="panel setup__aside">
+    <h2 class="disp panel__title">Why a setup code</h2>
+    <p class="panel__row">Until this step is done, anyone on your network who finds this page could claim the server. The code proves you're the one who ran the installer.</p>
+    <div class="panel__row">
+      <span class="mono eyebrow">INSTALLER OUTPUT</span>
+      <pre class="mono terminal">Houston is running.
+Finish setup at  <%= request.base_url %>
+Setup code       <span class="terminal__code">XXXX-XXXX</span></pre>
+    </div>
+    <p class="panel__row panel__row--muted">The code stops working once the account exists. Lost it? Re-run the install script to print a new one.</p>
+  </aside>
+</main>

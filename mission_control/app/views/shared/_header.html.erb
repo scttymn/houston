@@ -1,0 +1,10 @@
+<header class="topbar">
+  <%= render "shared/brand" %>
+  <% if authenticated? %>
+    <nav class="topbar__nav">
+      <%= link_to "Projects", root_path, class: ("is-current" if controller_name == "projects") %>
+    </nav>
+    <span class="topbar__spacer"></span>
+    <%= button_to "Sign out", session_path, method: :delete, class: "topbar__signout" %>
+  <% end %>
+</header>
