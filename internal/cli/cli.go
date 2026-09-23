@@ -103,6 +103,36 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	root.AddCommand(login, command("logout", "Forget the saved server and token", func() int {
 		return runLogout(stdout, stderr)
 	}))
+	var projectFlag string
+	var statusJSON, deploysJSON, showJSON, followDeploy bool
+	status := command("status", "A project's status on the server (every project, outside a project)", func() int {
+		return runStatus(file, projectFlag, statusJSON, stdout, stderr)
+	})
+	status.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	status.Flags().BoolVar(&statusJSON, "json", false, "print the API's JSON")
+	deploys := command("deploys", "A project's deploy history on the server", func() int {
+		return runDeploys(file, projectFlag, deploysJSON, stdout, stderr)
+	})
+	deploys.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	deploys.Flags().BoolVar(&deploysJSON, "json", false, "print the API's JSON")
+	show := &cobra.Command{
+		Use:   "show [number]",
+		Short: "A deploy's steps and log (default: the latest); --follow until it's finished",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			number := ""
+			if len(args) > 0 {
+				number = args[0]
+			}
+			code = runDeployShow(file, projectFlag, number, followDeploy, showJSON, stdout, stderr)
+			return nil
+		},
+	}
+	show.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	show.Flags().BoolVar(&followDeploy, "follow", false, "keep printing its log until it's finished; exit 0 on GO, 1 on NO-GO")
+	show.Flags().BoolVar(&showJSON, "json", false, "print the API's JSON")
+	deploys.AddCommand(show)
+	root.AddCommand(status, deploys)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,7 +125,7 @@ func (cl *Client) getJSON(ctx context.Context, path string, into any) error {
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("Mission Control answered %d: %s", status, message(body))
+		return fmt.Errorf("%s", message(body))
 	}
 	return json.Unmarshal(body, into)
 }
@@ -171,4 +172,96 @@ func message(body []byte) string {
 		return e.Error
 	}
 	return strings.TrimSpace(string(body))
+}
+
+// DomainState is a custom domain's DNS: DNS OK, DNS PENDING, WILDCARD, …
+type DomainState struct {
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+}
+
+type Deploy struct {
+	Number     int     `json:"number"`
+	Status     string  `json:"status"` // queued, in_flight, go, no_go
+	SHA        string  `json:"sha"`
+	Ref        string  `json:"ref"`
+	Step       string  `json:"step"`
+	Error      string  `json:"error"`
+	Runner     string  `json:"runner"`
+	StartedAt  string  `json:"started_at"`
+	FinishedAt *string `json:"finished_at"`
+	Duration   int     `json:"duration"`
+	// With a single deploy: its steps and a piece of its log.
+	Steps   []Step `json:"steps"`
+	Log     string `json:"log"`
+	LogSize int    `json:"log_size"`
+	LogNext int    `json:"log_next"`
+}
+
+type Step struct {
+	Name  string `json:"name"`
+	State string `json:"state"` // done, current, failed, pending, skipped
+}
+
+type SecretSummary struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	Set      bool   `json:"set"`
+}
+
+type Project struct {
+	Name       string                 `json:"name"`
+	Status     string                 `json:"status"` // queued, in_flight, go, no_go, standby
+	RunningSHA string                 `json:"running_sha"`
+	Host       string                 `json:"host"`
+	Domains    map[string]DomainState `json:"domains"`
+	LastDeploy *Deploy                `json:"last_deploy"`
+	// Only for a single project:
+	DeployRule struct {
+		On     string `json:"on"`
+		Branch string `json:"branch"`
+		Tags   string `json:"tags"`
+	} `json:"deploy_rule"`
+	Services        []string        `json:"services"`
+	RepoURL         string          `json:"repo_url"`
+	Branch          string          `json:"branch"`
+	WebhookVerified bool            `json:"webhook_verified"`
+	Secrets         []SecretSummary `json:"secrets"`
+}
+
+func (cl *Client) Projects(ctx context.Context) ([]Project, error) {
+	var body struct {
+		Projects []Project `json:"projects"`
+	}
+	return body.Projects, cl.getJSON(ctx, "/api/v1/projects", &body)
+}
+
+func (cl *Client) Project(ctx context.Context, name string) (Project, error) {
+	var p Project
+	return p, cl.getJSON(ctx, "/api/v1/projects/"+url.PathEscape(name), &p)
+}
+
+func (cl *Client) Deploys(ctx context.Context, project string, page int) ([]Deploy, error) {
+	var body struct {
+		Deploys []Deploy `json:"deploys"`
+	}
+	return body.Deploys, cl.getJSON(ctx, fmt.Sprintf("/api/v1/projects/%s/deploys?page=%d", url.PathEscape(project), page), &body)
+}
+
+// Deploy is one deploy (a number, or "latest") with its log from byte from.
+func (cl *Client) Deploy(ctx context.Context, project, number string, from int) (Deploy, error) {
+	var d Deploy
+	return d, cl.getJSON(ctx, fmt.Sprintf("/api/v1/projects/%s/deploys/%s?log_from=%d", url.PathEscape(project), url.PathEscape(number), from), &d)
+}
+
+// Raw is the API's JSON for path, for --json.
+func (cl *Client) Raw(ctx context.Context, path string) ([]byte, error) {
+	status, body, err := cl.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("%s", message(body))
+	}
+	return body, nil
 }

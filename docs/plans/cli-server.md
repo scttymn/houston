@@ -94,6 +94,42 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 - **Mutations, each caught:** the runner token accepted on `/api/v1`; `last_used_at` written on every request; a refused token saved by login; half an env config (`HOUSTON_SERVER` without the token) accepted.
 - A **Settings** link is in the header nav; Settings › API tokens is its first page.
 
+## Batch 2: Reading (status, deploys, a deploy's log)
+
+### Design (short)
+- **API** (`/api/v1`, personal tokens):
+  - `GET /projects` → each project's name, status (queued / in_flight / go / no_go / standby), running SHA, host, domain states, and last deploy.
+  - `GET /projects/:name` → the same, plus deploy rule, services, repo and branch, webhook verified or not, and the secrets summary (name, required, set).
+  - `GET /projects/:name/deploys?page=` → 20 per page, newest first.
+  - `GET /projects/:name/deploys/:number?log_from=<byte>` → the deploy, its steps, `log` from that byte (at most 256 KiB, cut on a character boundary) and `log_size`.
+  - Unknown → 404.
+  - A shared serializer never emits secret values, the deploy key, or the webhook secret. A test scans every response for them.
+- **CLI:**
+  - `houston status [--project] [--json]`: one project (from `--project`, else `./compose.yml`'s name), or every project when there's no compose file here.
+  - `houston deploys [--project] [--json]`
+  - `houston deploys show [n] [--follow] [--json]`: the latest when no n. `--follow` polls every 2 s with `log_from`, prints only new log text, waits through queued, and ends with GO (exit 0) or NO-GO and its reason (exit 1). Without `--follow`, a finished deploy's exit code says the same.
+  - These are server-only commands, so they need no `--server`.
+- **Project resolution** (shared by every remote command from here on): `--project`, else the compose file's `name` (a file that doesn't load is exit 2 with its problems), else "say which project: --project <name>" (exit 2).
+
+### AC ↔ test map (Batch 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | `GET /projects`: statuses, running SHA, domain states, last deploy | `integration/api_v1_read_test.rb` `test "projects"` | Contract |
+| 2 | `GET /projects/:name`: facts and the secrets summary; unknown → 404 | `test "a project"` | Contract |
+| 3 | No response (all four endpoints) contains a secret's value, the deploy key or the webhook secret | `test "reading never reveals secrets"` | Authz |
+| 4 | Deploys: newest first, 20 per page; unknown project → 404 | `test "deploys"` | Contract, Scale |
+| 5 | A deploy: steps, `log` from `log_from`, `log_size`; past the end → empty; a chunk ≤ 256 KiB on a UTF-8 boundary; unknown number → 404 | `test "a deploy and its log"` | Contract, Scale |
+| 6 | The client decodes all four from Mission Control's exact JSON; 404 → "no project x" / "no deploy #n" | `internal/server` `TestReading` | Contract |
+| 7 | `status`: one project (compose name) vs all (no compose file); `--project` wins; `--json` prints the API's JSON | `internal/cli` `TestStatus` | Contract |
+| 8 | `deploys show --follow`: prints each byte of the log once across polls, waits through queued, exits 0 on GO and 1 on NO-GO with the reason | `TestDeploysFollow` | Contract, Signals |
+| 9 | No `--project` and no compose file for `deploys` → exit 2 naming `--project`; a broken compose file → exit 2 with its problems | `TestProjectResolution` | Preconditions |
+
+### Done (Batch 2)
+- **Red:** 4 of the Rails tests failed (the fifth, "never reveals", passed trivially against 404s until the endpoints existed), and the Go tests didn't compile. **Green:** Mission Control 141 runs and the Go suite. Rubocop and gofmt are clean.
+- **Mutations, each caught:** the webhook secret in a response; `--follow` re-reading the whole log; NO-GO exiting 0; a chunk cut mid-character; a chunk starting mid-character.
+- **A test gap closed by a mutation:** "a chunk cut mid-character" first survived. The fixture's 256 KiB boundary landed on a character boundary by luck (all two-byte `é` from an even offset). With one ASCII byte in front, the boundary falls inside an `é`, and both boundary rules are now caught.
+- The API returns `log_next`, the byte to ask from next, so a client never re-reads or skips a byte, even when a chunk is trimmed to whole characters.
+
 ### Decisions (from you)
 1. **`console --server` is LAN-only for now** ("LAN-only is fine for now"). Reaching it through `cloudflared access ssh` from anywhere else is a later addition.
 

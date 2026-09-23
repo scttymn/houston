@@ -32,6 +32,9 @@ Rails.application.routes.draw do
 
     namespace :v1 do
       get "me", to: "me#show"
+      resources :projects, only: %i[ index show ], param: :name do
+        resources :deploys, only: %i[ index show ], param: :number
+      end
     end
   end
 

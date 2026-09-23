@@ -76,3 +76,48 @@ func TestConfigAndHeaders(t *testing.T) {
 		t.Errorf("modes: file %o, dir %o", info.Mode().Perm(), dir.Mode().Perm())
 	}
 }
+
+func TestReading(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path + "?" + r.URL.RawQuery {
+		case "/api/v1/projects?":
+			io.WriteString(w, `{"projects":[{"name":"garage","status":"no_go","running_sha":"`+strings.Repeat("a", 40)+`","host":"garage.svnmns.com",
+				"domains":{"equipping.com":{"state":"DNS PENDING","reason":"not yet"}},"last_deploy":{"number":2,"status":"no_go","sha":"`+strings.Repeat("b", 40)+`","ref":"refs/heads/main","error":"release hook failed (exit 3)","duration":41}}]}`)
+		case "/api/v1/projects/garage?":
+			io.WriteString(w, `{"name":"garage","status":"go","host":"garage.svnmns.com","domains":{},"repo_url":"git@forgejo:h/garage.git","branch":"main",
+				"webhook_verified":true,"services":["app","db"],"deploy_rule":{"on":"commit","branch":"main"},
+				"secrets":[{"name":"RAILS_MASTER_KEY","required":true,"set":false}]}`)
+		case "/api/v1/projects/garage/deploys?page=1":
+			io.WriteString(w, `{"deploys":[{"number":2,"status":"go","sha":"`+strings.Repeat("c", 40)+`","ref":"refs/heads/main","runner":"houston-runner-1","duration":90}]}`)
+		case "/api/v1/projects/garage/deploys/latest?log_from=0":
+			io.WriteString(w, `{"number":2,"status":"in_flight","sha":"`+strings.Repeat("c", 40)+`","ref":"refs/heads/main","step":"Build",
+				"steps":[{"name":"Test","state":"done"},{"name":"Build","state":"current"}],"log":"hello\n","log_size":6,"log_next":6}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no project nope"}`)
+		}
+	}))
+	defer s.Close()
+	c := New(Config{URL: s.URL, Token: "hou_x"})
+	ctx := context.Background()
+
+	projects, err := c.Projects(ctx)
+	if err != nil || len(projects) != 1 || projects[0].Domains["equipping.com"].State != "DNS PENDING" || projects[0].LastDeploy.Error != "release hook failed (exit 3)" {
+		t.Errorf("Projects = %+v, %v", projects, err)
+	}
+	p, err := c.Project(ctx, "garage")
+	if err != nil || !p.WebhookVerified || p.Secrets[0].Name != "RAILS_MASTER_KEY" || p.Secrets[0].Set || p.DeployRule.On != "commit" {
+		t.Errorf("Project = %+v, %v", p, err)
+	}
+	deploys, err := c.Deploys(ctx, "garage", 1)
+	if err != nil || len(deploys) != 1 || deploys[0].Runner != "houston-runner-1" {
+		t.Errorf("Deploys = %+v, %v", deploys, err)
+	}
+	d, err := c.Deploy(ctx, "garage", "latest", 0)
+	if err != nil || d.Log != "hello\n" || d.LogNext != 6 || d.Steps[1].State != "current" {
+		t.Errorf("Deploy = %+v, %v", d, err)
+	}
+	if _, err := c.Project(ctx, "nope"); err == nil || !strings.Contains(err.Error(), "no project nope") {
+		t.Errorf("unknown project: %v", err)
+	}
+}
