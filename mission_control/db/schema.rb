@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_060000) do
   create_table "installations", force: :cascade do |t|
     t.string "base_domain"
     t.string "cloudflare_account_id"
@@ -36,6 +36,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_050000) do
     t.string "code_digest", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "storage_locations", force: :cascade do |t|
+    t.datetime "acknowledged_at"
+    t.datetime "created_at", null: false
+    t.text "credentials"
+    t.boolean "default", default: false, null: false
+    t.string "kind", null: false
+    t.string "name", null: false
+    t.text "restic_password"
+    t.text "settings"
+    t.datetime "updated_at", null: false
+    t.datetime "verified_at"
+    t.index ["name"], name: "index_storage_locations_on_name", unique: true
   end
 
   create_table "users", force: :cascade do |t|

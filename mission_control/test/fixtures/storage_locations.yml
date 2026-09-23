@@ -1,0 +1,8 @@
+# A finished setup's default backup location. Tests about setup delete it.
+unas:
+  name: unas-nfs
+  kind: nfs
+  settings: <%= { nfs_server: "10.0.1.20", nfs_export: "/volume1/houston" }.to_json %>
+  verified_at: <%= Time.current %>
+  acknowledged_at: <%= Time.current %>
+  default: true

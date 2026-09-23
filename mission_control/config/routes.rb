@@ -3,6 +3,10 @@ Rails.application.routes.draw do
   resource :setup, only: %i[ show create ], controller: "setup"
   namespace :setup do
     resource :cloudflare, only: %i[ show create ], controller: "cloudflare"
+    resource :storage, only: %i[ show create ], controller: "storage" do
+      post :finish
+      get :password
+    end
   end
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

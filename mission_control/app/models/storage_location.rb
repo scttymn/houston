@@ -1,0 +1,75 @@
+# A place restic can write backups (and, for nfs/local, where live volumes can
+# live). Credentials and the restic password are encrypted at rest.
+class StorageLocation < ApplicationRecord
+  KINDS = %w[nfs local s3 b2].freeze
+  RESTIC_IMAGE = "restic/restic:0.19.1"
+
+  serialize :settings, coder: JSON
+  serialize :credentials, coder: JSON
+  encrypts :credentials, :restic_password
+
+  validates :name, format: { with: /\A[a-z][a-z0-9-]{0,62}\z/ }, uniqueness: true
+  validates :kind, inclusion: { in: KINDS }
+
+  def self.default_ready?
+    where(default: true).where.not(acknowledged_at: nil).exists?
+  end
+
+  # The location first-run setup is working on: verified, not yet finished.
+  def self.setup_candidate
+    where(acknowledged_at: nil).where.not(verified_at: nil).order(:id).last
+  end
+
+  def verified? = verified_at.present?
+  def acknowledged? = acknowledged_at.present?
+  def settings = super || {}
+  def credentials = super || {}
+
+  def volume_name = "houston-storage-#{name}"
+
+  def repository
+    case kind
+    when "nfs", "local" then "/repo"
+    when "s3" then "s3:#{settings["endpoint"].presence&.chomp("/") || "https://s3.amazonaws.com"}/#{settings["bucket"]}/houston"
+    when "b2" then "b2:#{settings["bucket"]}:houston"
+    end
+  end
+
+  def where_it_is
+    case kind
+    when "nfs" then "#{settings["server"]}:#{settings["export"]}"
+    when "local" then settings["path"]
+    else repository
+    end
+  end
+
+  # Makes sure the NFS volume exists (reusing it on reruns).
+  def ensure_volume
+    return DockerCommand::Result.new(success: true, output: "") unless kind == "nfs"
+    return DockerCommand::Result.new(success: true, output: "") if DockerCommand.run("volume", "inspect", volume_name).success
+
+    DockerCommand.run("volume", "create", "--driver", "local",
+                      "--opt", "type=nfs", "--opt", "o=addr=#{settings["server"]},rw,nfsvers=4",
+                      "--opt", "device=:#{settings["export"]}", volume_name)
+  end
+
+  def restic(*command)
+    env = { "RESTIC_PASSWORD" => restic_password, "RESTIC_REPOSITORY" => repository }.merge(credential_env)
+    mounts = case kind
+    when "nfs" then [ "#{volume_name}:/repo" ]
+    when "local" then [ "#{settings["path"]}:/repo" ]
+    else []
+    end
+    args = [ "run", "--rm" ] + env.keys.flat_map { |k| [ "-e", k ] } + mounts.flat_map { |m| [ "-v", m ] } + [ RESTIC_IMAGE, *command ]
+    DockerCommand.run(*args, env:)
+  end
+
+  private
+    def credential_env
+      case kind
+      when "s3" then { "AWS_ACCESS_KEY_ID" => credentials["access_key_id"], "AWS_SECRET_ACCESS_KEY" => credentials["secret_access_key"] }
+      when "b2" then { "B2_ACCOUNT_ID" => credentials["key_id"], "B2_ACCOUNT_KEY" => credentials["application_key"] }
+      else {}
+      end
+    end
+end

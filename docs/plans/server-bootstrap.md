@@ -181,6 +181,60 @@ Never: modify or delete a DNS record without the managed-by:houston comment
 | Atomicity | 3: secrets are encrypted before they're stored |
 | Parity | 10: the real API (spec §14 lists this as a must-verify) |
 
+## Batch 3: first-run step 3, default backup storage
+
+### Design (short)
+- **`StorageLocation`:** name (`^[a-z][a-z0-9-]{0,62}$`, unique), kind, settings (JSON), credentials (JSON, **encrypted**), `restic_password` (**encrypted**), `verified_at`, `acknowledged_at`, `default`. Capabilities: `nfs` and `local` hold live volumes *and* backups; `s3` and `b2` hold backups only (spec §9).
+- **Kinds in this batch:** `nfs` (server + export path), `local` (an absolute host path), `s3` (endpoint, bucket, access key, secret), `b2` (bucket, key id, application key). **Defer `sftp`** to build step 5 (storage in Settings): restic over SFTP needs an SSH key managed for it. The radio group shows the four kinds that work.
+- **restic runs in Docker** (`restic/restic`, pinned version), through a `DockerCommand` runner (Open3). Tests use a recording fake.
+  - `nfs`: `docker volume create --driver local --opt type=nfs --opt o=addr=<server>,rw,nfsvers=4 --opt device=:<export> houston-storage-<name>` (inspected first, so reruns reuse it), mounted at `/repo`.
+  - `local`: `-v <path>:/repo`.
+  - `s3`: `RESTIC_REPOSITORY=s3:<endpoint>/<bucket>/houston`.
+  - `b2`: `RESTIC_REPOSITORY=b2:<bucket>:houston`.
+  - **Secrets never go in argv:** `-e NAME` without a value takes it from the docker CLI's own environment (`RESTIC_PASSWORD`, `AWS_*`, `B2_*`).
+- **Crash-safe order:**
+  1. Save the location with a newly generated password (unverified).
+  2. `restic init`.
+  3. If it answers "already exists", open the repository with the saved password (`restic cat config`).
+  4. Mark it verified.
+  A rerun reuses the saved password, so a crash between steps never leaves a repository nobody can open. A repository that exists but won't open with our password is a NO-GO, and Houston never deletes it.
+- **Pages (design SetupStorage):** the type radios and per-kind fields, then the test-write result ("GO Wrote a test file. Backups are ready to go here."). Then **SHOWN ONCE: Save this password now**, with the password, Copy (Stimulus + clipboard), Download .txt, and the "I saved it somewhere off this server" checkbox, which **Finish setup** requires.
+  - Finishing sets `acknowledged_at` and makes the location the default. After that, no route shows the password again.
+  - Before finishing, reloading shows it again. It's the same setup session, and losing it to a reload would be worse.
+- **Mission Control needs Docker:** the Docker CLI goes into its image (copied from `docker:29-cli`, like the CLI's toolchain). Its dev compose mounts `/var/run/docker.sock`, a dev-only bind mount that `houston test` drops.
+- `Setup.next_step`: Cloudflare → storage (no acknowledged default location) → done.
+
+### Crash-gap template
+```text
+Durable step 1 (primary): StorageLocation row with the encrypted password (unverified)
+Dies before: restic init / verification / acknowledgement
+Retry: submit step 3 again with the same name → same row, same password
+Must still accomplish: init (or open the existing repository with the saved password), verify, then ask to save the password
+Paths that must not block repair: "repository already exists" is success when our password opens it
+Never: delete or re-init a repository; show the password after acknowledgement
+```
+
+### AC ↔ test map (Batch 3), `mission_control/test/…`
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | Cloudflare connected, no default storage → pages lead to `/setup/storage` | `integration/setup_gate_test.rb` `test "the admin is taken to the storage step"` | Preconditions |
+| 2 | The form offers nfs/local/s3/b2 with each kind's fields; no sftp | `controllers/setup/storage_controller_test.rb` `test "shows the storage form"` | Contract, Honest surface |
+| 3 | NFS happy path: the exact docker calls (volume inspect → create with NFS opts → restic init with `-e RESTIC_PASSWORD`); the password is **not in any argv**; the location is saved encrypted; the password page shows it with the checkbox | `test "an nfs location is created and initialized"` | Contract, Atomicity |
+| 4 | local / s3 / b2: the exact mounts and `RESTIC_REPOSITORY`; credentials only via env, never argv | `test "each kind gets its repository and credentials"` (table) | Contract |
+| 5 | Invalid input (name, server, relative path, missing bucket/keys) → 422, no docker calls | `test "invalid details run nothing"` (table) | Preconditions |
+| 6 | `restic init` fails (permission denied) → 422 NO-GO with restic's message; a rerun with the same name reuses the saved password; "already exists" plus `cat config` OK → verified | `test "a failed init can be retried with the same password"` | Crash & repair |
+| 7 | "Already exists" but `cat config` fails (wrong password) → NO-GO, nothing deleted, not verified | `test "never takes over a repository it can't open"` | Contract |
+| 8 | Finish without the checkbox → 422. With it → default + acknowledged, setup complete, redirect `/`; afterwards the password page and download → redirect/404 | `test "finishing needs the password saved and closes the step"` | Preconditions |
+| 9 | Download .txt before finishing → `text/plain` attachment with the password; before verification → 404 | `test "the password can be downloaded until setup finishes"` | Contract |
+| 10 | **Real run:** a `local` location on this Mac through the real Docker socket; `restic init` creates a repository in a temp folder; the page shows the password; Copy works in the browser; Finish lands on `/` | manual check | Parity |
+
+### Done (Batch 3)
+- Red: 39 errors (the fixtures referenced a missing table). Green: 39 runs. One test bug fixed: the gate test's `setup` deletes users, so it creates its own admin.
+- Mutation: always generating a new password (instead of reusing the saved one) was caught only by the retry test.
+- **Real run (row 10):** with the Docker socket mounted in dev and Cloudflare marked connected in the *dev* database (the real Cloudflare check is still pending), a `local` location at a temp folder on this Mac made Mission Control run `restic init` through Docker. The repository appeared on disk (`config`, `data`, `keys`…) and **opened independently** with the page's password. The `.txt` download matched the page. Finish without the box → 422 with the message; with it → `/`, and the location is default + acknowledged, `Setup.next_step` → nil, download closed. The forms were driven with curl; Copy wasn't exercised in a real browser (no browser session without typing the password).
+- **Review, fixed test-first:** the password page and download now send `Cache-Control: no-store`, and the "doesn't open it" message includes restic's own words (so a network error isn't passed off as a wrong password).
+- **Deferred:** a way to pick a different location before finishing (today: finish, then change it in Settings, build step 5); an NFS version choice (fixed at `nfsvers=4`); a real NFS check against your UNAS.
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?

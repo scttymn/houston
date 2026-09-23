@@ -36,4 +36,13 @@ class SetupGateTest < ActionDispatch::IntegrationTest
     get root_path
     assert_redirected_to new_session_path
   end
+
+  test "the admin is taken to the storage step" do
+    StorageLocation.delete_all
+    User.create!(email_address: "admin@example.com", password: "correct horse battery")
+    post session_path, params: { email_address: "admin@example.com", password: "correct horse battery" }
+
+    get root_path
+    assert_redirected_to setup_storage_path
+  end
 end

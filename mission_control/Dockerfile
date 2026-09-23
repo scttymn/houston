@@ -14,6 +14,9 @@ FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
 # Rails app lives here
 WORKDIR /rails
 
+# Mission Control drives Docker on its server (restic, volumes); it needs the CLI.
+COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
+
 # Install base packages
 RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 && \

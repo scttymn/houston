@@ -1,0 +1,114 @@
+<% content_for :title, "Default backup storage · Mission Control" %>
+<% content_for :setup_step, "3" %>
+
+<main class="setup">
+  <div class="setup__form">
+    <div class="setup__intro">
+      <span class="mono eyebrow eyebrow--signal">STEP 03 OF 03</span>
+      <h1 class="disp">Default backup storage</h1>
+      <p>Snapshots go here unless a project picks another location on its project page.</p>
+    </div>
+
+    <% if @location %>
+      <dl class="facts">
+        <dt class="mono">NAME</dt><dd class="mono"><%= @location.name %></dd>
+        <dt class="mono">TYPE</dt><dd class="mono"><%= @location.kind %></dd>
+        <dt class="mono">WHERE</dt><dd class="mono"><%= @location.where_it_is %></dd>
+      </dl>
+      <p class="check notice notice--go"><span class="mono check__state">GO</span><span>Wrote a test file. Backups are ready to go here.</span></p>
+    <% else %>
+      <%= form_with model: @setup, scope: :storage, url: setup_storage_path, class: "storage-form" do |form| %>
+        <fieldset class="kinds">
+          <legend>Type</legend>
+          <% StorageLocation::KINDS.each do |kind| %>
+            <label class="kinds__option mono"><%= form.radio_button :kind, kind %><%= kind %></label>
+          <% end %>
+        </fieldset>
+
+        <div class="field">
+          <%= form.label :name %>
+          <%= form.text_field :name, class: "mono", placeholder: "unas-nfs", required: true, "aria-invalid": @setup.errors[:name].any? %>
+          <% if @setup.errors[:name].any? %><span class="field__error">Name <%= @setup.errors[:name].to_sentence %>.</span><% end %>
+        </div>
+
+        <div class="kind kind--nfs">
+          <div class="field">
+            <%= form.label :nfs_server, "NFS server" %>
+            <%= form.text_field :nfs_server, class: "mono", placeholder: "10.0.1.20" %>
+          </div>
+          <div class="field">
+            <%= form.label :nfs_export, "Export path" %>
+            <%= form.text_field :nfs_export, class: "mono", placeholder: "/volume1/houston" %>
+            <span class="field__hint">Houston connects to it directly. Nothing to set up on this server.</span>
+          </div>
+        </div>
+
+        <div class="kind kind--local">
+          <div class="field">
+            <%= form.label :local_path, "Path on this server" %>
+            <%= form.text_field :local_path, class: "mono", placeholder: "/srv/houston-backups" %>
+            <span class="field__hint">Fine for a second disk. A copy on the same disk as your apps won't survive that disk dying.</span>
+          </div>
+        </div>
+
+        <div class="kind kind--s3">
+          <div class="field">
+            <%= form.label :s3_endpoint, "Endpoint (optional)" %>
+            <%= form.text_field :s3_endpoint, class: "mono", placeholder: "https://s3.amazonaws.com" %>
+          </div>
+          <div class="field"><%= form.label :s3_bucket, "Bucket" %><%= form.text_field :s3_bucket, class: "mono" %></div>
+          <div class="field-pair">
+            <div class="field"><%= form.label :s3_access_key_id, "Access key ID" %><%= form.text_field :s3_access_key_id, class: "mono", autocomplete: "off" %></div>
+            <div class="field"><%= form.label :s3_secret_access_key, "Secret access key" %><%= form.password_field :s3_secret_access_key, class: "mono", autocomplete: "off" %></div>
+          </div>
+        </div>
+
+        <div class="kind kind--b2">
+          <div class="field"><%= form.label :b2_bucket, "Bucket" %><%= form.text_field :b2_bucket, class: "mono" %></div>
+          <div class="field-pair">
+            <div class="field"><%= form.label :b2_key_id, "Key ID" %><%= form.text_field :b2_key_id, class: "mono", autocomplete: "off" %></div>
+            <div class="field"><%= form.label :b2_application_key, "Application key" %><%= form.password_field :b2_application_key, class: "mono", autocomplete: "off" %></div>
+          </div>
+        </div>
+
+        <% details = @setup.errors.to_hash.except(:name) %>
+        <% if details.any? %>
+          <div class="checks" role="alert">
+            <% details.each do |attribute, messages| %>
+              <p class="check"><span class="mono check__state check__state--nogo">NO-GO</span><span><%= StorageSetup.human_attribute_name(attribute) %> <%= messages.to_sentence %>.</span></p>
+            <% end %>
+          </div>
+        <% end %>
+        <% if @setup.checks.any? %>
+          <div class="checks" role="alert">
+            <% @setup.checks.each do |check| %>
+              <p class="check"><span class="mono check__state check__state--nogo">NO-GO</span><span><%= check.label %></span></p>
+            <% end %>
+          </div>
+        <% end %>
+
+        <div><%= form.submit "Test and save", class: "button button--primary" %></div>
+      <% end %>
+    <% end %>
+  </div>
+
+  <% if @location %>
+    <section class="shown-once" aria-labelledby="password-title" data-controller="clipboard">
+      <div class="mono shown-once__tag">SHOWN ONCE</div>
+      <div class="shown-once__body">
+        <h2 id="password-title" class="disp">Save this password now</h2>
+        <p>Every backup on <span class="mono"><%= @location.name %></span> is encrypted with this password. Mission Control keeps an encrypted copy, but if this server's disk dies, this is the only way to read your backups.</p>
+        <div id="password" class="mono shown-once__password" data-clipboard-target="source"><%= @location.restic_password %></div>
+        <div class="shown-once__actions">
+          <button type="button" class="button" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+          <%= link_to "Download .txt", password_setup_storage_path(format: :txt), class: "button", data: { turbo: false } %>
+        </div>
+        <%= form_with url: finish_setup_storage_path, class: "finish" do |form| %>
+          <label class="finish__saved"><%= check_box_tag :saved, "1", false, id: "saved" %> I saved it somewhere off this server, like a password manager.</label>
+          <% if @unsaved %><span class="field__error" role="alert">Tick the box once the password is saved somewhere off this server.</span><% end %>
+          <div><%= form.submit "Finish setup", class: "button button--primary" %></div>
+        <% end %>
+      </div>
+    </section>
+  <% end %>
+</main>

@@ -122,3 +122,34 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .rule { display: grid; grid-template-columns: 180px 24px 1fr; font-size: 14px; }
 .rule .mono { font-size: 13px; overflow-wrap: anywhere; }
 .rule__arrow { color: var(--signal); }
+
+/* Storage (setup step 3) */
+.storage-form { display: flex; flex-direction: column; gap: 24px; }
+.kinds { margin: 0; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 0; }
+.kinds legend { font-size: 14px; font-weight: 500; margin-bottom: 8px; }
+.kinds__option { display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border: 1px solid var(--ink); margin-right: -1px; background: var(--white); cursor: pointer; font-size: 14px; }
+.kinds__option input { position: absolute; opacity: 0; pointer-events: none; }
+.kinds__option:has(input:checked) { background: var(--ink); color: var(--on-dark); }
+.kinds__option:has(input:focus-visible) { outline: 2px solid var(--signal-bright); outline-offset: 2px; }
+.kind { display: none; flex-direction: column; gap: 24px; }
+.storage-form:has(input[value=nfs]:checked) .kind--nfs,
+.storage-form:has(input[value=local]:checked) .kind--local,
+.storage-form:has(input[value=s3]:checked) .kind--s3,
+.storage-form:has(input[value=b2]:checked) .kind--b2 { display: flex; }
+.facts { display: grid; grid-template-columns: 120px 1fr; gap: 8px 16px; margin: 0; padding: 16px 20px; border: 1px solid var(--ink); background: var(--surface); }
+.facts dt { font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
+.facts dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+
+.shown-once { width: 500px; flex-shrink: 0; align-self: flex-start; border: 2px solid var(--signal); background: var(--surface); }
+.shown-once__tag { padding: 8px 20px; background: var(--signal); color: var(--on-dark); font-size: 11px; font-weight: 600; letter-spacing: 0.18em; }
+.shown-once__body { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.shown-once__body h2 { margin: 0; font-size: 30px; line-height: 1; }
+.shown-once__body p { margin: 0; font-size: 14px; line-height: 1.55; }
+.shown-once__password { padding: 14px 16px; background: var(--ink); color: #F2C46D; font-size: 15px; letter-spacing: 0.04em; overflow-wrap: anywhere; user-select: all; }
+.shown-once__actions { display: flex; gap: 8px; }
+.shown-once__actions .button { height: 40px; background: var(--white); color: var(--ink); text-decoration: none; font-weight: 500; }
+.finish { display: flex; flex-direction: column; gap: 12px; }
+.finish__saved { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.finish:has(#saved:not(:checked)) .button--primary { background: #E6E0D0; border-color: #CFC8B6; color: #6B6F78; }
+
+@media (max-width: 960px) { .shown-once { width: 100%; } }
