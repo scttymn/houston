@@ -22,6 +22,25 @@ class ChangeCheck
     end
   end
 
+  class Failed < StandardError; end
+
+  # Deploy now: queues the current head of what the rule deploys, moved or
+  # not (after a HOLD is fixed, nothing moved, but it still has to deploy).
+  # The branch head, or the highest tag by version order.
+  def queue_head!
+    result = GitRemote.refs(@project)
+    raise Failed, result.error unless result.ok
+
+    wanted = matching(result.refs)
+    raise Failed, "nothing in the repo matches the deploy rule (#{@project.deploy_rule_words.downcase})" if wanted.empty?
+    ref, sha = wanted.max_by { |ref, _| [ ref.scan(/\d+/).map(&:to_i), ref ] }
+    Project.transaction do
+      deploy = Deploy.queue!(@project, sha:, ref:)
+      @project.update!(seen_refs: wanted, last_checked_at: Time.current, last_check_error: nil)
+      deploy
+    end
+  end
+
   private
     # ref → commit, for the refs the rule deploys. An annotated tag's peeled
     # ref (^{}) names the commit it points at.

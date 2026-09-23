@@ -301,3 +301,90 @@ func (cl *Client) send(ctx context.Context, method, path string, payload any) er
 	}
 	return nil
 }
+
+// DeployNow queues the head of what the project's deploy rule matches.
+func (cl *Client) DeployNow(ctx context.Context, project string) (Deploy, error) {
+	var d Deploy
+	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/deploys", nil, &d)
+}
+
+type Access struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+type Link struct {
+	ID        int    `json:"id"`
+	DeployKey string `json:"deploy_key"`
+	Access    Access `json:"access"`
+}
+
+type LinkRead struct {
+	OK    bool `json:"ok"`
+	Found struct {
+		Name      string   `json:"name"`
+		SHA       string   `json:"sha"`
+		Branch    string   `json:"branch"`
+		Domains   []string `json:"domains"`
+		Variables []struct {
+			Name     string `json:"name"`
+			Required bool   `json:"required"`
+		} `json:"variables"`
+	} `json:"found"`
+	Problems string `json:"problems"`
+}
+
+// Webhook is a project's webhook. Secret is nil once a push has arrived.
+type Webhook struct {
+	URL      string  `json:"url"`
+	Verified bool    `json:"verified"`
+	Secret   *string `json:"secret"`
+}
+
+// LinkSaved is a linked project and its webhook (the secret, until the
+// first push arrives).
+type LinkSaved struct {
+	Project       string  `json:"project"`
+	WebhookURL    string  `json:"webhook_url"`
+	WebhookSecret *string `json:"webhook_secret"`
+}
+
+func (cl *Client) CreateLink(ctx context.Context, repoURL string) (Link, error) {
+	var l Link
+	return l, cl.postJSON(ctx, "/api/v1/links", map[string]string{"repo_url": repoURL}, &l)
+}
+
+func (cl *Client) LinkAccess(ctx context.Context, id int) (Access, error) {
+	var a Access
+	return a, cl.postJSON(ctx, fmt.Sprintf("/api/v1/links/%d/access", id), nil, &a)
+}
+
+func (cl *Client) LinkRead(ctx context.Context, id int, branch, composePath string) (LinkRead, error) {
+	var r LinkRead
+	return r, cl.postJSON(ctx, fmt.Sprintf("/api/v1/links/%d/read", id), map[string]string{"branch": branch, "compose_path": composePath}, &r)
+}
+
+func (cl *Client) LinkSave(ctx context.Context, id int) (LinkSaved, error) {
+	var l LinkSaved
+	return l, cl.postJSON(ctx, fmt.Sprintf("/api/v1/links/%d/save", id), nil, &l)
+}
+
+func (cl *Client) Webhook(ctx context.Context, project string, rotate bool) (Webhook, error) {
+	var w Webhook
+	path := "/api/v1/projects/" + url.PathEscape(project) + "/webhook"
+	if rotate {
+		return w, cl.postJSON(ctx, path+"/rotate", nil, &w)
+	}
+	return w, cl.getJSON(ctx, path, &w)
+}
+
+func (cl *Client) postJSON(ctx context.Context, path string, payload, into any) error {
+	status, body, err := cl.do(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("%s", message(body))
+	}
+	return json.Unmarshal(body, into)
+}

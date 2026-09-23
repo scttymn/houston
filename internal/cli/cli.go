@@ -82,11 +82,18 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	inspect.Flags().BoolVar(&asJSON, "json", false, "print JSON, as Mission Control reads it")
 	root.AddCommand(inspect)
-	var ref string
-	deployCmd := command("deploy", "Deploy this checkout on a Houston server (run there, as the houston user)", func() int {
+	var ref, deployProject string
+	var onServer, deployFollow bool
+	deployCmd := command("deploy", "Deploy this checkout on a Houston server (there, as houston); --server: have the server deploy the repo's head", func() int {
+		if onServer {
+			return runDeployServer(file, deployProject, deployFollow, stdout, stderr)
+		}
 		return runDeploy(file, ref, stdout, stderr, d)
 	})
 	deployCmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
+	deployCmd.Flags().BoolVar(&onServer, "server", false, "from anywhere: queue a deploy of the head of what the deploy rule matches")
+	deployCmd.Flags().StringVar(&deployProject, "project", "", "with --server: the project (default: the compose file's name)")
+	deployCmd.Flags().BoolVar(&deployFollow, "follow", false, "with --server: follow it to its result; exit 0 on GO, 1 on NO-GO")
 	root.AddCommand(deployCmd)
 	var accessID, accessSecret string
 	login := &cobra.Command{
@@ -157,6 +164,33 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		}),
 	)
 	root.AddCommand(secrets)
+
+	var linkBranch, linkFile string
+	var linkContinue int
+	var linkWait, webhookRotate bool
+	link := &cobra.Command{
+		Use:   "link [repo-url]",
+		Short: "Link a repo to Houston (Add project): deploy key, access, compose file, save",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
+			}
+			code = runLink(url, linkContinue, linkBranch, linkFile, linkWait, stdout, stderr)
+			return nil
+		},
+	}
+	link.Flags().StringVar(&linkBranch, "branch", "main", "the branch to read")
+	link.Flags().StringVar(&linkFile, "file", "compose.yml", "the compose file's path in the repo")
+	link.Flags().IntVar(&linkContinue, "continue", 0, "carry on with a link started earlier (after adding its deploy key)")
+	link.Flags().BoolVar(&linkWait, "wait", false, "keep checking access (every 5 s, up to 10 minutes) until the deploy key is added")
+	webhook := command("webhook", "A project's webhook URL (and secret, until the first push arrives)", func() int {
+		return runWebhook(file, projectFlag, webhookRotate, stdout, stderr)
+	})
+	webhook.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	webhook.Flags().BoolVar(&webhookRotate, "rotate", false, "make a new secret (then paste it into the git host)")
+	root.AddCommand(link, webhook)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

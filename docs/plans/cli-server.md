@@ -17,7 +17,7 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 | `/api/projects/sync`, `/api/projects/:name/secrets/:key` (values), `/api/deploys`, `/api/runner/jobs/claim` | yes, never through the tunnel | **no** |
 | `/api/v1/…` (status, deploys, logs, secret names and writes, link, deploy, webhook) | **no** | yes, through the tunnel |
 
-  **Personal tokens never read a secret value or a deploy key.** Secrets stay write-only, as on the page.
+  **Personal tokens never read a secret value or a deploy key.** Secrets stay write-only, as on the page. The one value the remote API returns is the **webhook secret, under the page's rule**: only until its first verified delivery, because it has to be pasted into the git host.
 - **CLI:**
   - `houston login` / `logout` (a saved server)
   - `HOUSTON_SERVER` + `HOUSTON_API_TOKEN` for agents (no file needed)
@@ -158,6 +158,46 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 - **Red:** 3 Rails tests and the Go test failed. **Green:** Mission Control 144 runs and the Go suite; rubocop and gofmt are clean.
 - **Mutations, each caught:** the value in the API's response (2 failures); any key settable; the CLI printing the value.
 - A value given as an argument (`secrets set NAME value`) is a usage error, so values never land in shell history or `ps`.
+
+## Batch 4: Actions (deploy, link, webhook)
+
+### Design (short)
+- **`POST /api/v1/projects/:name/deploys`** → **queues the current head** of what the deploy rule matches (the branch head; for tags, the highest tag by version order), moved or not, then updates `seen_refs`.
+  - This is the page's "Deploy" and an agent's "deploy now". A plain check for changes finds nothing after a HOLD is fixed, because the commit didn't move.
+  - Response: `{number, sha, ref, status}` (a queued one coalesces as always).
+  - Unlinked → 422 "link the repo first"; ls-remote fails → 502 with git's line.
+- **Links** (`/api/v1/links`), the Add project steps over the same models (`RepoLink`, `GitRemote`, `ProjectLinking`):
+  - `POST /links {repo_url}` → a draft with its key, and the access check run at once: `{id, deploy_key, access: {ok, message}}`
+  - `POST /links/:id/access` → the check again
+  - `POST /links/:id/read {branch, compose_path}` → `{ok, found: {…}}` or `{ok: false, problems}`
+  - `POST /links/:id/save` → `{project, webhook_url, webhook_secret}`
+  - Input rules as the page's (hostile URLs are a 422 before git runs).
+- **Webhook:** `GET /api/v1/projects/:name/webhook` → `{url, verified, secret}` and `POST …/webhook/rotate` → a new secret.
+  - **The webhook secret is shown under the page's rule:** only until its first verified delivery (`secret: null` after). It's the one value this API returns, because you must paste it into the git host.
+  - Project reads (`RemoteView`) still never include it.
+- **CLI:**
+  - `houston deploy --server [--project] [--follow]`: queues and prints `#n sha7 ref`. `--follow` reuses `deploys show --follow` (exit 0 GO, 1 NO-GO).
+  - `houston link <repo-url> [--branch] [--file] [--wait]` and `houston link --continue <id>`:
+    - It creates the draft and prints the deploy key.
+    - Access OK → read → save → it prints the project, webhook URL and secret.
+    - Access not OK: without `--wait`, exit 1 with "add the key, then: `houston link --continue <id>`". With `--wait`, it checks every 5 s for up to 10 minutes.
+    - Read problems → exit 2, printed as the CLI prints them.
+  - `houston webhook [--project] [--rotate]`
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Deploy queues the branch head even when `seen_refs` already has it; the tag rule picks `v1.10` over `v1.9`; a second call coalesces; unlinked → 422; ls-remote failure → 502 | `integration/api_v1_actions_test.rb` `test "deploy queues the head"` | Contract, Re-entry |
+| 2 | Links: create (the key, access), a hostile URL → 422 with no git, access again, read (found / problems), save → a project with its link; saving without a read → 422 | `test "linking over the API"` | Contract, Authz |
+| 3 | Webhook: the secret until verified, then null; rotate → a new secret, shown again | `test "the webhook"` | Authz |
+| 4 | CLI `deploy --server --follow`: POST, then follows #n to its result; exit code 0 / 1 | `internal/cli` `TestDeployServer` | Contract |
+| 5 | CLI `link`: access OK → saved, printing the webhook URL and secret; access denied → exit 1 with `--continue <id>`; `--continue` resumes the same draft; `--wait` polls until OK; read problems → exit 2 | `TestLink` | Contract, Crash & repair |
+| 6 | CLI `webhook` prints the URL and secret, or "verified"; `--rotate` prints the new one | `TestWebhook` | Contract |
+
+### Done (Batch 4)
+- **Red:** 3 Rails tests failed, and the Go tests didn't compile. **Green:** Mission Control 147 runs and the Go suite; rubocop and gofmt are clean.
+- **Mutations, each caught:** tags picked in string order (`v1.9` over `v1.10`); the webhook secret shown after its first delivery.
+- **Cleanup:** the link-save response has its own type (`LinkSaved`) instead of borrowing `Webhook`'s fields.
 
 ### Decisions (from you)
 1. **`console --server` is LAN-only for now** ("LAN-only is fine for now"). Reaching it through `cloudflared access ssh` from anywhere else is a later addition.

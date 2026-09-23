@@ -32,8 +32,18 @@ Rails.application.routes.draw do
 
     namespace :v1 do
       get "me", to: "me#show"
+      resources :links, only: :create do
+        member do
+          post :access
+          post :read
+          post :save
+        end
+      end
       resources :projects, only: %i[ index show ], param: :name do
-        resources :deploys, only: %i[ index show ], param: :number
+        resources :deploys, only: %i[ index show create ], param: :number
+        resource :webhook, only: :show do
+          post :rotate
+        end
         resources :secrets, only: %i[ index update destroy ], param: :key, constraints: { key: %r{[^/]+} } do
           post :generate, on: :member
         end
