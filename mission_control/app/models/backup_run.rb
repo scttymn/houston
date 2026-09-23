@@ -27,7 +27,7 @@ class BackupRun < ApplicationRecord
   # A manual one already queued is returned as it is (a double click).
   def self.request!(project, reason: "manual")
     raise Refused, "nothing deployed yet" unless project.running_deploy
-    location = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+    location = project.backup_location
     raise Refused, "no backup storage yet (finish setup's storage step)" unless location
 
     run = transaction do

@@ -40,6 +40,7 @@ class ProjectSync
                        health: @payload["health"], port: @payload["port"], deploy_rule: @payload["deploy_rule"] || {},
                        volumes: @payload["volumes"].to_a.map { |v| v.slice("name", "path") },
                        databases: @payload["databases"].to_a.map { |d| d.slice("service", "image") },
+                       keep_auto: @payload.dig("backups", "keep_auto") || 14, keep_deploy: @payload.dig("backups", "keep_deploy") || 10,
                        synced_at: Time.current, **link.to_h)
       claim_hosts
     end
@@ -123,6 +124,11 @@ class ProjectSync
       unless volumes.is_a?(Array) && volumes.size <= MAX_VOLUMES &&
              volumes.all? { |v| v.is_a?(Hash) && v["name"].is_a?(String) && v["name"].match?(SERVICE) && v["path"].is_a?(String) && v["path"].match?(MOUNT_PATH) }
         errors["volumes"] << "must be a list of at most #{MAX_VOLUMES} {name, path} with absolute paths"
+      end
+
+      backups = @payload["backups"]
+      unless backups.nil? || (backups.is_a?(Hash) && %w[keep_auto keep_deploy].all? { |k| backups[k].is_a?(Integer) && backups[k].between?(1, 1000) })
+        errors["backups"] << "must be {keep_auto, keep_deploy}, whole numbers from 1 to 1000"
       end
 
       databases = @payload.fetch("databases", [])

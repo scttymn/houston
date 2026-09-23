@@ -53,10 +53,11 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     assert_select ".notice", /nothing deployed yet/
     assert_equal 0, BackupRun.count
 
+    # No acknowledged storage: setup isn't finished, so its gate answers
+    # first (BackupRunTest covers the model's own refusal).
     StorageLocation.update_all(acknowledged_at: nil)
-    get project_path("equip")
-    assert_select "form[action='/projects/equip/backups']", 0
     post project_backups_path("equip")
+    assert_redirected_to setup_storage_path
     assert_equal 0, BackupRun.count
     assert fresh
   end
@@ -65,5 +66,22 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     post project_backups_path("equip")
     assert_redirected_to new_session_path
     assert_equal 0, BackupRun.count
+  end
+
+  test "the backup plan" do
+    sign_in_as users(:one)
+    @project.update!(services: %w[app db cache], databases: [ { "service" => "db", "image" => "postgres:17" } ], keep_auto: 7, keep_deploy: 3)
+    @project.backup_runs.create!(location: storage_locations(:unas), kind: "auto", reason: "manual", status: "go", heartbeat_at: Time.current,
+                                 found: { "databases" => [], "sqlite" => [ { "volume" => "storage", "path" => "production.sqlite3" } ] })
+    @project.backup_runs.create!(location: storage_locations(:unas), kind: "auto", reason: "manual", status: "no_go", heartbeat_at: Time.current, found: {})
+
+    get project_path("equip")
+    assert_select "turbo-frame#snapshots[src='/projects/equip/snapshots'][loading=lazy]"
+    assert_select ".backup-plan", /7 scheduled · 3 pre-deploy/
+    assert_select ".backup-plan", /unas-nfs/
+    assert_select ".backup-plan", %r{storage.*/rails/storage}m
+    assert_select ".backup-plan", /db.*pg_dump/m
+    assert_select ".backup-plan", /production\.sqlite3.*\.backup/m
+    assert_select ".backup-plan", /NOT BACKED UP.*cache/m
   end
 end

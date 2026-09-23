@@ -65,6 +65,7 @@ Rails.application.routes.draw do
     end
     resources :deploys, only: :show, param: :number
     resources :backups, only: :create, controller: "project_backups"
+    resources :snapshots, only: :index, controller: "project_snapshots"
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end

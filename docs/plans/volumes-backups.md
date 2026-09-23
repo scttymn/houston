@@ -24,15 +24,13 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
 ## Batches
 
 1. **Back up now, end to end** (below): the backup engine, backup runs, and the project page's Back up now button. Local-disk volumes, the default storage location.
-2. **Snapshots, retention, and the CLI:**
-   - `forget` after each backup (`--keep-daily <auto>` / `--keep-last <deploy>`), `prune` once a day per location
-   - the Snapshots panel (Scheduled / Pre-deploy, with sizes) and the Backup plan panel
-   - `/api/v1` snapshots and backups; `houston snapshots --server`, `houston backup --server [--follow]`; last backup in `houston status`
-3. **The schedule:** `backups.schedule` (daily HH:MM, in Houston's time zone, UTC by default; Decision 4) through sync; a recurring tick; once per day per project, caught up after downtime; NEXT BACKUP on the flight board; a failed backup shows as NO-GO.
-4. **The pre-deploy snapshot:** the runner API (one per deploy, idempotent), deploy step "Snapshot" just before Release (Decision 2) in Go and on the deploy page, skipped with no data, its failure stops the deploy (Decision 1).
-5. **Volume placement:** a location per named volume (Add project, the project page, `houston volumes --server`); sync creates new volumes there (NFS subdirectory, host path); a volume that exists elsewhere is a NO-GO, not a silent move; the SQLite-on-NFS warning; Postgres data stays on local disk.
-6. **Storage locations in Settings and per-project backup targets:** list with capabilities (live volumes / backups), add (the first-run form, reused), make default, the password shown once; the project's backup target; `houston storage list|add` (secrets from stdin).
-7. **The real run:** on OrbStack, the equip copy (SQLite in WAL mode) and the spike (Postgres), with an NFS server container as a location and a host path as another: Back up now, the schedule, a pre-deploy snapshot, retention, and the snapshot's contents restored by hand and opened (`sqlite3`, `pg_restore --list`).
+2. **Retention and the project page:** `forget` after each backup (`--keep-daily <auto>` / `--keep-last <deploy>`), `prune` once a day per location; the Snapshots panel (Scheduled / Pre-deploy, with sizes) and the Backup plan panel. (Split from the old Batch 2, which was past the ~12-row signal.)
+3. **The API and the CLI:** `/api/v1` snapshots and backups; `houston snapshots --server`, `houston backup --server [--follow]`; the last backup in `houston status`.
+4. **The schedule:** `backups.schedule` (daily HH:MM, in Houston's time zone, UTC by default; Decision 4) through sync; a recurring tick; once per day per project, caught up after downtime; NEXT BACKUP on the flight board; a failed backup shows as NO-GO.
+5. **The pre-deploy snapshot:** the runner API (one per deploy, idempotent), deploy step "Snapshot" just before Release (Decision 2) in Go and on the deploy page, skipped with no data, its failure stops the deploy (Decision 1).
+6. **Volume placement:** a location per named volume (Add project, the project page, `houston volumes --server`); sync creates new volumes there (NFS subdirectory, host path); a volume that exists elsewhere is a NO-GO, not a silent move; the SQLite-on-NFS warning; Postgres data stays on local disk.
+7. **Storage locations in Settings and per-project backup targets:** list with capabilities (live volumes / backups), add (the first-run form, reused), make default, the password shown once; the project's backup target; `houston storage list|add` (secrets from stdin).
+8. **The real run:** on OrbStack, the equip copy (SQLite in WAL mode) and the spike (Postgres), with an NFS server container as a location and a host path as another: Back up now, the schedule, a pre-deploy snapshot, retention, and the snapshot's contents restored by hand and opened (`sqlite3`, `pg_restore --list`).
 
 ## Batch 1: Back up now, end to end
 
@@ -181,4 +179,56 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
 1. **A failed pre-deploy snapshot stops the deploy** ("1 yes"): NO-GO "pre-deploy snapshot failed: …", and the old version keeps serving.
 2. **The pre-deploy snapshot runs just before the release hook** ("move it"), after the build and the accessories, instead of the design's step 03. Writes during the build are in it, and it's still before any migration.
 3. **sftp stays deferred** ("defer"), to spec §12 "later".
-4. **The schedule uses Houston's configured time zone, UTC by default** ("based on whatever houston is configured to use with UTC as the default"). Batch 3 adds `time_zone` to the installation (an IANA name, default `UTC`), a Settings field, and `houston settings --server` shows it. `daily 03:00` means 03:00 there, DST included: a skipped hour runs at the next valid time, and a repeated one runs once.
+4. **The schedule uses Houston's configured time zone, UTC by default** ("based on whatever houston is configured to use with UTC as the default"). Batch 4 adds `time_zone` to the installation (an IANA name, default `UTC`), a Settings field, and `houston settings --server` shows it. `daily 03:00` means 03:00 there, DST included: a skipped hour runs at the next valid time, and a repeated one runs once.
+
+## Batch 2: Retention and the project page
+
+### Design (short)
+- **Sync sends `backups: {keep_auto, keep_deploy}`** from `x-houston.backups.keep` (defaults 14 / 10). They're stored on the project (`keep_auto`, `keep_deploy`, integers). Absent → the defaults; outside 1–1000 → 422.
+- **Retention, after each GO backup** (in `Backup`, same run, same deadline):
+  - `restic forget --host houston --tag project:<name>,kind:<kind> --group-by '' --json`, with `--keep-daily <keep_auto>` for `auto` or `--keep-last <keep_deploy>` for `deploy`
+  - Never after NO-GO or skipped.
+  - A failed forget leaves the run GO, with a warning ("old snapshots weren't forgotten: …"): the new snapshot is safe, and the next run tries again.
+- **Prune:** `PruneJob` on the `backups` queue, so it never overlaps one of Houston's backups. It runs daily at 04:30 UTC (`recurring.yml`, production).
+  - For each acknowledged location with at least one backup run, it runs `restic prune --retry-lock 30m`, with a 3-hour timeout.
+  - It records `pruned_at` / `prune_error` on the location, and logs a failure. Settings shows them in Batch 7.
+- **`Snapshots.for(project, location)`:** `restic snapshots --json --host houston --tag project:<name>` against the default location.
+  - It returns the snapshots newest first, each with `id`, `time`, `kind`, `reason`, `deploy`, `sha` and `bytes` (from `summary.total_bytes_processed`), at most 1000.
+  - Cached for 10 minutes; a GO backup clears the cache.
+  - A failure raises `Snapshots::Unavailable` with restic's words, and isn't cached.
+- **The project page:**
+  - **Snapshots panel:** a lazy Turbo frame from `GET /projects/:name/snapshots[?kind=deploy]`, so a slow B2 listing never holds up the page. It has tabs Scheduled (`kind:auto`) and Pre-deploy (`kind:deploy`), each with its rule and "kept N / keep". The rows show when, a note ("Back up now", "before deploy #n"), the SHA and the size.
+  - **Backup plan panel** (derived, read-only):
+    - keep rules and storage (the default location's name)
+    - volumes (name → path)
+    - databases: each Postgres service · pg_dump, and each SQLite file from the last GO run · .backup
+    - not backed up: the other accessories, which start empty after a restore
+  - The schedule row arrives with Batch 4.
+
+### AC ↔ test map (Batch 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Sync sends `backups: {keep_auto: 14, keep_deploy: 10}` by default and the file's values when set | `internal/mission` `TestRequestFor`, `TestRequestForData` | Contract |
+| 2 | Mission Control stores them; absent → 14 / 10; 0, 1001, "5" → 422 naming `backups` | `integration/api_sync_test.rb` `test "sync records the keep rules"` | Contract |
+| 3 | After a GO auto backup: `forget` with host, the AND tag filter, `--group-by ''` and `--keep-daily 14`. A deploy-kind run uses `--keep-last 10`. No forget after NO-GO or skipped. A failed forget → GO with the warning. The snapshots cache is cleared by a GO | `models/backup_test.rb` `test "retention after a backup"` | Contract, Signals |
+| 4 | PruneJob: `restic prune --retry-lock 30m` once per used, acknowledged location; `pruned_at` set; a failure → `prune_error` and a log line, and the next location still pruned; on the `backups` queue; production's recurring entry exists | `jobs/prune_job_test.rb` `test "pruning each location"` | Signals, Scale |
+| 5 | `Snapshots.for`: the command (host, `project:<name>` filter), newest first, the fields; a second call within 10 minutes runs no restic; a failure raises with restic's words and isn't cached | `models/snapshots_test.rb` `test "listing a project's snapshots"` | Contract, Scale |
+| 6 | `GET /projects/:name/snapshots`: Scheduled rows by default, Pre-deploy with `kind=deploy` ("before deploy #7"), sizes, "kept 2 / 14"; restic failing → the message in the panel; no storage → "no backup storage yet"; signed out → sign-in; unknown project → 404 | `controllers/project_snapshots_test.rb` `test "the snapshots panel"` | Authz, Contract |
+| 7 | The project page has the lazy frame and the Backup plan panel: keep rules, storage name, volumes, Postgres services, the last GO run's SQLite files, and "not backed up: cache" | `controllers/project_backups_test.rb` `test "the backup plan"` | Contract |
+
+### Done (Batch 2)
+- **Red:** the Go test failed; Mission Control had 1 failure and 9 errors in the new tests. **Green:** Mission Control 181 runs and the Go suite. The migration runs down and up. rubocop and gofmt are clean.
+- **Test mistakes fixed on the way:**
+  - The takeover test's override matched every restic call, and forget is now a second one.
+  - A `?` in an `assert_select` selector is a substitution placeholder.
+  - **The setup gate answers first when no storage is acknowledged.** Batch 1's "no storage → no button" assertion had passed vacuously on a redirect. Both panels' tests now assert the redirect to setup; `BackupRunTest` covers the model's own refusal.
+- `Project#backup_location` is the one place that says where a project's backups go (the acknowledged default). Batch 7's per-project target changes only it.
+- **Mutations, each caught:**
+  - forget with restic's default grouping
+  - no cache clear after a GO
+  - a failed forget failing the run
+  - pruning unused or unfinished locations
+  - a prune failure stopping the rest
+  - snapshots not cached
+  - keep rules unchecked
+- **scotty-review (cold pass):** one LOW finding, fixed: `Snapshots.list` capped at 1000 in restic's order (oldest first) before sorting, which would drop the newest. It now sorts, then caps, with a test. No new public API without a production caller, and no inert state. Prune failures are recorded on the location and logged (shown in Settings in Batch 7).

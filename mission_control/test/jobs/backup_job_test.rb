@@ -52,7 +52,7 @@ class BackupJobTest < ActiveJob::TestCase
   test "a job that lost its run finalizes nothing" do
     run = BackupRun.request!(@project)
     takeover = nil
-    fake = backup_docker(->(args) { args.include?(StorageLocation::RESTIC_IMAGE) } => -> {
+    fake = backup_docker(->(args) { args.include?(StorageLocation::RESTIC_IMAGE) && args.include?("backup") } => -> {
       run.reload.update_columns(heartbeat_at: 3.minutes.ago)
       takeover = BackupRun.create!(project: @project, location: run.location, kind: "auto", reason: "schedule", status: "queued", token_digest: "", heartbeat_at: Time.current)
       BackupRun.claim!(takeover)

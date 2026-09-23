@@ -89,6 +89,25 @@
         </div>
       </section>
     <% end %>
+    <section class="panel backup-plan">
+      <h2 class="disp panel__title">Backup plan</h2>
+      <dl class="facts">
+        <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
+        <dt class="mono">STORAGE</dt><dd class="mono"><%= @storage&.name || "none yet" %></dd>
+        <dt class="mono">VOLUMES</dt>
+        <dd><% if @project.volumes.empty? %>none<% end %><% @project.volumes.each do |volume| %><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span><br><% end %></dd>
+        <dt class="mono">DATABASES</dt>
+        <dd>
+          <% @project.databases.each do |db| %><span class="mono"><%= db["service"] %></span> · pg_dump<br><% end %>
+          <% @last_good_backup&.found.to_h.fetch("sqlite", []).each do |file| %><span class="mono"><%= file["path"] %></span> · .backup<br><% end %>
+          <% if @project.databases.empty? && @last_good_backup&.found.to_h.fetch("sqlite", []).blank? %>none found yet<% end %>
+        </dd>
+        <% if @project.not_backed_up.any? %>
+          <dt class="mono">NOT BACKED UP</dt><dd><span class="mono"><%= @project.not_backed_up.join(", ") %></span> · start empty after a restore</dd>
+        <% end %>
+      </dl>
+    </section>
+    <%= turbo_frame_tag "snapshots", src: project_snapshots_path(@project.name), loading: :lazy %>
     <aside class="panel secrets">
       <h2 class="disp panel__title">Secrets</h2>
       <p class="panel__row panel__row--muted">Values are write-only: Houston never shows them again.</p>

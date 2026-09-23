@@ -53,6 +53,24 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_equal [ { "name" => "keep", "path" => "/keep" } ], project.reload.volumes
   end
 
+  test "sync records the keep rules" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, backups: { keep_auto: 3, keep_deploy: 5 }))
+    assert_response :success
+    project = Project.find_by!(name: "equip")
+    assert_equal [ 3, 5 ], [ project.keep_auto, project.keep_deploy ]
+
+    sync(equip_payload(variables: optional))
+    assert_equal [ 14, 10 ], [ project.reload.keep_auto, project.keep_deploy ]
+
+    [ { keep_auto: 0, keep_deploy: 5 }, { keep_auto: 3, keep_deploy: 1001 }, { keep_auto: "5", keep_deploy: 5 }, { keep_auto: 3 }, "14/10" ].each do |backups|
+      sync(equip_payload(variables: optional, backups:))
+      assert_response :unprocessable_entity, backups.inspect
+      assert_includes json["errors"].keys, "backups"
+    end
+    assert_equal [ 14, 10 ], [ project.reload.keep_auto, project.keep_deploy ]
+  end
+
   test "sync rejects what the CLI would never send" do
     {
       "name" => [ { name: "Equip" }, { name: "admin" }, { name: "hooks" }, { name: "-x" }, { name: nil } ],

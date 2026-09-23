@@ -45,9 +45,11 @@ class Backup
       sqlite = @project.volumes.any? ? copy_sqlite : []
       write_manifest(postgres, sqlite)
       snapshot_id, bytes = restic_backup
+      forget
       found = { "databases" => postgres.flat_map { |pg| pg[:databases].map { |d| { "service" => pg[:service], "name" => d[:name] } } },
                 "sqlite" => sqlite.map { |s| s.slice("volume", "path") } }
       finish("go", error: @warnings.presence&.join("; "), snapshot_id:, bytes:, found:)
+      Snapshots.forget_cache(@project, @location)
     rescue Failed => e
       finish("no_go", error: e.message)
     rescue TimedOut
@@ -140,6 +142,17 @@ class Backup
         @warnings << "#{items.size} #{noun} couldn't be read: #{items.first(UNREADABLE_SHOWN).join(", ")}#{items.size > UNREADABLE_SHOWN ? ", …" : ""}"
       end
       [ summary["snapshot_id"], summary["total_bytes_processed"] ]
+    end
+
+    # Retention for this run's kind (spec §9): the newest snapshot per day for
+    # auto, the last N for deploy. Grouping by nothing matters: restic's
+    # default (host and paths) would keep every snapshot whose paths differ.
+    # A failure is a warning; the new snapshot is safe and the next run tries again.
+    def forget
+      keep = @run.kind == "deploy" ? [ "--keep-last", @project.keep_deploy.to_s ] : [ "--keep-daily", @project.keep_auto.to_s ]
+      ran = docker(*@location.restic_args("forget", "--host", "houston", "--tag", "project:#{@project.name},kind:#{@run.kind}", "--group-by", "", "--json", *keep),
+                   env: @location.restic_env)
+      @warnings << "old snapshots weren't forgotten: #{tail(ran.output)}" unless ran.success
     end
 
     def finish(status, **fields)

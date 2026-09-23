@@ -46,5 +46,14 @@ module BackupHelpers
     end
   end
 
+  def restic_forgets(fake) = fake.calls.select { |c| c.args.include?(StorageLocation::RESTIC_IMAGE) && c.args.include?("forget") }
+
+  # One entry of `restic snapshots --json`.
+  def snapshot_json(id:, time:, kind: "auto", reason: "schedule", deploy: nil, sha: "a" * 40, bytes: 410_000_000, project: "equip")
+    tags = [ "project:#{project}", "sha:#{sha}", "kind:#{kind}", "reason:#{reason}" ] + (deploy ? [ "deploy:#{deploy}" ] : [])
+    { time:, hostname: "houston", paths: [ "/data", "/out" ], tags:, id: id.ljust(64, "0"), short_id: id.first(8),
+      summary: { total_bytes_processed: bytes } }
+  end
+
   def restic_backups(fake) = fake.calls.select { |c| c.args.include?(StorageLocation::RESTIC_IMAGE) && c.args.include?("backup") }
 end

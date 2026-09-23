@@ -66,8 +66,9 @@ class BackupTest < ActiveSupport::TestCase
                  restic.drop(restic.index(StorageLocation::RESTIC_IMAGE))
     assert_equal "restic-password-xyz", fake.calls[9].env["RESTIC_PASSWORD"]
 
-    assert_equal [ "volume", "rm", "-f", "houston-backup.equip" ], calls[10]
-    assert_equal 11, calls.size
+    assert_equal "forget", calls[10][calls[10].index(StorageLocation::RESTIC_IMAGE) + 1]
+    assert_equal [ "volume", "rm", "-f", "houston-backup.equip" ], calls[11]
+    assert_equal 12, calls.size
 
     # Secrets only in the docker process's environment.
     assert_not fake.all_args.any? { |a| a.include?("restic-password-xyz") }, "the restic password is in argv"
@@ -109,6 +110,44 @@ class BackupTest < ActiveSupport::TestCase
     assert_match "1 file couldn't be read: /data/storage/tmp/x", @run.error
   end
 
+  test "retention after a backup" do
+    Rails.cache.write([ "snapshots", "equip", storage_locations(:unas).id ], [ :stale ])
+    fake = backup_docker
+    back_up(fake)
+    forgets = restic_forgets(fake)
+    assert_equal 1, forgets.size
+    assert_equal [ StorageLocation::RESTIC_IMAGE, "forget", "--host", "houston", "--tag", "project:equip,kind:auto", "--group-by", "", "--json", "--keep-daily", "14" ],
+                 forgets.first.args.drop(forgets.first.args.index(StorageLocation::RESTIC_IMAGE))
+    assert_equal "go", @run.status
+    assert_nil Rails.cache.read([ "snapshots", "equip", storage_locations(:unas).id ]), "a GO backup clears the snapshots cache"
+    assert_equal [ "volume", "rm", "-f", "houston-backup.equip" ], fake.calls.last.args
+
+    # A deploy-kind run keeps the last N.
+    @project.update!(keep_deploy: 4)
+    @run = BackupRun.create!(project: @project, location: storage_locations(:unas), kind: "deploy", reason: "deploy", deploy_number: 7, status: "queued", heartbeat_at: Time.current)
+    @token = BackupRun.claim!(@run)
+    fake = backup_docker
+    back_up(fake)
+    assert_equal [ "--tag", "project:equip,kind:deploy", "--group-by", "", "--json", "--keep-last", "4" ], restic_forgets(fake).first.args.last(7)
+    assert_includes restic_backups(fake).first.args.each_cons(2).to_a, [ "--tag", "deploy:7" ]
+
+    # A failed forget: still GO, with a warning.
+    @run = BackupRun.request!(@project)
+    @token = BackupRun.claim!(@run)
+    fake = backup_docker(->(args) { args.include?("forget") } => failure("Fatal: unable to create lock in backend: repository is already locked exclusively\n"))
+    back_up(fake)
+    assert_equal [ "go", SNAPSHOT ], [ @run.status, @run.snapshot_id ]
+    assert_match "old snapshots weren't forgotten: Fatal: unable to create lock", @run.error
+
+    # No forget after a NO-GO.
+    @run = BackupRun.request!(@project)
+    @token = BackupRun.claim!(@run)
+    fake = backup_docker(->(args) { args.include?(StorageLocation::RESTIC_IMAGE) && args.include?("backup") } => failure("Fatal: repository not found\n"))
+    back_up(fake)
+    assert_equal "no_go", @run.status
+    assert_empty restic_forgets(fake)
+  end
+
   # A bug or a surprise mid-backup still finishes the run, and still cleans up.
   test "an unexpected error finishes the run NO-GO" do
     fake = backup_docker(->(args) { args.include?("/rails/lib/backup/sqlite.rb") } => -> { raise NoMethodError, "undefined method 'x' for nil" })
@@ -122,7 +161,7 @@ class BackupTest < ActiveSupport::TestCase
   test "nothing to back up" do
     @project.update!(volumes: [], databases: [])
     fake = FakeDocker.new
-    back_up(fake)
+    back_up(fake) # and no forget either
     assert_equal [ "skipped", "nothing to back up (no named volumes, no Postgres)" ], [ @run.status, @run.error ]
     assert_empty fake.calls
   end

@@ -32,6 +32,13 @@ class Project < ApplicationRecord
 
   def accessories = services - [ app_service ]
 
+  # Where this project's backups go: the default location, once setup's
+  # storage step is finished.
+  def backup_location = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+
+  # Services a backup doesn't hold (they start empty after a restore).
+  def not_backed_up = accessories - databases.map { |d| d["service"] }
+
   def latest_deploy = deploys.summary.order(number: :desc).first
   def running_deploy = deploys.summary.where(status: "go").order(number: :desc).first
 

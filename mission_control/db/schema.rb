@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_160000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -102,6 +102,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_150000) do
     t.json "domain_states", default: {}, null: false
     t.json "domains", default: [], null: false
     t.string "health", null: false
+    t.integer "keep_auto", default: 14, null: false
+    t.integer "keep_deploy", default: 10, null: false
     t.string "last_check_error"
     t.datetime "last_checked_at"
     t.string "name", null: false
@@ -170,6 +172,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_150000) do
     t.boolean "default", default: false, null: false
     t.string "kind", null: false
     t.string "name", null: false
+    t.string "prune_error", limit: 2000
+    t.datetime "pruned_at"
     t.text "restic_password"
     t.text "settings"
     t.datetime "updated_at", null: false

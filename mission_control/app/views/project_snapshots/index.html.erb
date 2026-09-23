@@ -1,0 +1,37 @@
+<%= turbo_frame_tag "snapshots" do %>
+  <section class="panel snapshots">
+    <h2 class="disp panel__title">Snapshots <% if @location %><small class="mono eyebrow"><%= @location.name %></small><% end %></h2>
+    <% if !@location %>
+      <p class="panel__row panel__row--muted">No backups: no backup storage yet (finish setup's storage step).</p>
+    <% elsif @error %>
+      <p class="panel__row"><span class="field__error">Can't read snapshots: <%= @error %></span></p>
+    <% else %>
+      <nav class="tabs panel__row">
+        <%= link_to "Scheduled", project_snapshots_path(@project.name), "aria-current": (@kind == "auto" ? "page" : nil) %>
+        <%= link_to "Pre-deploy", project_snapshots_path(@project.name, kind: "deploy"), "aria-current": (@kind == "deploy" ? "page" : nil) %>
+      </nav>
+      <p class="panel__row panel__row--muted">
+        <% if @kind == "auto" %>
+          Back up now makes these. One per day is kept for <%= @project.keep_auto %> days
+        <% else %>
+          Taken right before every deploy and restore. The last <%= @project.keep_deploy %> are kept
+        <% end %>
+        · kept <%= @kept %> / <%= @kind == "auto" ? @project.keep_auto : @project.keep_deploy %>
+      </p>
+      <% if @snapshots.empty? %>
+        <p class="panel__row panel__row--muted">None yet.</p>
+      <% end %>
+      <ul class="rows">
+        <% @snapshots.each do |snapshot| %>
+          <li data-snapshot="<%= snapshot.short_id %>">
+            <span><%= l(snapshot.time, format: :short) %></span>
+            <span><%= { "manual" => "Back up now", "schedule" => "daily", "restore" => "before a restore" }.fetch(snapshot.reason) { snapshot.deploy ? "before deploy ##{snapshot.deploy}" : snapshot.reason } %></span>
+            <span class="mono"><%= snapshot.sha.to_s.first(7) %></span>
+            <span class="mono"><%= snapshot.bytes ? number_to_human_size(snapshot.bytes) : "—" %></span>
+          </li>
+        <% end %>
+      </ul>
+      <p class="panel__row panel__row--muted">Each snapshot holds code and data together.</p>
+    <% end %>
+  </section>
+<% end %>
