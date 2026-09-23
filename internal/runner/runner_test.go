@@ -207,3 +207,56 @@ func TestRunnerKeepsPolling(t *testing.T) {
 		t.Errorf("%d claims", m.claims.Load())
 	}
 }
+
+type fakeDocker struct {
+	projects string            // docker compose ls --all --format json
+	created  map[string]string // project → its containers' creation times, one per line
+	downs    [][]string
+	lsErr    error
+}
+
+func (d *fakeDocker) Output(args ...string) ([]byte, error) {
+	switch {
+	case args[0] == "compose" && args[1] == "ls":
+		return []byte(d.projects), d.lsErr
+	case args[0] == "ps":
+		project := strings.TrimPrefix(args[slices.Index(args, "--filter")+1], "label=com.docker.compose.project=")
+		return []byte(d.created[project]), nil
+	case args[0] == "compose" && slices.Contains(args, "down"):
+		d.downs = append(d.downs, args)
+		return nil, nil
+	}
+	return nil, errors.New("unexpected docker " + strings.Join(args, " "))
+}
+
+func TestSweepRemovesOnlyStaleTestProjects(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	old, young := now.Add(-3*time.Hour).Format("2006-01-02 15:04:05 -0700 MST"), now.Add(-10*time.Minute).Format("2006-01-02 15:04:05 -0700 MST")
+	d := &fakeDocker{
+		projects: `[{"Name":"garage-test-0a1b2c3d"},{"Name":"spike-test-ffffffff"},{"Name":"garage-test-dev"},{"Name":"garage"},{"Name":"mixed-test-12345678"}]`,
+		created: map[string]string{
+			"garage-test-0a1b2c3d": old + "\n" + old + "\n",
+			"spike-test-ffffffff":  young + "\n",
+			"garage-test-dev":      old + "\n",
+			"garage":               old + "\n",
+			"mixed-test-12345678":  old + "\n" + young + "\n",
+		},
+	}
+	var log strings.Builder
+	Sweep(d, now, &log)
+
+	want := [][]string{{"compose", "-p", "garage-test-0a1b2c3d", "down", "-v", "--rmi", "local", "--remove-orphans"}}
+	if !reflect.DeepEqual(d.downs, want) {
+		t.Errorf("downs = %v, want %v", d.downs, want)
+	}
+	if !strings.Contains(log.String(), "garage-test-0a1b2c3d") {
+		t.Errorf("log = %q", log.String())
+	}
+
+	d = &fakeDocker{lsErr: errors.New("Cannot connect to the Docker daemon")}
+	log.Reset()
+	Sweep(d, now, &log)
+	if len(d.downs) != 0 || !strings.Contains(log.String(), "Cannot connect") {
+		t.Errorf("docker error: downs %v, log %q", d.downs, log.String())
+	}
+}

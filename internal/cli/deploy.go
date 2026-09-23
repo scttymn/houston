@@ -67,7 +67,7 @@ func runRunner(name, workspace string, stderr io.Writer, d docker.Runner) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	r := &runner.Runner{
-		Name: name, Workspace: workspace, Mission: client, Git: gitCLI{}, Sleep: runner.Sleep,
+		Name: name, Workspace: workspace, Mission: client, Git: gitCLI{}, Sleep: runner.Sleep, Docker: d,
 		Deploy: func(ctx context.Context, o deploy.Options) int {
 			return deploy.Run(ctx, o, deploy.Deps{Docker: d, Git: gitCLI{}, Mission: client, Exec: execCLI{}})
 		},

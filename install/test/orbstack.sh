@@ -54,9 +54,12 @@ check "houston has the runner token (0600, its own)" vm sh -c 'f=~houston/.confi
 check "git is installed" vm git --version
 check "the houston CLI is installed" vm sh -c 'houston --version && hou --version'
 check "Kamal's image is pulled" vm docker image inspect ghcr.io/basecamp/kamal:v2.12.0
-for svc in mission-control registry cloudflared; do
+for svc in mission-control registry cloudflared houston-runner-1 houston-runner-2; do
   check "$svc container exists and isn't stopped" vm sh -c "docker compose -f /opt/houston/compose.yml ps -a --format '{{.Service}} {{.State}}' | grep -E '^$svc (running|restarting)'"
 done
+check "runners run as the houston user" vm sh -c '[ "$(docker compose -f /opt/houston/compose.yml exec -T houston-runner-1 id -u)" = "$(id -u houston)" ]'
+check "runners have git, ssh and the houston CLI" vm docker compose -f /opt/houston/compose.yml exec -T houston-runner-1 sh -c 'git --version && ssh -V 2>&1 && houston --version && docker compose version'
+check "Mission Control expects 2 runners and has threads for them" vm sh -c 'docker compose -f /opt/houston/compose.yml exec -T mission-control env | grep -qx HOUSTON_RUNNERS=2 && docker compose -f /opt/houston/compose.yml exec -T mission-control env | grep -qx RAILS_MAX_THREADS=8'
 check "registry listens on 127.0.0.1:5000 only" vm sh -c 'ss -ltn | grep ":5000 " | grep -q "127.0.0.1:5000" && ! ss -ltn | grep ":5000 " | grep -qvE "127.0.0.1:5000"'
 check "Mission Control answers on the LAN address ($ip)" vm curl -fsS -o /dev/null "http://$ip:3000/up"
 if [[ "$code" =~ ^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$ ]]; then ok "printed a setup code ($code)"; else bad "printed a setup code (got '$code')"; fi

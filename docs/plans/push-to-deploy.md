@@ -269,6 +269,70 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 - **Mutations, each caught:** a runner accepting new host keys; early failures leaving a claimed deploy in flight (4 failures); tests never run; no backoff; any user allowed to deploy by hand.
 - `houston runner --name --workspace` is wired in. It stops cleanly on SIGINT or SIGTERM, which is how `docker stop` asks.
 
+## Batch 5: Runner containers
+
+### Design (short)
+- **The image** (`install/runner.Dockerfile`): `docker:29-cli` (the Docker CLI with compose and buildx) plus `git` and `openssh-client`. The installer builds it as `houston/runner:local`.
+- **Two runners in the installer's compose file** (`houston-runner-1`, `houston-runner-2`), each:
+  - `user: <houston uid>:<gid>`, `group_add` for the docker group
+  - `HOME=/home/houston`, `HOUSTON_URL=http://mission-control:80`, `HOUSTON_TOKEN=${HOUSTON_RUNNER_TOKEN}` (compose reads `/opt/houston/.env`)
+  - mounts:
+    - the Docker socket
+    - the host's `houston` CLI, read-only
+    - `/etc/passwd` and `/etc/group`, read-only, so OpenSSH has an entry for houston's uid
+    - `/home/houston/.ssh`, read-only, at the same path (`houston deploy` hands that host path to Kamal's container)
+    - its workspace `/var/lib/houston/runners/<name>` **at the same path** (the Kamal container's `/workdir` mount is a host path)
+  - `command: houston runner --name <name> --workspace <workspace>`
+- **Mission Control** gets `HOUSTON_RUNNERS=2` (the strip's m) and `RAILS_MAX_THREADS=8`, since two idle claims hold two Puma threads (Batch 3's note).
+- **Sweeping stale test projects** (`houston runner`, at start and hourly): a `houston test` killed mid-run leaves `<name>-test-<8 hex>` compose projects behind.
+  - Only projects whose containers are all older than **2 hours** are removed (`docker compose -p <p> down -v --rmi local --remove-orphans`).
+  - Why the age: two runners share one daemon, so a younger test project may belong to the other runner's test in progress; a deploy's deadline is 30 minutes.
+  - Anything that isn't a test project is never touched.
+
+### AC ↔ test map (Batch 5)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Sweep: an old `x-test-0a1b2c3d` → down; a young one kept; `x-test-dev` and `garage` untouched; a docker error is logged, and the runner carries on | `internal/runner` `TestSweepRemovesOnlyStaleTestProjects` | Crash & repair, Signals |
+| 2 | The installer: the runner image, two runners running as houston's uid with every mount, Mission Control's `HOUSTON_RUNNERS` / `RAILS_MAX_THREADS`; a rerun keeps them running | `install/test/orbstack.sh` (new checks) | Contract, Re-entry |
+| 3 | **VM (`install/test/runner-e2e.sh`):**<br>- a project linked to a private Forgejo repo (the spike fixture plus `commands.test`)<br>- Check for changes → queued → a runner claims it → step 00 runs the tests → GO, the app served through kamal-proxy<br>- Mission Control's record names the runner, and its log has the tests' output<br>- the strip shows RUNNERS 2/2 | `install/test/runner-e2e.sh` | Parity |
+| 4 | VM: a signed webhook (to `hooks.houston.test`) after a new commit → a runner deploys the new SHA (`KAMAL_VERSION`) | same | Parity |
+| 5 | VM: a commit whose tests exit 3 → NO-GO "tests failed (exit 3)", the previous version serving | same | Crash & repair |
+
+### Done (Batch 5)
+- **Row 1:** `TestSweepRemovesOnlyStaleTestProjects` went red, then green. It removes only an all-old `-test-<8 hex>` project; young ones, mixed-age ones, `-test-dev` and ordinary projects are untouched; a docker error is logged.
+- **Rows 3–5, `install/test/runner-e2e.sh` on Ubuntu 24.04: RUNNER PASS.**
+  - A private Forgejo repo (the spike fixture plus `commands.test`) was linked with Mission Control's own models.
+  - Check for changes → deploy #1 GO, claimed by `houston-runner-1`, with step 00's `houston test` project in its log. kamal-proxy serves the commit, and the secret reached the app.
+  - RUNNERS 2/2 were polling.
+  - A push plus a signed webhook to `hooks.houston.test` → #2 GO, serving the new commit.
+  - `commands.test: exit 3` → #3 NO-GO "tests failed (exit 3)", with #2's commit still serving.
+- **Found by the VM runs (neither was visible to the unit tests):**
+  1. `compose create` ran before the new runner image was built, so compose tried to pull `houston/runner:local` from Docker Hub. The image and workspaces are now built first, and the service is `pull_policy: never`.
+  2. Every deploy's tests failed with exit 1. The runner's `HOME` is `/home/houston`, but only `~/.ssh` is mounted under it, so the Docker CLI (running as houston) couldn't create `~/.docker` for buildx, and `docker compose run --build` failed. Each runner now has `DOCKER_CONFIG` in its own workspace, and the kept VM shows buildx's state there. The check now prints a failed deploy's log.
+- **Row 2** (installer checks in `orbstack.sh`) runs with Batch 8's full check.
+
+## Batch 6: Live deploy page
+
+### Design (short)
+- **Turbo Streams over Solid Cable** (already configured). The deploy page subscribes with `turbo_stream_from deploy` (a signed stream name; Action Cable's connection already requires the signed-in session, `ApplicationCable::Connection`).
+- **Mission Control broadcasts from the deploy API** after each accepted report commits:
+  - a log chunk → **append** to `#deploy_log`, as escaped text (a chunk dropped by the 4 MiB cap isn't broadcast)
+  - a step or status change → **replace** `#deploy_steps` and `#deploy_status` (the chip, the NO-GO reason, the still-serving notice)
+  - queued → in flight (claim) → a replace too, so a page opened on a queued deploy wakes up
+  - The 3-second refresher on the deploy page goes; the board and project pages keep theirs.
+- **Follow** (on by default): a Stimulus controller keeps the log scrolled to the end as chunks arrive, and stops when you scroll up. **Copy log** uses the clipboard controller. (The DeployLog board.)
+- **`/cable` on `hooks.<base>`** is already a 404 (Batch 2's lockdown). The admin host and the LAN address are same-origin, which Action Cable allows by default.
+
+### AC ↔ test map (Batch 6)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The deploy page carries a signed `turbo-cable-stream-source` for the deploy, and no refresher | `controllers/deploy_pages_test.rb` | Contract |
+| 2 | A report with a log chunk broadcasts one append to `deploy_log`; a chunk containing `<script>` is escaped in the broadcast | `integration/api_deploys_test.rb` `test "progress is broadcast"` | Contract (hostile input) |
+| 3 | A step change and the finish broadcast replacements of `deploy_steps` and `deploy_status`; a refused report (409/403) broadcasts nothing | same | Contract, Authz |
+| 4 | A chunk past the cap isn't broadcast; the one that crosses it broadcasts its cut part and the marker | `test "the log is capped"` (extended) | Scale |
+| 5 | A claim broadcasts the queued → in-flight change | `integration/api_claims_test.rb` (extended) | Contract |
+| 6 | The Follow controller: auto-scroll on append while at the bottom, off once scrolled up (real browser, a throwaway page) | manual check in the browser pane | Contract |
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.

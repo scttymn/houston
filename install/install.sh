@@ -15,6 +15,8 @@ IMAGE="houston/mission-control:local"
 CLOUDFLARED_IMAGE="cloudflare/cloudflared:2026.9.1"
 KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0"
 REGISTRY_IMAGE="registry:3"
+RUNNER_IMAGE="houston/runner:local"
+RUNNERS="${HOUSTON_RUNNERS:-2}"
 
 say() { printf '%s\n' "$*"; }
 compose() { docker compose -f "$HOUSTON_DIR/compose.yml" "$@"; }
@@ -132,8 +134,45 @@ install_cli() {
   docker pull --quiet "$KAMAL_IMAGE" >/dev/null
 }
 
+# One service per runner. Paths the runner hands to the host's docker (its
+# workspace, houston's ~/.ssh) are mounted at the same path.
+runner_services() {
+  i=1
+  while [ "$i" -le "$RUNNERS" ]; do
+    name="houston-runner-$i"
+    cat <<RUNNER
+  $name:
+    image: $RUNNER_IMAGE
+    pull_policy: never
+    restart: unless-stopped
+    user: "$houston_uid:$houston_gid"
+    group_add:
+      - "$docker_gid"
+    environment:
+      HOME: $houston_home
+      HOUSTON_URL: http://mission-control:80
+      HOUSTON_TOKEN: \${HOUSTON_RUNNER_TOKEN}
+      # Only ~/.ssh is mounted under HOME, so docker keeps its state in the workspace.
+      DOCKER_CONFIG: /var/lib/houston/runners/$name/.docker
+    command: ["houston", "runner", "--name", "$name", "--workspace", "/var/lib/houston/runners/$name"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/houston:/usr/local/bin/houston:ro
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+      - $houston_home/.ssh:$houston_home/.ssh:ro
+      - /var/lib/houston/runners/$name:/var/lib/houston/runners/$name
+
+RUNNER
+    i=$((i + 1))
+  done
+}
+
 write_compose() {
   docker_gid=$(getent group docker | cut -d: -f3)
+  houston_uid=$(id -u houston)
+  houston_gid=$(id -g houston)
+  houston_home=$(getent passwd houston | cut -d: -f6)
   step "Writing $HOUSTON_DIR/compose.yml"
   cat >"$HOUSTON_DIR/compose.yml" <<EOF
 # Written by the Houston installer; rerunning it rewrites this file.
@@ -148,6 +187,9 @@ services:
       RAILS_ENV: production
       SOLID_QUEUE_IN_PUMA: "1"
       HOUSTON_TUNNEL_TOKEN_PATH: /houston/tunnel-token
+      HOUSTON_RUNNERS: "$RUNNERS"
+      # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
+      RAILS_MAX_THREADS: "8"
     ports:
       - "3000:80"
     group_add:
@@ -179,6 +221,7 @@ services:
     volumes:
       - registry-data:/var/lib/registry
 
+$(runner_services)
 volumes:
   mission-control-storage:
   houston-config:
@@ -194,6 +237,13 @@ start() {
   docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
   step "Building Mission Control from $HOUSTON_SOURCE"
   docker build --quiet --target production -t "$IMAGE" "$HOUSTON_SOURCE/mission_control" >/dev/null
+  step "Building the runner image"
+  docker build --quiet -t "$RUNNER_IMAGE" -f "$HOUSTON_SOURCE/install/runner.Dockerfile" "$HOUSTON_SOURCE/install" >/dev/null
+  i=1
+  while [ "$i" -le "$RUNNERS" ]; do
+    install -d -m 750 -o houston -g houston /var/lib/houston /var/lib/houston/runners "/var/lib/houston/runners/houston-runner-$i"
+    i=$((i + 1))
+  done
   compose create --quiet-pull >/dev/null 2>&1 || compose create
   # Mission Control (uid 1000) writes the tunnel token for cloudflared here.
   docker run --rm --user root --entrypoint chown -v houston_houston-config:/houston "$IMAGE" 1000:1000 /houston

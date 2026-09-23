@@ -6,9 +6,12 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,6 +39,7 @@ type Runner struct {
 	Git       Git
 	Deploy    func(ctx context.Context, o deploy.Options) int
 	Sleep     func(ctx context.Context, d time.Duration)
+	Docker    Docker // for the sweep; nil skips it
 	// Base is what every deploy gets (arch, SSH dir, environment, output,
 	// the houston binary); File, Ref, Claimed and RunTests come per job.
 	Base deploy.Options
@@ -45,7 +49,12 @@ type Runner struct {
 // being fixed) is retried with backoff, never fatal.
 func (r *Runner) Run(ctx context.Context) error {
 	backoff := time.Second
+	var swept time.Time
 	for ctx.Err() == nil {
+		if r.Docker != nil && time.Since(swept) >= time.Hour {
+			Sweep(r.Docker, time.Now(), r.Base.Stderr)
+			swept = time.Now()
+		}
 		if _, err := r.RunOnce(ctx); err != nil {
 			r.logf("%s: can't claim work: %v; trying again in %s\n", r.Name, err, backoff)
 			r.Sleep(ctx, backoff)
@@ -144,4 +153,60 @@ func Sleep(ctx context.Context, d time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(d):
 	}
+}
+
+// Docker is the docker CLI, for the sweep.
+type Docker interface {
+	Output(args ...string) ([]byte, error)
+}
+
+var testProject = regexp.MustCompile(`-test-[0-9a-f]{8}$`)
+
+// StaleAfter is how old a test project's containers must all be before the
+// sweep removes it. Runners share one daemon, so a younger one may be the
+// other runner's test in progress; a deploy's deadline is 30 minutes.
+const StaleAfter = 2 * time.Hour
+
+// Sweep removes compose projects houston test left behind (a runner killed
+// mid-test): <name>-test-<8 hex> whose containers are all older than
+// StaleAfter. Nothing else is ever touched; problems are only logged.
+func Sweep(d Docker, now time.Time, log io.Writer) {
+	out, err := d.Output("compose", "ls", "--all", "--format", "json")
+	if err != nil {
+		fmt.Fprintf(log, "houston runner: can't list compose projects to sweep: %v\n", err)
+		return
+	}
+	var projects []struct{ Name string }
+	if err := json.Unmarshal(out, &projects); err != nil {
+		fmt.Fprintf(log, "houston runner: can't read docker compose ls: %v\n", err)
+		return
+	}
+	for _, p := range projects {
+		if !testProject.MatchString(p.Name) || !allOlderThan(d, p.Name, now.Add(-StaleAfter)) {
+			continue
+		}
+		if _, err := d.Output("compose", "-p", p.Name, "down", "-v", "--rmi", "local", "--remove-orphans"); err != nil {
+			fmt.Fprintf(log, "houston runner: couldn't remove stale test project %s: %v\n", p.Name, err)
+			continue
+		}
+		fmt.Fprintf(log, "houston runner: removed %s, a test project left behind over %s ago\n", p.Name, StaleAfter)
+	}
+}
+
+func allOlderThan(d Docker, project string, cutoff time.Time) bool {
+	out, err := d.Output("ps", "-a", "--filter", "label=com.docker.compose.project="+project, "--format", "{{.CreatedAt}}")
+	if err != nil {
+		return false
+	}
+	text := strings.TrimSpace(string(out))
+	if text == "" {
+		return false
+	}
+	for _, c := range strings.Split(text, "\n") {
+		t, err := time.Parse("2006-01-02 15:04:05 -0700 MST", strings.TrimSpace(c))
+		if err != nil || t.After(cutoff) {
+			return false
+		}
+	}
+	return true
 }
