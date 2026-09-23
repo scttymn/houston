@@ -497,6 +497,34 @@ The second cold pass found two wrong assumptions in the first round's fixes. Eac
 - **A promise from Batch 3, kept late:** generation g+1's container names (`equip-db-g2`, …) are claimed when the restore is asked for, before any exists. A project owning one refuses the restore with its name. The real sync after the switch keeps them and releases g's. It was found while writing these notes, not by a test, so both mutations (not refused, not claimed) were run and caught.
 - **Known, deferred:** `Docker.Output` takes no context, so a hung Docker daemon during cleanup keeps a restore in flight past its deadline (the heartbeat still beats). It needs a context on every Docker call, runner-wide, which is its own change. A long restore's data progress is on its backup run, not in the deploy log. There's no cancelling a restore.
 
+## Batch 7: The real run
+
+### What it runs
+- **`install/test/restore-e2e.sh`** on a fresh OrbStack machine (wildcard mode, nothing through the tunnel).
+  - Forgejo is the git host, and runners deploy and restore.
+  - The spike fixture has Postgres (a hostile database name lives in `backups-e2e.sh`), a data volume placed on the machine's own NFS export, and a SQLite database in it.
+  - A poller asks kamal-proxy for the app five times a second through every restore.
+  - With `EQUIP_SOURCE` (a Houston-ready copy, never the repo), `restore-e2e-equip.sh` does the same for equip.
+- **`maintenance-through-tunnel.sh`** (a stage of `orbstack.sh`) now checks a project's own maintenance page through the real tunnel, beside the default one with the app's containers stopped.
+
+### Done (Batch 7)
+- **RESTORE PASS**, on the committed Batch 6 code:
+  - **The zero-downtime restore:** all 150 requests during restore #3 answered 200, and the last came from the snapshot's commit. Postgres, and SQLite on NFS, said "one" again. Generation 2's data volume was on vm-nfs, in `volumes/spike.g2/data`. Generation 1's Postgres and volumes were gone, and so was its NFS directory's content. The safety snapshot was listed as "before a restore".
+  - **A failed restore:** #4's snapshot was gone by the time its data was restored. It went NO-GO at its data. All 81 requests answered 200 from the version serving. Generation 3 was removed, and generation 2's data was untouched.
+  - **The maintenance page, through a restore:** Mission Control answered the app's hostname with its page on all 95 requests during restore #5, and after it. Maintenance stayed on until turned off.
+  - **Going back with the safety snapshot, its image pruned from the host and the registry:** restore #5 rebuilt the image and went GO. All 229 requests answered 200. The data was "two" again, at the commit that had served.
+  - **A relinked repo without the commit:** refused ("not our ref"), with nothing queued.
+  - **equip:** its SQLite was restored at the very commit serving (Kamal renames the running container of that version). All 161 requests to `/up` answered 200, "one" came back, and generation 1's volume was gone. The master key went from a private temp directory into `houston secrets set`'s stdin; its value isn't in the log (checked).
+- **`orbstack.sh ubuntu:noble` on the committed code: PASS (81 checks).** That includes the project's own maintenance page through the real tunnel (its name and message filled in, not the default page) and the deploy-through-tunnel settle fix. The test tunnel and its DNS records were removed afterwards; `equip.svnmns.com` still answered 200.
+- **Found by the real run:** the claim dropping a restore's fields (fixed in Batch 6, red first). Also two bugs in my own script: a helper kept only the last line of a multi-line log or error.
+- **Not run for real, and why:** a switch that fails or is killed mid-way needs Kamal to fail after kamal-proxy switched, or to die in a sub-second window. Both are covered by unit tests against the proxy's real `list` output (colors included) and Kamal 2.12's source (`boot.rb`, `role.rb`), not staged on a machine.
+
+## Later (named, not built)
+- **A restore whose commit is gone from the repo** (history rewritten): fall back to its image and the compose.yml kept with a deploy. Today it's refused before anything happens.
+- **`houston init`** writing a starter maintenance page.
+- **Console through `cloudflared access ssh`.**
+- **Every runner Docker call under a context**, so a hung Docker daemon can't keep a deploy or restore in flight past its deadline. A restore's data progress in the deploy log. Cancelling a restore.
+
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
 2. **A restore uses the project's linked repo.** Answered: "Every app will have a linked repo, so I assume it would use the same repo." The runner fetches the snapshot's commit from it with the project's deploy key, as a deploy does. A project without a repo (only ever deployed by hand) can't be restored until it's linked, and the Restore button says so. That's an edge, not the normal path.

@@ -3,7 +3,7 @@
 # the agent stage (its houston-agent-test app is serving): Houston's own
 # maintenance page, routed at the real tunnel. Times how long Cloudflare
 # takes to route the app's hostname to Mission Control and back, and shows
-# the page stays up with the app's containers stopped.
+# the page stays up with the app's containers stopped, and a project's own.
 #
 #   install/test/maintenance-through-tunnel.sh <machine> <base domain>
 # shellcheck disable=SC2015 # ok/bad return 0
@@ -46,6 +46,15 @@ vm sh -c "docker ps -q --filter label=service=$app | xargs -r docker stop" >/dev
 settle 503 "$url/up"
 curl -s --max-time 10 "$url/" | grep -q "is down for maintenance" && ok "the page stays up with the app's containers stopped" || bad "the app's containers stopped: no page"
 vm sh -c "docker ps -aq --filter label=service=$app | xargs -r docker start" >/dev/null
+
+# A project's own page (x-houston.maintenance, stored as sync stores it),
+# through the same route: placeholders filled, the message escaped.
+vm docker compose -f /opt/houston/compose.yml exec -T mission-control bin/rails runner \
+  "Project.find_by!(name: '$app').update!(maintenance_page: '<html><body><h1>{{project}}: our own page</h1><p>{{message}}</p></body></html>')" >/dev/null 2>&1
+body=$(curl -s --max-time 10 "$url/")
+printf '%s' "$body" | grep -q "$app: our own page" && printf '%s' "$body" | grep -q "Back by 10:00" && ! printf '%s' "$body" | grep -q "is down for maintenance" &&
+  ok "the project's own page, through the tunnel" || bad "own page: $(printf '%s' "$body" | head -c 300)"
+vm docker compose -f /opt/houston/compose.yml exec -T mission-control bin/rails runner "Project.find_by!(name: '$app').update!(maintenance_page: nil)" >/dev/null 2>&1
 
 out=$(houston maintenance off --project "$app" 2>&1)
 printf '%s' "$out" | grep -q "no maintenance page" && ok "houston maintenance off" || bad "off: $out"
