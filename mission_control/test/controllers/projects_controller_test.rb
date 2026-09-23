@@ -137,6 +137,17 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "the header counts runners" do
+    stub_tunnel
+    Runner.create!(name: "houston-runner-1", last_seen_at: 10.seconds.ago)
+    Runner.create!(name: "houston-runner-2", last_seen_at: 5.minutes.ago)
+    ENV["HOUSTON_RUNNERS"] = "2"
+    get root_path
+    assert_select ".status", /RUNNERS\s*1\/2/
+  ensure
+    ENV.delete("HOUSTON_RUNNERS")
+  end
+
   test "the pre-flight checks the route to hooks.<base>" do
     stub_tunnel
     get root_path

@@ -10,6 +10,10 @@
       <div class="mono status">
         <span>TUNNEL <%= status_word(tunnel.go?) %></span>
         <span>REGISTRY <%= status_word(SystemStatus.registry_up?) %></span>
+        <% if (expected = ENV["HOUSTON_RUNNERS"].to_i).positive? %>
+          <% live = Runner.live_count %>
+          <span>RUNNERS <span class="<%= live >= expected ? "status__go" : "status__nogo" %>"><%= live %>/<%= expected %></span></span>
+        <% end %>
         <span class="status__clock"><%= Time.now.utc.strftime("%H:%M UTC") %></span>
       </div>
     <% end %>

@@ -19,6 +19,7 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_select ".state", /IN FLIGHT/
     assert_select "body", /bbbbbbb/
     assert_select "body", /aaaaaaa is still serving/
+    assert_select ".deploy-steps li:first-child[data-step=Test]", /00/
     assert_select ".deploy-steps [data-step=Secrets][data-state=done]"
     assert_select ".deploy-steps [data-step=Build][data-state=current]"
     assert_select ".deploy-steps [data-step=Deploy][data-state=pending]"
@@ -43,5 +44,16 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_select "pre.log", /<script>alert/
     assert_select ".deploy-steps [data-step=Release][data-state=failed]"
     assert_select "body", /release hook failed \(exit 3\)/
+  end
+
+  test "a runner's deploy starts with its tests" do
+    make_deploy(@project, 1, "in_flight", step: "Test").update!(runner: "houston-runner-1")
+    get project_deploy_path("equip", 1)
+    assert_select ".deploy-steps [data-step=Test][data-state=current]"
+    assert_select ".deploy-steps [data-step=Secrets][data-state=pending]"
+
+    make_deploy(@project, 2, "go")
+    get project_deploy_path("equip", 2)
+    assert_select ".deploy-steps [data-step=Test][data-state=skipped]", /SKIPPED/
   end
 end

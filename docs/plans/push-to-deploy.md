@@ -27,13 +27,12 @@ Link a repo in Mission Control, and every push the deploy rule matches is deploy
    - the webhook secret shown until the first verified delivery, then rotatable
    - `git ls-remote` against the deploy rule; queued deploys coalescing to the newest SHA
    - the Check for changes button, and the `hooks.<base>` probe on the flight board
-3. **Runners and the queue:**
-   - the claim API (long poll) and `houston runner`: fetch with the deploy key, step 00 `houston test`, `houston deploy` with the claimed deploy
-   - the runner image, and two runners in the installer (same-path workspace mounts)
-   - sweeping stale test projects; RUNNERS n/m in the strip
-4. **Live deploy page:** log and steps streamed; step 00 shown.
-5. **Custom-domain DNS:** zones found by suffix, proxied CNAMEs with `managed-by:houston project:<name>`, the states WILDCARD / DNS OK / DNS PENDING / ZONE NOT IN CLOUDFLARE YET, and owned records no project uses removed.
-6. **Real run on svnmns.com:** a push to a git host → a webhook through Cloudflare → a runner deploys it; a custom domain in a zone that isn't in Cloudflare shows its state.
+3. **Claiming queued deploys** (Mission Control): the claim API (long poll), one runner per deploy, stale takeover at claim, the runner registry and RUNNERS n/m, and "Test" as step 00.
+4. **`houston runner`** (Go): claim → fetch with the deploy key (Mission Control's recorded host keys only) → step 00 `houston test` → `houston deploy` on the claimed deploy; backoff when Mission Control is away; `houston deploy` refusing to run as anyone but the houston user.
+5. **Runner containers:** the image, two runners in the installer (same-path workspace mounts, the host's CLI, houston's uid, the socket), sweeping stale test projects; proven on a VM (Check for changes → a runner deploys from Forgejo).
+6. **Live deploy page:** log and steps streamed.
+7. **Custom-domain DNS:** zones found by suffix, proxied CNAMEs with `managed-by:houston project:<name>`, the states WILDCARD / DNS OK / DNS PENDING / ZONE NOT IN CLOUDFLARE YET, and owned records no project uses removed.
+8. **Real run on svnmns.com:** a push to Forgejo → a webhook through Cloudflare → a runner deploys it; a custom domain in a zone that isn't in Cloudflare shows its state.
 
 ## Batch 1: Link a repo
 
@@ -189,6 +188,54 @@ Work under the lock: only deploys + projects rows; git ls-remote runs before the
 - **Mutations, each caught:** the hooks host serving other routes; any signature accepted; `seen_refs` never saved; no coalescing (the unique index raises); annotated tags deploying the tag object instead of the commit; `webhook_verified_at` moving on every push.
 - **Visual check:** a linked project's page, with Connect pushes (the URL, the secret until the first push, Check for changes, Rotate secret) and a QUEUED deploy, at 1440 px. A queued deploy's duration shows "—".
 - **Queued deploys wait for Batch 3's runners.** Until then, the page shows them as QUEUED.
+
+## Batch 3: Claiming queued deploys
+
+### Design (short)
+- **`POST /api/runner/jobs/claim`** `{runner, wait}` (runner token, never through the tunnel, as in step 3's API).
+  - `runner` must match `^houston-runner-\d+$`. `wait` is seconds, 0–25, default 25: a long poll that checks every second.
+  - In one IMMEDIATE transaction:
+    - Finish any stale in-flight deploy (no heartbeat for 2 minutes) as abandoned, as `Deploy.start!` does.
+    - Pick the oldest queued deploy whose project has no in-flight deploy.
+    - Flip it to `in_flight` with a fresh token (digest stored), `heartbeat_at` now, and `runner` set, using `update_all … WHERE status = 'queued'`. It's claimed only if that updated one row.
+  - **Response 200:**
+    - `deploy {id, number, token, sha, ref, took_over}`
+    - `project {name, repo_url, branch, compose_path, deploy_key}`
+    - `known_hosts`: the lines Mission Control recorded for the repo's host (`ssh-keygen -F`), empty for HTTPS
+  - Nothing to claim within `wait` → 204.
+- **The runner registry:** `runners (name unique, last_seen_at)`, touched on every claim call.
+  - The header strip shows **RUNNERS n/m**: n seen in the last 60 s, m = `HOUSTON_RUNNERS` (the installer sets it; unset → the item isn't shown).
+- **`Deploy::STEPS`** gains **Test** first ("Run tests" as step 00, spec §13). `houston runner` reports it; a hand `houston deploy` skips it.
+- **The deploy key over the local API:** the runner token already reads secrets there. The key goes only to a claim, which proves the runner token, and never through the tunnel.
+
+### At-least-once / ownership template (claim)
+```text
+Enqueue site: Deploy.queue! (ChangeCheck)
+Exclusive claim: UPDATE deploys SET status='in_flight', token_digest=… WHERE id=? AND status='queued' (1 row = ours), inside BEGIN IMMEDIATE
+Enter preconditions: status queued, and the project has no fresh in_flight deploy (stale ones are finished first, same transaction)
+Duplicate delivery: two runners claim at once → each deploy is handed out once (row count check)
+Process kill mid-work: heartbeat stops → the next claim finishes it as abandoned after 2 min and hands the queued one out with took_over (Kamal's lock released by the runner)
+Ownership at finalize: unchanged from step 3 (token + in_flight checked in the writing transaction)
+Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (Batch 4)
+```
+
+### AC ↔ test map (Batch 3)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | A claim hands out the oldest queued deploy: 200 with deploy (token ≥ 43 chars, digest stored), project (repo, branch, compose path, deploy key) and known_hosts; the deploy is in flight with `runner` and `heartbeat_at` | `integration/api_claims_test.rb` `test "a runner claims the oldest queued deploy"` | Contract |
+| 2 | Nothing queued → 204 after `wait` (0 in tests); a project with a fresh in-flight deploy keeps its queued one back while another project's is handed out | `test "nothing to claim"` | Preconditions |
+| 3 | A stale in-flight deploy is finished as abandoned, and its project's queued deploy is handed out with `took_over` | `test "a silent runner's deploy is taken over at claim"` | Crash & repair |
+| 4 | The flip is conditional: `Deploy.claim!` on a deploy that stopped being queued (claimed by another runner between the pick and the update) returns nil and changes nothing | `models/deploy_test.rb` `test "a deploy is claimed once"` | Concurrency (TOCTOU) |
+| 5 | A bad runner name, `wait` > 25 or negative → 422; no token → 401; `Cf-Ray` → 404; nothing claimed | `test "claims are guarded"` | Authz, Contract |
+| 6 | Runners are recorded; the strip shows RUNNERS 1/2 with one seen in the last minute and `HOUSTON_RUNNERS=2`; no item when unset | `controllers/projects_controller_test.rb` `test "the header counts runners"` | Signals |
+| 7 | known_hosts: an SSH repo's host lines from `storage/known_hosts`; HTTPS → empty | `models/git_remote_test.rb` `test "the recorded host keys for a repo"` | Contract |
+| 8 | Steps: Test is step 00; a claimed deploy at Test shows Test current and the rest pending | `controllers/deploy_pages_test.rb` (extended) | Contract |
+
+### Done (Batch 3)
+- **Red:** all 8 rows failed (9 tests). **Green:** 122 runs. The migration runs down and up, and rubocop is clean on the touched files.
+- **Mutations, each caught:** the flip without its `status = 'queued'` condition (row 4); a busy project's queued deploy handed out (row 2); silent deploys never taken over at claim (row 3); every recorded host key handed to a runner (row 7).
+- **A choice made on the way:** a deploy run by hand has no runner and never runs step 00, so its page shows Test as **SKIPPED**, not DONE.
+- **Deploy note for Batch 5:** a claim long-polls for up to 25 s on a Puma thread. Rails' default is 3 threads (`RAILS_MAX_THREADS`), so two idle runners would hold two of them, and the UI and webhooks would share the last. The installer must raise `RAILS_MAX_THREADS`; the SQLite pool follows it (`database.yml`).
 
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.

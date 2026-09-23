@@ -242,7 +242,7 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .deploy-steps [data-state=done] .step__state { color: var(--go-fg); }
 .deploy-steps [data-state=current] .step__state { color: var(--link); }
 .deploy-steps [data-state=failed] .step__state { color: var(--nogo-fg); }
-.deploy-steps [data-state=pending] { color: var(--muted); }
+.deploy-steps [data-state=pending], .deploy-steps [data-state=skipped] { color: var(--muted); }
 .log-panel { flex: 1 1 0; min-width: 0; }
 .log { margin: 0; padding: 16px 20px; max-height: 70vh; overflow: auto; background: var(--ink); color: var(--on-dark); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 720px) {

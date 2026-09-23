@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_120000) do
   create_table "deploys", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "error"
@@ -20,6 +20,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_110000) do
     t.integer "number", null: false
     t.integer "project_id", null: false
     t.string "ref", null: false
+    t.string "runner"
     t.string "sha", null: false
     t.string "status", default: "in_flight", null: false
     t.string "step"
@@ -88,6 +89,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_110000) do
     t.string "preview_sha"
     t.string "repo_url", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "runners", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_runners_on_name", unique: true
   end
 
   create_table "secrets", force: :cascade do |t|

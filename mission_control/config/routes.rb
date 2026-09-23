@@ -28,6 +28,7 @@ Rails.application.routes.draw do
     get "projects/:name/secrets/:key", to: "secrets#show", constraints: { key: %r{[^/]+} }
     post "projects/:name/deploys", to: "deploys#create"
     patch "deploys/:id", to: "deploys#update"
+    post "runner/jobs/claim", to: "runner_jobs#claim"
   end
 
   # Add project (at /link, so no project name can shadow it).

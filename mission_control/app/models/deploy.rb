@@ -32,16 +32,18 @@ class Deploy < ApplicationRecord
   # Everything but the log, which can be megabytes: for lists.
   scope :summary, -> { select(column_names - [ "log" ]) }
 
-  # houston deploy's steps, in order (internal/deploy).
-  STEPS = %w[Secrets Build Accessories Release Deploy Post-deploy].freeze
+  # houston deploy's steps (internal/deploy), after houston runner's Test (step 00).
+  STEPS = %w[Test Secrets Build Accessories Release Deploy Post-deploy].freeze
   def short_sha = sha.first(7)
 
-  # Each step as :done, :current, :failed or :pending.
+  # Each step as :done, :current, :failed, :pending, or :skipped (a hand
+  # houston deploy runs no tests).
   def step_states
     return STEPS.index_with(:pending) if status == "queued"
-    at = STEPS.index(step) || 0
+    at = STEPS.index(step) || (runner ? 0 : 1)
     STEPS.each_with_index.to_h do |name, i|
-      state = if status == "go" || i < at then :done
+      state = if name == "Test" && runner.nil? then :skipped
+      elsif status == "go" || i < at then :done
       elsif i > at then :pending
       elsif status == "no_go" then :failed
       else :current
@@ -65,9 +67,7 @@ class Deploy < ApplicationRecord
       took_over = nil
       if (current = project.deploys.in_flight.first)
         raise Busy, current if current.heartbeat_at > STALE_AFTER.ago
-        current.update!(status: "no_go", finished_at: Time.current,
-                        error: "abandoned: no word from houston deploy since #{current.heartbeat_at.utc.iso8601}")
-        took_over = current.number
+        took_over = current.abandon!
       end
       number = (project.deploys.maximum(:number) || 0) + 1
       deploy = project.deploys.create!(number:, sha:, ref:, token_digest: digest(token), heartbeat_at: Time.current)
@@ -88,6 +88,34 @@ class Deploy < ApplicationRecord
         project.deploys.create!(number:, sha:, ref:, status: "queued", token_digest: "", heartbeat_at: Time.current)
       end
     end
+  end
+
+  # Hands the oldest claimable queued deploy to runner: [deploy, token,
+  # the number it took over or nil], or nil. Silent in-flight deploys are
+  # finished first; a project with a live one keeps its queued deploy back.
+  def self.claim_next!(runner:)
+    transaction do
+      took_over = in_flight.where(heartbeat_at: ...STALE_AFTER.ago).to_h { |stale| [ stale.project_id, stale.abandon! ] }
+      candidate = where(status: "queued").where.not(project_id: in_flight.select(:project_id)).order(:created_at, :id).first
+      deploy, token = candidate && claim!(candidate, runner:)
+      deploy && [ deploy, token, took_over[deploy.project_id] ]
+    end
+  end
+
+  # Flips deploy from queued to in flight for runner, only if it's still
+  # queued (another runner may have had it since it was picked). Returns
+  # [deploy, token] or nil.
+  def self.claim!(deploy, runner:)
+    token = SecureRandom.urlsafe_base64(32)
+    claimed = where(id: deploy.id, status: "queued").update_all(status: "in_flight", runner:, token_digest: digest(token),
+                                                                 heartbeat_at: Time.current, updated_at: Time.current)
+    claimed == 1 ? [ deploy.reload, token ] : nil
+  end
+
+  # Finishes a silent in-flight deploy; returns its number.
+  def abandon!
+    update!(status: "no_go", finished_at: Time.current, error: "abandoned: no word from houston deploy since #{heartbeat_at.utc.iso8601}")
+    number
   end
 
   def owned_by?(token)

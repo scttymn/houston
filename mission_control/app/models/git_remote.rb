@@ -25,6 +25,21 @@ class GitRemote
   def self.known_hosts = ENV.fetch("HOUSTON_KNOWN_HOSTS", Rails.root.join("storage", "known_hosts").to_s)
   def self.houston_bin = ENV.fetch("HOUSTON_BIN", "houston")
 
+  # The host key lines recorded for a repo's SSH host (runners trust only
+  # these; they never accept a new key themselves). [] for HTTPS or an
+  # unseen host.
+  def self.known_hosts_for(repo_url)
+    spec = case repo_url
+    when %r{\Assh://(?:[^@/]+@)?([^:/]+):(\d+)/} then "[#{$1}]:#{$2}"
+    when %r{\Assh://(?:[^@/]+@)?([^:/]+)/} then $1
+    when %r{\A[^@/]+@([^:/]+):} then $1
+    end
+    return [] unless spec && File.exist?(known_hosts)
+
+    output, status = Open3.capture2e("ssh-keygen", "-F", spec, "-f", known_hosts)
+    status.success? ? output.lines.map(&:strip).reject { |l| l.empty? || l.start_with?("#") } : []
+  end
+
   # Can Houston read the repo, and does it have the branch?
   def self.check(link)
     with_key(link) do |env, key|

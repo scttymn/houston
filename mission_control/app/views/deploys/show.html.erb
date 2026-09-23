@@ -32,9 +32,9 @@
     <ol class="panel deploy-steps">
       <% @deploy.step_states.each_with_index do |(name, state), i| %>
         <li data-step="<%= name %>" data-state="<%= state %>">
-          <span class="mono"><%= format("%02d", i + 1) %></span>
+          <span class="mono"><%= format("%02d", i) %></span>
           <span><%= name %></span>
-          <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED", pending: "—" }.fetch(state) %></span>
+          <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED", pending: "—", skipped: "SKIPPED" }.fetch(state) %></span>
         </li>
       <% end %>
     </ol>

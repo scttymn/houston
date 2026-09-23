@@ -25,4 +25,20 @@ class DeployTest < ActiveSupport::TestCase
     assert_raises(ActiveRecord::RecordNotUnique) { Deploy.insert!(row.(equip, 2)) }
     Deploy.insert!(row.(other, 1))
   end
+
+  # Two runners can pick the same queued deploy; the conditional flip lets
+  # exactly one of them have it.
+  test "a deploy is claimed once" do
+    project = Project.create!(name: "equip", app_service: "app", services: %w[app], health: "/up", port: 80)
+    queued = Deploy.queue!(project, sha: "a" * 40, ref: "refs/heads/main")
+    seen_by_b = Deploy.find(queued.id)
+
+    deploy, token = Deploy.claim!(queued, runner: "houston-runner-1")
+    assert deploy
+    assert deploy.owned_by?(token)
+
+    assert_nil Deploy.claim!(seen_by_b, runner: "houston-runner-2")
+    assert_equal "houston-runner-1", queued.reload.runner
+    assert queued.owned_by?(token)
+  end
 end
