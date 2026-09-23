@@ -27,5 +27,9 @@ module Cloudflare
         @client.post("/zones/#{@zone}/dns_records", record)
       end
     end
+
+    def delete(record)
+      @client.delete("/zones/#{@zone}/dns_records/#{record["id"]}")
+    end
   end
 end

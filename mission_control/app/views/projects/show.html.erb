@@ -8,6 +8,7 @@
         <%= state_chip(@project.status) %>
         <% ([ @project.host(@installation) ] + @project.domains).each do |host| %>
           <%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
+          <%= render "projects/domain_state", project: @project, host: %>
         <% end %>
       </div>
     </div>

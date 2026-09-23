@@ -24,6 +24,7 @@ module Cloudflare
     def post(path, body) = request(Net::HTTP::Post, path, body:)
     def put(path, body) = request(Net::HTTP::Put, path, body:)
     def patch(path, body) = request(Net::HTTP::Patch, path, body:)
+    def delete(path) = request(Net::HTTP::Delete, path)
 
     private
       def request(verb, path, query: {}, body: nil)

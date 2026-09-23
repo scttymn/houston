@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_130000) do
   create_table "deploys", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "error"
@@ -62,6 +62,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_120000) do
     t.text "deploy_key_private"
     t.string "deploy_key_public"
     t.json "deploy_rule", default: {}, null: false
+    t.json "domain_states", default: {}, null: false
     t.json "domains", default: [], null: false
     t.string "health", null: false
     t.string "last_check_error"

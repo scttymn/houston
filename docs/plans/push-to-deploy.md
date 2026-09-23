@@ -341,6 +341,45 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
   - The first run of the last check failed because my script fired `change`, and Stimulus's default for an input is `input`. The view now binds `change->follow#toggle` explicitly, and a real `.click()` passes.
 - The deploy page no longer refreshes itself. The status (with the runner's name), the steps and the log arrive over Turbo Streams, and "Copy log" copies it.
 
+## Batch 7: Custom-domain DNS
+
+### Design (short)
+- **`DomainDns`**, run by sync after `<name>.<base>`. For each domain in `x-houston.domains`:
+  - **Under `<base>`** (`api.svnmns.com`): wildcard mode → **WILDCARD**, no record; host-by-host mode → a record, like `<name>.<base>`.
+  - **Otherwise**, find its zone: try `GET /zones?name=` for the domain, then each parent (`www.equipping.com` → `equipping.com`), never the TLD alone. No zone the token can see → **ZONE NOT IN CLOUDFLARE YET**, nothing written.
+  - **The record at the name:**
+    - none → create a proxied CNAME to the tunnel (an apex works through Cloudflare's CNAME flattening) with the comment `managed-by:houston project:<name>`
+    - this project's → update it
+    - another project's (`managed-by:houston project:<other>`) → **NO-GO** "belongs to project <other>"
+    - no Houston comment → **NO-GO** "a record Houston didn't create" (during a migration it may still point at the old server)
+    - Either NO-GO → nothing written.
+  - The state after a write: **DNS OK** when the zone is active, **DNS PENDING** when it's `pending` (nameservers not switched yet).
+  - A Cloudflare error → "can't check: <message>" for that domain; the rest carry on.
+- **States never fail the sync.** The app still deploys at `<name>.<base>`, and each domain moves over when its DNS is right. They're stored on the project (`domain_states`, domain → `{state, reason}`), returned in the sync response, and **`houston deploy` logs any that aren't DNS OK or WILDCARD**.
+- **Records no project uses:** a domain removed from `compose.yml` has its record deleted, but only a record at that name commented `managed-by:houston project:<this project>`. Unmanaged records and other projects' records are never touched.
+- **Pages:** the flight board's domains and the project page's hosts show each domain's state chip.
+
+### AC ↔ test map (Batch 7)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | A domain in an active zone → a CNAME to the tunnel with `managed-by:houston project:garage` (the exact body) → DNS OK | `integration/api_sync_test.rb` `test "custom domains get their records"` (table, WebMock contract stubs) | Contract |
+| 2 | Zone `pending` → record created, DNS PENDING | same | Contract |
+| 3 | `www.equipping.com` finds zone `equipping.com` via the parent lookup | same | Contract |
+| 4 | No zone → ZONE NOT IN CLOUDFLARE YET; no write | `test "domains Houston can't or mustn't point"` | Preconditions |
+| 5 | A record without the comment → NO-GO; another project's → NO-GO naming it; no write in either case; the sync still 200 | same | Authz (ownership), Contract |
+| 6 | This project's own record → updated (PATCH), DNS OK | `test "custom domains get their records"` | Re-entry |
+| 7 | A domain dropped from compose → this project's record deleted; an unmanaged or another project's record at that name untouched | `test "a dropped domain's record goes"` | Crash & repair |
+| 8 | A domain under `<base>`: wildcard mode → WILDCARD with no call; host-by-host → a record | `test "domains under the base domain"` | Contract |
+| 9 | A Cloudflare error on one domain → "can't check" for it, the next domain still pointed | `test "domains Houston can't or mustn't point"` | Signals |
+| 10 | The sync response has `domains`; `houston deploy` logs the ones that aren't DNS OK / WILDCARD | `internal/deploy` `TestDeployLogsDomainStates` | Signals |
+| 11 | The project page and the flight board show each domain's state | `controllers/project_pages_test.rb`, `projects_controller_test.rb` | Contract |
+
+### Done (Batch 7)
+- **Red:** the Rails rows failed (2 failures, 3 errors) and the Go row didn't compile. **Green:** Mission Control 129 runs and the Go suite. The migration runs down and up; rubocop and gofmt are clean.
+- **Mutations, each caught:** overwriting records Houston doesn't own for this project; deleting a dropped name's record whoever owns it; no parent-zone lookup (3 failures); a pending zone reported as DNS OK.
+- **Fallout:** the sync response gained `domains` (the "sync creates" test pins the full shape). Go's `SyncResult` holds a map now, so the client test compares it with `reflect.DeepEqual`.
+- **The real proof,** a domain in a zone that isn't in Cloudflare showing its state, is Batch 8's run on svnmns.com.
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.

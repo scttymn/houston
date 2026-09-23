@@ -81,7 +81,7 @@ func TestClientTalksToMissionControl(t *testing.T) {
 	res, err := c.Sync(ctx, SyncRequest{Name: "equip", AppService: "app", Services: []string{"app", "db"}, Domains: []string{},
 		Variables: []Variable{{Name: "RAILS_MASTER_KEY", Required: true}}, Health: "/up", Port: 80,
 		DeployRule: DeployRule{On: "commit", Branch: "main", Tags: "v*"}})
-	if err != nil || res != (SyncResult{Project: "equip", Host: "equip.svnmns.com", DNS: "per_host"}) {
+	if err != nil || !reflect.DeepEqual(res, SyncResult{Project: "equip", Host: "equip.svnmns.com", DNS: "per_host"}) {
 		t.Errorf("Sync = %+v, %v", res, err)
 	}
 	if v, ok, err := c.Secret(ctx, "equip", "RAILS_MASTER_KEY"); v != "k3y $HOME café" || !ok || err != nil {

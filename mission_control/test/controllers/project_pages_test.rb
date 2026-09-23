@@ -117,4 +117,10 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     get project_path("equip")
     assert_select ".webhook", 0
   end
+
+  test "domain states" do
+    @project.update!(domain_states: { "equipping.com" => { "state" => "DNS PENDING", "reason" => nil } })
+    get project_path("equip")
+    assert_select ".hosts", /equipping\.com\s*DNS PENDING/
+  end
 end

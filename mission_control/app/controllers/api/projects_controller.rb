@@ -9,10 +9,11 @@ class Api::ProjectsController < Api::BaseController
 
     project = sync.save!
     dns = sync.point_dns!
+    domains = sync.point_domains!
     if (missing = project.missing_secrets).any?
       return render json: { error: "HOLD: set #{missing.to_sentence} in Mission Control first", missing: }, status: :unprocessable_entity
     end
-    render json: { project: project.name, host: project.host, dns: }
+    render json: { project: project.name, host: project.host, dns:, domains: }
   rescue ProjectSync::Refused => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue Cloudflare::Error => e

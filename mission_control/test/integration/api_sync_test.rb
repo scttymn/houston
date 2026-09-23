@@ -10,7 +10,7 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     sync(equip_payload(variables: [ { name: "RAILS_MASTER_KEY", required: false }, { name: "SENTRY_DSN", required: false } ]))
 
     assert_response :success
-    assert_equal({ "project" => "equip", "host" => "equip.svnmns.com", "dns" => "wildcard" }, json)
+    assert_equal({ "project" => "equip", "host" => "equip.svnmns.com", "dns" => "wildcard", "domains" => {} }, json)
     project = Project.find_by!(name: "equip")
     assert_equal "app", project.app_service
     assert_equal %w[app db], project.services

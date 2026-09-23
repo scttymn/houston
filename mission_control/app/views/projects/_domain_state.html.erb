@@ -1,0 +1,3 @@
+<% if (state = project.domain_states[host]) %>
+  <small class="mono domain-state domain-state--<%= state["state"].parameterize %>" title="<%= state["reason"] %>"><%= state["state"] %></small>
+<% end %>

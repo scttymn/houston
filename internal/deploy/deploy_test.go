@@ -203,6 +203,7 @@ type fakeMission struct {
 	deploy    mission.Deploy
 	reports   []mission.Progress
 	reportErr func(p mission.Progress) error
+	domains   map[string]mission.DomainState
 }
 
 func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error) {
@@ -210,7 +211,7 @@ func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (missio
 	if m.syncErr != nil {
 		return mission.SyncResult{}, m.syncErr
 	}
-	return mission.SyncResult{Project: req.Name, Host: req.Name + ".svnmns.com", DNS: "per_host"}, nil
+	return mission.SyncResult{Project: req.Name, Host: req.Name + ".svnmns.com", DNS: "per_host", Domains: m.domains}, nil
 }
 
 func (m *fakeMission) Secret(ctx context.Context, project, key string) (string, bool, error) {
@@ -872,5 +873,26 @@ func TestDeployRunsTestsFirst(t *testing.T) {
 	h.claimed, h.tests = &claimed, true
 	if code := h.run(); code != 0 || len(h.exec.calls) != 0 || h.mission.reports[0].Step == "Test" {
 		t.Errorf("no commands.test: exit %d, exec %v, first step %q", code, h.exec.calls, h.mission.reports[0].Step)
+	}
+}
+
+func TestDeployLogsDomainStates(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.mission.domains = map[string]mission.DomainState{
+		"shop.example.com": {State: "DNS OK"},
+		"shop.app":         {State: "DNS PENDING"},
+		"legacy.shop.com":  {State: "NO-GO", Reason: "legacy.shop.com has a record Houston didn't create"},
+	}
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	log := h.mission.log()
+	for _, want := range []string{"shop.app: DNS PENDING", "legacy.shop.com: NO-GO (legacy.shop.com has a record Houston didn't create)"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log lacks %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "shop.example.com") {
+		t.Error("a domain that's fine isn't worth a log line")
 	}
 }

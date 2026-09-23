@@ -31,6 +31,7 @@ class ProjectSync
   def save!(link: nil)
     Project.transaction do
       @project = Project.find_or_initialize_by(name: @payload["name"])
+      @dropped_domains = @project.domains.to_a - @payload["domains"].to_a
       @project.update!(app_service: @payload["app_service"], services: @payload["services"], domains: @payload["domains"],
                        variables: @payload["variables"].map { |v| { "name" => v["name"], "required" => v["required"] == true } },
                        health: @payload["health"], port: @payload["port"], deploy_rule: @payload["deploy_rule"] || {},
@@ -54,6 +55,16 @@ class ProjectSync
     end
     records.point(name, @installation.tunnel_id, existing:, comment: "#{Cloudflare::Records::MANAGED} project:#{project.name}")
     "per_host"
+  end
+
+  # Custom domains: points each, removes the records of dropped ones, and
+  # stores the states. Returns domain → { state, reason }.
+  def point_domains!
+    dns = DomainDns.new(project, @installation)
+    @dropped_domains.to_a.each { |domain| dns.remove(domain) }
+    states = project.domains.reject { |d| d == project.host(@installation) }.index_with { |domain| dns.point(domain).to_h }
+    project.update!(domain_states: states)
+    states
   end
 
   private

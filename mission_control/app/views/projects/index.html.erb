@@ -62,7 +62,8 @@
               </td>
               <td class="flight__domains">
                 <% ([ project.host(@installation) ] + project.domains).each do |host| %>
-                  <%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
+                  <span><%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
+                  <%= render "projects/domain_state", project:, host: %></span>
                 <% end %>
               </td>
               <td>

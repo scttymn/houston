@@ -95,9 +95,17 @@ type SyncRequest struct {
 }
 
 type SyncResult struct {
-	Project string `json:"project"`
-	Host    string `json:"host"` // <name>.<base>
-	DNS     string `json:"dns"`
+	Project string                 `json:"project"`
+	Host    string                 `json:"host"` // <name>.<base>
+	DNS     string                 `json:"dns"`
+	Domains map[string]DomainState `json:"domains"`
+}
+
+// DomainState is a custom domain's DNS after a sync: DNS OK, DNS PENDING,
+// WILDCARD, ZONE NOT IN CLOUDFLARE YET, NO-GO, or CAN'T CHECK.
+type DomainState struct {
+	State  string `json:"state"`
+	Reason string `json:"reason"`
 }
 
 // Sync saves the project in Mission Control and points its DNS. A HOLD is a

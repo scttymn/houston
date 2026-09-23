@@ -165,6 +165,20 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	if dep.TookOver > 0 {
 		r.report.logf("Took over deploy #%d, which had gone silent.\n", dep.TookOver)
 	}
+	domains := make([]string, 0, len(synced.Domains))
+	for d := range synced.Domains {
+		domains = append(domains, d)
+	}
+	sort.Strings(domains)
+	for _, d := range domains {
+		if st := synced.Domains[d]; st.State != "DNS OK" && st.State != "WILDCARD" {
+			if st.Reason != "" {
+				r.report.logf("%s: %s (%s)\n", d, st.State, st.Reason)
+			} else {
+				r.report.logf("%s: %s\n", d, st.State)
+			}
+		}
+	}
 	return r.deploy(dep.TookOver > 0)
 }
 
