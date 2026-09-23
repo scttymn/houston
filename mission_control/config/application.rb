@@ -23,6 +23,13 @@ module MissionControl
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.1
 
+    # Active Record encryption keys come from the environment, never from
+    # credentials (config/master.key isn't part of Houston). The installer
+    # generates them; development and test use fixed, dev-only keys.
+    config.active_record.encryption.primary_key = ENV["AR_ENCRYPTION_PRIMARY_KEY"]
+    config.active_record.encryption.deterministic_key = ENV["AR_ENCRYPTION_DETERMINISTIC_KEY"]
+    config.active_record.encryption.key_derivation_salt = ENV["AR_ENCRYPTION_KEY_DERIVATION_SALT"]
+
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.

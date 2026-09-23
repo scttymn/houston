@@ -1,0 +1,59 @@
+<% content_for :title, "Connect Cloudflare · Mission Control" %>
+<% content_for :setup_step, "2" %>
+<% base = @setup.base_domain.presence || "example.com" %>
+
+<main class="setup">
+  <%= form_with model: @setup, scope: :cloudflare, url: setup_cloudflare_path, class: "setup__form" do |form| %>
+    <div class="setup__intro">
+      <span class="mono eyebrow eyebrow--signal">STEP 02 OF 03</span>
+      <h1 class="disp">Connect Cloudflare</h1>
+      <p>Houston routes every app through one Cloudflare tunnel. After this step, a new project is live at its own subdomain with no DNS work.</p>
+    </div>
+
+    <div class="field">
+      <%= form.label :base_domain, "Base domain" %>
+      <%= form.text_field :base_domain, class: "mono", placeholder: "example.com", autocomplete: "off", spellcheck: false, required: true, autofocus: true,
+            "aria-invalid": @setup.errors[:base_domain].any? %>
+      <% if @setup.errors[:base_domain].any? %>
+        <span class="field__error">Base domain <%= @setup.errors[:base_domain].to_sentence %>.</span>
+      <% end %>
+      <span class="field__hint">Apps get <span class="mono">&lt;name&gt;.<%= base %></span>. Mission Control moves to <span class="mono">admin.<%= base %></span>.</span>
+    </div>
+
+    <div class="field">
+      <%= form.label :api_token, "Cloudflare API token" %>
+      <%= form.password_field :api_token, class: "mono", autocomplete: "off", required: true %>
+      <span class="field__hint">Needs Account · Cloudflare Tunnel · Edit and Zone · DNS · Edit on the base domain.</span>
+      <% if @setup.checks.any? %>
+        <div class="checks" role="status">
+          <span class="mono eyebrow">TOKEN CHECK</span>
+          <% @setup.checks.each do |check| %>
+            <p class="check"><span class="mono check__state check__state--<%= check.ok ? "go" : "nogo" %>"><%= check.ok ? "GO" : "NO-GO" %></span><span><%= check.label %></span></p>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+
+    <div><%= form.submit "Create tunnel and continue", class: "button button--primary" %></div>
+  <% end %>
+
+  <aside class="panel setup__aside">
+    <h2 class="disp panel__title">What Houston will create</h2>
+    <div class="panel__row">
+      <span class="mono eyebrow">TUNNEL · REMOTELY MANAGED</span>
+      <span class="mono"><%= @setup.tunnel_name %></span>
+    </div>
+    <div class="panel__row">
+      <span class="mono eyebrow">INGRESS RULES</span>
+      <span class="rule"><span class="mono">admin.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control</span></span>
+      <span class="rule"><span class="mono">hooks.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control, webhook paths only</span></span>
+      <span class="rule"><span class="mono">everything else</span><span class="rule__arrow">→</span><span>Your apps, matched by hostname</span></span>
+    </div>
+    <div class="panel__row">
+      <span class="mono eyebrow">DNS RECORD</span>
+      <span><span class="mono">*.<%= base %></span> CNAME to the tunnel, proxied</span>
+      <span class="mono panel__row--muted">comment: managed-by:houston</span>
+    </div>
+    <p class="panel__row panel__row--muted">Then Houston connects this server to the tunnel. This setup rarely changes after today.</p>
+  </aside>
+</main>

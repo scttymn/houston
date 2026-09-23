@@ -117,6 +117,70 @@ Work under the lock: only the delete and the inserts (bcrypt runs before the tra
 - **Real run (row 12):** `houston dev`, then `houston console` running `bin/rails houston:setup_code` printed `NYWJ-J9U8`. The step-1 page rendered as designed in the in-app browser, with **no font or Google requests**. The form was submitted with curl (I don't type credentials into browsers): a wrong code got 422 with "Setup code doesn't match…", and the real code (lower case, no dash) got 302 to `/` and the home page. `/setup` is closed afterwards, and the task says "setup is complete" and exits 1.
 - **Fonts:** not added yet. They need downloading (Fontsource packages, SIL OFL), which waits for your OK. Until then there's a system-font fallback.
 
+## Batch 2: first-run step 2, Cloudflare
+
+### Design (short)
+- **Setup state:** a singleton `Installation` record holds `base_domain`, the Cloudflare account/zone/tunnel ids, `cloudflare_api_token` and `tunnel_token` (**Active Record encryption**), and `cloudflare_connected_at`. After the admin exists, a signed-in admin is sent to the next unfinished step (`/setup/cloudflare`; Batch 3 adds storage). Sign-out always works.
+- **Encryption keys come from the environment** (`AR_ENCRYPTION_*`). Dev and test use fixed dev-only keys. Production refuses to boot without real ones, which the installer generates (Batch 4). Nothing depends on `config/master.key`.
+- **Token check, reads only, before anything is created** (the design's TOKEN CHECK list; each row GO or NO-GO with a reason):
+  1. `GET /accounts`: exactly one account. None, or a 401, means the token isn't valid. Several means "make a token for just one account".
+  2. `GET /accounts/{id}/cfd_tunnel?per_page=1`: Tunnel access.
+  3. `GET /zones?name=<base>`, then `GET /zones/{zone}/dns_records?per_page=1`: DNS access on the base domain.
+  Edit rights can't be read without writing, so they're proven by the create steps, whose errors are shown as-is.
+- **Create, every step idempotent,** so a rerun finishes what failed:
+  1. **Tunnel** `houston-<first label of base>`: reuse one with that name (`GET …/cfd_tunnel?name=…&is_deleted=false`), else `POST …/cfd_tunnel {name, config_src: "cloudflare"}`.
+  2. **Tunnel token:** `GET …/cfd_tunnel/{id}/token`.
+  3. **Ingress:** `PUT …/cfd_tunnel/{id}/configurations`, in this order:
+     - `admin.<base>` → Mission Control
+     - `hooks.<base>` with `path ^/[a-z0-9-]+$` → Mission Control
+     - `hooks.<base>` → `http_status:404`
+     - everything else → kamal-proxy
+     The service URLs default to `http://mission-control:80` and `http://kamal-proxy:80`, with env overrides for Batch 4.
+  4. **Wildcard:** `*.<base>` CNAME → `<tunnel>.cfargotunnel.com`, proxied, comment `managed-by:houston`. An existing record with that comment is updated in place. **A record without it is never touched:** that's a NO-GO asking you to remove it.
+  5. Mark it connected and redirect. Starting cloudflared on the server with the token is Batch 4 (installer).
+- **HTTP:** `Cloudflare::Client` on Net::HTTP (10 s timeouts). Tests use WebMock with exact method, path, auth header and body expectations, and no real network.
+- **Page:** the design's SetupCloudflare board, with a live "What Houston will create" aside for the entered domain. No "Back": step 1 can't be redone once the admin exists.
+
+### Crash-gap template
+```text
+Durable steps: tunnel (Cloudflare) → token stored → ingress (Cloudflare) → DNS record (Cloudflare) → connected_at (DB)
+Dies between any two: Cloudflare has some of it; Mission Control isn't marked connected
+Retry: submit step 2 again
+Must still accomplish: everything, reusing what exists (tunnel by name, DNS record by managed-by comment)
+Must not block repair: no "tunnel already exists" failure; reuse it
+Never: modify or delete a DNS record without the managed-by:houston comment
+```
+
+### AC ↔ test map (Batch 2), `mission_control/test/…`
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | After step 1, signed-in pages lead to `/setup/cloudflare` until connected; sign-out still works; not signed in → sign-in | `integration/setup_gate_test.rb` `test "the admin is taken to the Cloudflare step"` | Preconditions, Authz |
+| 2 | `GET /setup/cloudflare` shows the step-2 form and the aside | `controllers/setup/cloudflare_controller_test.rb` `test "shows the Cloudflare form"` | Contract |
+| 3 | Happy path: the exact requests (tunnel POST body, ingress PUT body, DNS POST body with the comment); tokens stored encrypted (raw column ≠ token); connected; redirect `/` | `test "creates the tunnel, ingress and wildcard"` | Contract, Atomicity |
+| 4 | Check failures (401, no account, two accounts, tunnel 403, zone missing) → 422 with the NO-GO row, **no write requests** | `test "a failed token check creates nothing"` (table) | Preconditions, Signals |
+| 5 | Invalid base domain → 422, no requests | `test "the base domain must be a domain"` | Contract |
+| 6 | Rerun with the tunnel and our DNS record already there → no tunnel POST, the DNS record PATCHed to this tunnel, connected | `test "a rerun reuses what exists"` | Crash & repair, Re-entry |
+| 7 | A `*.<base>` record without `managed-by:houston` → NO-GO naming it, no PATCH/DELETE of it, not connected | `test "never touches a DNS record Houston didn't create"` | Contract |
+| 8 | Cloudflare 500 on the ingress PUT → 422 with Cloudflare's message, not connected; a rerun completes | `test "a Cloudflare error mid-way can be retried"` | Crash & repair, Signals |
+| 9 | Connected → `/setup/cloudflare` redirects to `/` | `test "the step closes once connected"` | Preconditions |
+| 10 | **Real Cloudflare (needs your token and a base domain):** the same flow against the real API; the tunnel, config and `*.<base>` record exist with the comment | manual check | Parity |
+
+### Done (Batch 2)
+- Red: the suite failed to load (`Setup`, `Installation` and the client didn't exist). Green: 30 runs, 0 failures. Request bodies are compared as parsed JSON (WebMock hashes), so key order isn't pinned.
+- Mutations: patching any existing `*.<base>` record was caught only by row 7; skipping the "all checks GO" gate was caught only by row 4.
+- Review: tokens encrypted at rest (asserted on the raw columns), not echoed back in forms, and filtered from logs by Rails' default `filter_parameters` (`token`). No required changes.
+- **Row 10 (real Cloudflare) is pending your token and base domain.**
+
+### Lens run (Batch 2)
+| Lens | Where |
+|---|---|
+| Contract | 2, 3, 5, 7 |
+| Preconditions / Authz | 1, 4, 9 |
+| Crash & repair / Re-entry | 6, 8 + template |
+| Signals | 4, 8: every failure names what's wrong and what to do |
+| Atomicity | 3: secrets are encrypted before they're stored |
+| Parity | 10: the real API (spec §14 lists this as a must-verify) |
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?

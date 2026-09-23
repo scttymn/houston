@@ -1,0 +1,5 @@
+# A finished setup, so most tests start past first-run. Tests about setup
+# delete it.
+current:
+  base_domain: svnmns.com
+  cloudflare_connected_at: <%= Time.current %>

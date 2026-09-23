@@ -40,4 +40,9 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # Dev/test-only encryption keys (production takes real ones from the environment).
+  config.active_record.encryption.primary_key ||= "dev-only-primary-key-not-for-production-use"
+  config.active_record.encryption.deterministic_key ||= "dev-only-deterministic-key-not-for-production"
+  config.active_record.encryption.key_derivation_salt ||= "dev-only-key-derivation-salt-not-for-production"
 end

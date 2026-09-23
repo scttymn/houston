@@ -22,4 +22,18 @@ class SetupGateTest < ActionDispatch::IntegrationTest
     get ActionController::Base.helpers.asset_path("application.css")
     assert_response :success
   end
+
+  test "the admin is taken to the Cloudflare step" do
+    User.create!(email_address: "admin@example.com", password: "correct horse battery")
+    Installation.delete_all
+    post session_path, params: { email_address: "admin@example.com", password: "correct horse battery" }
+
+    get root_path
+    assert_redirected_to setup_cloudflare_path
+
+    delete session_path
+    assert_redirected_to new_session_path
+    get root_path
+    assert_redirected_to new_session_path
+  end
 end

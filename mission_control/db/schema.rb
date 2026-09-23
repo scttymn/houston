@@ -10,7 +10,19 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_050000) do
+  create_table "installations", force: :cascade do |t|
+    t.string "base_domain"
+    t.string "cloudflare_account_id"
+    t.text "cloudflare_api_token"
+    t.datetime "cloudflare_connected_at"
+    t.string "cloudflare_zone_id"
+    t.datetime "created_at", null: false
+    t.string "tunnel_id"
+    t.text "tunnel_token"
+    t.datetime "updated_at", null: false
+  end
+
   create_table "sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "ip_address"

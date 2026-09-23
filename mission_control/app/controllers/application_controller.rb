@@ -6,11 +6,15 @@ class ApplicationController < ActionController::Base
   # Changes to the importmap will invalidate the etag for HTML responses
   stale_when_importmap_changes
 
-  # Until the admin exists, every page leads to first-run setup.
+  # Until the admin exists, every page leads to first-run setup; after that,
+  # a signed-in admin is taken to the next unfinished setup step.
   prepend_before_action :require_setup
 
   private
     def require_setup
-      redirect_to setup_path unless User.exists?
+      return redirect_to(setup_path) unless User.exists?
+      return if controller_name == "sessions"
+      step = Setup.next_step
+      redirect_to step if step && authenticated?
     end
 end

@@ -112,3 +112,13 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
   .topbar__meta { display: none; }
   .page { padding: 24px 16px; }
 }
+
+/* Token check (setup step 2) */
+.checks { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--rule); background: var(--surface); font-size: 14px; }
+.check { margin: 0; display: flex; gap: 10px; }
+.check__state { flex: 0 0 56px; font-size: 12px; font-weight: 600; }
+.check__state--go { color: var(--go-fg); }
+.check__state--nogo { color: var(--nogo-fg); }
+.rule { display: grid; grid-template-columns: 180px 24px 1fr; font-size: 14px; }
+.rule .mono { font-size: 13px; overflow-wrap: anywhere; }
+.rule__arrow { color: var(--signal); }
