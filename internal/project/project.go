@@ -58,6 +58,13 @@ func Load(path string) (*Project, error) {
 	if !ok {
 		return nil, ps.errors(path)
 	}
+	return Parse(path, data)
+}
+
+// Parse validates compose file contents as if they were at path, for
+// checking a file before writing it (houston init).
+func Parse(path string, data []byte) (*Project, error) {
+	var ps problems
 	raw, ok := parseRaw(data, &ps)
 	if !ok {
 		return nil, ps.errors(path)
@@ -163,15 +170,22 @@ func checkName(raw map[string]any, ps *problems) string {
 		return ""
 	}
 	s, _ := v.(string)
-	switch {
-	case s == "admin" || s == "hooks":
-		ps.add("name", "`%s` is reserved for Mission Control; pick another name", s)
-		return ""
-	case !nameRE.MatchString(s):
-		ps.add("name", "must be lowercase letters, digits and dashes, start with a letter, end with a letter or digit, and be at most 63 characters")
+	if err := CheckName(s); err != nil {
+		ps.add("name", "%s", err.Error())
 		return ""
 	}
 	return s
+}
+
+// CheckName reports why name can't be a project name, or nil.
+func CheckName(name string) error {
+	switch {
+	case name == "admin" || name == "hooks":
+		return fmt.Errorf("`%s` is reserved for Mission Control; pick another name", name)
+	case !nameRE.MatchString(name):
+		return errors.New("must be lowercase letters, digits and dashes, start with a letter, end with a letter or digit, and be at most 63 characters")
+	}
+	return nil
 }
 
 // loadCompose runs Docker's own loader with interpolation and environment

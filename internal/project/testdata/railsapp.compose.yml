@@ -12,5 +12,5 @@ volumes:
   storage:
 x-houston:
   health: /up
-  commands: { console: bin/rails console, test: bin/rails db:test:prepare test }
+  commands: { console: bin/rails console, test: bin/rails test }
   hooks: { release: bin/rails db:migrate }

@@ -126,13 +126,23 @@ func writeGenerated(path string, data []byte) error {
 }
 
 // writeAtomic replaces path with data via a temp file and rename, so a crash
-// never leaves a half-written file behind.
+// never leaves a half-written file behind. An existing file keeps its mode;
+// a new one gets 0644.
 func writeAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	mode := fs.FileMode(0o644)
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
 		return err
 	}
 	defer os.Remove(tmp.Name()) // no-op after a successful rename

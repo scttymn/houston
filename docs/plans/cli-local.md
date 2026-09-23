@@ -364,12 +364,120 @@ Commands: `bin/go test ./internal/cli/` (rows 1–9); `bin/test-integration -run
 ### Check at execute time
 - `com.docker.compose.oneoff` label values (`False`/`True`) on current Compose.
 
+## Batch 5: `houston init` for Rails (SQLite)
+
+Batch 4 is green and committed (`e5101ad`). Batch 5 is `houston init`: it turns a Rails app into a Houston project. The real-world target is a copy of `~/code/equip` (Rails 8.1, SQLite, Rails' generated Dockerfile, no compose file).
+
+### Scope
+- **Rails + SQLite only.** A Gemfile with `pg` gets "Rails with Postgres isn't supported by `houston init` yet" (exit 1, nothing written). **Defer:** Rails + Postgres goes with the other stacks in build step 7. It needs its own care: `DATABASE_URL` merging with Rails' multi-database `database.yml`, a `pg_isready` healthcheck, and `depends_on: condition: service_healthy`.
+- Other stacks: "Houston can set up Rails apps for now", exit 1, nothing written (build step 7).
+
+### Design (short)
+
+**Detection:** `Gemfile` + `config/application.rb` means Rails. `pg` in the Gemfile means Postgres (not yet supported).
+
+**One question:** the project name, defaulting to the folder name lowercased with `_`→`-`. It's asked only when stdin is a terminal ("Project name [equip]:"). Empty input takes the default, and an invalid name is a usage error (exit 2) quoting the rule. `Main` gains a `stdin io.Reader`.
+
+**Each file is its own idempotent step,** so a rerun finishes what a crashed run started, and a finished project reports "already set up" (exit 0):
+
+| File | If missing / not done | If already done |
+|---|---|---|
+| `Dockerfile` | Add `dev` and `test` stages right after `base`; name the final stage `production` | Stages `dev`, `test`, `production` all exist → skip |
+| `compose.yml` | Create it (below) | Has `x-houston` → skip. Exists without it → append an `x-houston` block (the rest byte-for-byte unchanged), but only if the result passes `project.Load`; otherwise print the problems and write nothing |
+| `.env` | Create it: one `NAME=` line per variable the compose file references (secrets only; `<SVC>_HOST` excluded) | Append only missing names; never touch existing values |
+| `.gitignore` | Add `/.env` unless a line already covers it (`.env`, `/.env`, `.env*`, `/.env*`) | skip |
+
+All contents are computed and checked before anything is written. Each write is atomic (temp + rename).
+
+**Dockerfile:** Rails' generated file is reused, not replaced:
+- The `dev` stage copies the `build` stage's own `apt-get install` RUN (so app-specific packages like `libvips` come along) and its `COPY` lines for `Gemfile`/`vendor`. It then sets `RAILS_ENV=development`, `BUNDLE_DEPLOYMENT=0`, `BUNDLE_WITHOUT=""` and runs `bundle install`.
+- CMD: `bin/rails db:prepare && exec bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid`. The pid file lives outside the bind mount, so a stale `tmp/pids/server.pid` never blocks the next `houston dev`.
+- `test` = `FROM dev`, `RAILS_ENV=test`, `COPY . .`.
+- No `base`/`build` stage, no Dockerfile, or a final stage already named something other than `production` → a clear message and exit 1, with nothing written.
+
+**`compose.yml` for equip** (`WORKDIR` read from the `base` stage):
+```yaml
+name: equip
+
+services:
+  app:
+    build: { context: ., target: dev }
+    ports: ["3000:3000"]
+    environment:
+      # Blank in dev: Rails then reads config/master.key. Set it on the server.
+      RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}
+    volumes:
+      - .:/rails
+      - storage:/rails/storage
+
+volumes:
+  storage:
+
+x-houston:
+  health: /up
+  commands:
+    console: bin/rails console
+    test: bin/rails test
+  hooks:
+    release: bin/rails db:migrate
+```
+`RAILS_MASTER_KEY` is written as **optional** on purpose. As a required variable, `houston test` would give it a random value, and Rails would fail to decrypt credentials. Blank means Rails falls back to `config/master.key` in dev (bind-mounted) and runs without it in test, as Rails normally does. Mission Control still lists it for the server. This must be confirmed on equip (below).
+
+**Output:** one line per file ("created compose.yml", "added dev and test stages to Dockerfile; named the final stage production", "created .env (RAILS_MASTER_KEY)", "added /.env to .gitignore", or "… already set up"), then "Next: `houston dev`".
+
+### Crash-gap template
+```text
+Durable step 1 (primary): each file write (4 independent atomic writes)
+Dies before: the remaining files
+Retry: rerun `houston init`
+Must still accomplish: the missing files, without touching finished ones
+Paths that must not block repair: no global "already initialized" check — each file decides for itself
+```
+
+### AC ↔ test map (Batch 5), `internal/cli/init_test.go`, fixture `testdata/rails/` (Rails 8's generated Dockerfile, Gemfile, `config/application.rb`, `.gitignore`)
+
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | Fresh Rails app → exact `compose.yml`, exact rewritten `Dockerfile` (stages inserted after `base`, build stage's apt/COPY lines reused, final stage `production`, everything else unchanged), `.env` = `RAILS_MASTER_KEY=\n`, `.gitignore` untouched (it has `/.env*`), the summary lines, exit 0. The written `compose.yml` passes `project.Load` | `TestInit_RailsSQLite` | Contract |
+| 2 | Name: folder `My_App` → `my-app`. With a terminal, input `equip2` → `equip2`, empty → default, `Bad_Name` → exit 2 and nothing written. Without a terminal, no prompt is printed | `TestInit_ProjectName` (table) | Contract, Preconditions |
+| 3 | Second run → "already set up", exit 0, every file byte-identical. Partial state (Dockerfile done, no compose/.env) → only the missing files are written | `TestInit_IdempotentAndResumes` | Crash & repair, Re-entry |
+| 4 | Existing `.env` with values → only missing names appended. Existing `compose.yml` without `x-houston` → block appended, the original bytes are a prefix of the result. Existing compose with `network_mode` → problems printed, **nothing** written, exit 1 | `TestInit_NeverOverwrites` | Atomicity, Preconditions |
+| 5 | No Gemfile / Postgres Gemfile / no Dockerfile / final stage named `app` → the specific message, exit 1, nothing written | `TestInit_Unsupported` (table) | Preconditions, Signals |
+| 6 | `.gitignore` without an env entry → `/.env` appended. No `.gitignore` → created with `/.env` | `TestInit_Gitignore` | Contract |
+| 7 | `-f sub/compose.yml init` sets up `sub/`. `init --server` → exit 2 | `TestInit_FileFlagAndUsage` | Contract, Honest surface |
+| 8 | **Real app (a copy of equip, not your repo):** `houston init`, then `houston dev` → `/up` 200; a second `houston dev` after Ctrl-C still boots (no stale pid); `houston console` with piped `puts Rails.env` prints `development`; `houston test` runs equip's suite and exits with its result; `houston init` again says "already set up". Evidence is the command output in the transcript (it depends on your private repo, so it isn't an automated test) | manual real-app check | Parity |
+
+Commands: `bin/go test ./internal/cli/ -run TestInit` (rows 1–7), then the equip check (row 8). All earlier tests stay green (`Main` gains `stdin`).
+
+### Lens run (Batch 5)
+
+| Lens | Where |
+|---|---|
+| Contract | 1, 2, 6, 7 |
+| Preconditions | 2, 4, 5: nothing is written when a check fails |
+| Crash & repair / Re-entry | 3 + template: per-file steps, reruns complete partial work |
+| Atomicity | 4: the compose append is validated before writing; every write is temp + rename |
+| Signals | 1, 5: the summary says exactly what changed; errors say what to do |
+| Parity | 1, 8: Rails' own Dockerfile and ignore files are reused, not replaced |
+| Honest surface | 7: no `--stack` or `--yes` flags; the only question has a default and is skipped without a terminal |
+| Authz, Concurrency, At-least-once, Migrate | N/A: local files, one process |
+
+### Found during execute (Batch 5)
+- **Terminal detection was wrong:** "stdin is a character device" is also true for `/dev/null`, so `init < /dev/null` prompted and `console < /dev/null` would have asked Docker for a TTY. Now `golang.org/x/term` (the OS's isatty). Red test: `TestIsTerminal_DevNullIsNot`. Found by the equip check.
+- **Rewrites kept file modes only by accident:** `writeAtomic`'s temp file is 0600, so rewriting a user's `Dockerfile` would have changed its mode. Existing files now keep their mode, and new ones get 0644 (asserted in row 1).
+- **Test command for Rails + SQLite is `bin/rails test`** (Rails' own `config/ci.rb` uses it). `db:test:prepare` fails for apps without `db/schema.rb`, like equip, which has no migrations. SQLite needs no database creation, and Rails loads `schema.rb` into the fresh test database itself. Postgres (build step 7) may still need `db:test:prepare`.
+- **equip result (row 8):** `init` → `dev` `/up` 200 in 96 s (first build) → the console shows `RAILS_MASTER_KEY=""` with credentials decrypting from `config/master.key` → Ctrl-C clean → the second `dev` boots in 3 s (no stale pid) → `houston test` runs equip's suite: 25 runs, 1 failure, exit code passed through, nothing left behind. My first explanation of the failure was wrong (the test calls `WebpImages.build!` itself). Checked properly with three `houston test` runs: (A) with the WebP files included in the test image → 25 runs, 0 failures; (B) without them, `pages_controller_test.rb` → 1 failure; (C) without them, the WebP test alone → passes. So Houston's runtime is fine, and the test is **order-dependent**: when another test renders the page first, Propshaft caches the asset list before `build!` writes the variants. It passes on the laptop only because `app/assets/builds/` already holds the files. `houston test` starts from the Docker build context (equip's `.dockerignore` and `.gitignore` both exclude them), like a clean checkout. The fix is equip's call: build the variants before boot (`bin/rails images:webp test`), or refresh Propshaft's cache after `build!`. `init` again → "already set up".
+
+### Check at execute time
+- **Rails with `RAILS_MASTER_KEY=""`:** confirmed on equip (see above).
+- That the Rails build stage's apt line in the fixture matches equip's (equip's Dockerfile is Rails' generated template).
+
 ## Later batches (titles only)
 
 2. **`houston dev`**: fully specified below.
 3. **`houston test`**: fully specified below.
 4. **`houston console` / `houston logs [-f]`**: fully specified below.
-5. **`houston init` (Rails)**: detection, prompts, writing or extending `compose.yml` (SQLite `storage` volume, or Postgres when `pg` is in the Gemfile), Dockerfile stages, `.env` template, `.gitignore`, never overwriting silently.
+5. **`houston init` (Rails)**: fully specified below.
 6. **`houston dev --production` + packaging**: `hou` symlink, release builds, laptop install script. Decide whether to keep cobra's built-in `completion` command (shell completions) or disable it; it's untested surface today. Also: the `cli` container runs as root, so on a Linux host files it writes (go.sum, generated code) come out root-owned. That's fine on macOS/OrbStack, and should be fixed before Linux CI or runners use this image (found in the Batch 1 review).
 
 ## Agent loop checkpoints

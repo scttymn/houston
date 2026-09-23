@@ -9,6 +9,7 @@ import (
 	"github.com/sevenmoons/houston/internal/docker"
 	"github.com/sevenmoons/houston/internal/project"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // Exit codes. Commands that run a child process return the child's code.
@@ -18,7 +19,7 @@ const (
 )
 
 // Main runs the houston command line and returns the process exit code.
-func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
+func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Runner) int {
 	var file string
 	var follow bool
 	code := 0
@@ -65,6 +66,9 @@ func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
 			return runConsole(file, stderr, d)
 		}),
 	)
+	root.AddCommand(command("init", "Set up this Rails app for Houston (compose.yml, Dockerfile stages, .env)", func() int {
+		return runInit(file, stdin, stdout, stderr)
+	}))
 	logs := command("logs", "Show the app's logs", func() int {
 		return runLogs(file, follow, stderr, d)
 	})
@@ -94,7 +98,8 @@ func loadProject(file string, stderr io.Writer) (*project.Project, bool) {
 
 // stdinIsTerminal reports whether Houston's stdin is a terminal. Tests
 // replace it.
-var stdinIsTerminal = func() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
+var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
+
+// isTerminal asks the OS whether f is a terminal. A character-device check
+// isn't enough: /dev/null is one too.
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }

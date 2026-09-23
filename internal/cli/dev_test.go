@@ -90,8 +90,12 @@ func newProject(t *testing.T, compose string, files map[string]string) (string, 
 }
 
 func run(d *fakeDocker, args ...string) (code int, stdout, stderr string) {
+	return runWithInput(d, "", args...)
+}
+
+func runWithInput(d *fakeDocker, input string, args ...string) (code int, stdout, stderr string) {
 	var out, errOut bytes.Buffer
-	code = Main(args, &out, &errOut, d)
+	code = Main(args, strings.NewReader(input), &out, &errOut, d)
 	return code, out.String(), errOut.String()
 }
 
