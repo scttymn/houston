@@ -84,11 +84,11 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
    - the maintenance page (the default, and a project's own) staying up through a restore, a deploy, a failed one, and the app's containers stopped, until it's turned off
    - restoring the safety snapshot to go back
    - a restore whose image was pruned
-   - a restore refused because its commit was force-pushed away
+   - a restore refused because the project was relinked to a repo without its commit (a force-pushed commit stays fetchable: see the spike notes)
 
 ## Batch 1: Houston's maintenance page, and the spike
 
-### Spike first (spec §14): `install/test/restore-spike.sh`
+### Spike first (spec §14)
 Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` setup; a `houston-maint-test` name that answers the other server's 404 first):
 - Add an ingress rule for one hostname → Mission Control, and time how long until a request through Cloudflare gets Mission Control's answer (cloudflared picks up remote config).
 - Remove the rule → the app again, timed the same way.
@@ -103,7 +103,13 @@ Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` s
 - **The image:** `docker rmi` the host's copy of the first SHA; `docker pull 127.0.0.1:5000/spike:<sha>` gets it back. Whether `kamal deploy --skip-push` pulls it itself.
 - **git:** `git fetch --depth 1 <old, non-tip sha>` from Forgejo works, or is refused (then the runner falls back to the branch without depth).
 
-The notes go into this file before Batch 1's code.
+**Spike notes:**
+- **git, run locally against a Forgejo 13 container:**
+  - `git fetch --depth 1 --no-tags -- <repo> <old, non-tip sha>` works (protocol v2), and `checkout --detach` gives exactly that commit.
+  - **A commit force-pushed away can still be fetched,** even after `git gc --prune=now` on the server, because the repository's reflog keeps it. So "the commit is gone" is rarer than feared. When a fetch by SHA succeeds, the code is exactly right: that's the point of checking the SHA.
+  - The realistic drift is **a project relinked to a repo that never had the commit**, and that's what Batch 7 uses (not a force-push).
+- **Cloudflare timing** is measured by Batch 1's own real stage (`install/test/maintenance-through-tunnel.sh`, a stage of `orbstack.sh`), with the real feature rather than a throwaway rule. It measures on and off, and a custom domain.
+- **Kamal and the registry** (a second generation's accessory, `spike.g2_*` volumes, pulling a pruned image back): these shape Batches 3 and 6, not Batch 1. They're checked at the start of Batch 3, on OrbStack, before its code.
 
 ### Design (short)
 - **`projects`:**
