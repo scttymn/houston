@@ -18,11 +18,8 @@ bad() { printf '  FAIL  %s\n' "$*"; failures=$((failures + 1)); }
 vm() { orb -m "$machine" -u root "$@"; }
 rails() { vm docker compose -f /opt/houston/compose.yml exec -T mission-control bin/rails runner "$1"; }
 code_of() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
-wait_for() {
-  local want="$1" url="$2" got="" start=$SECONDS
-  for _ in $(seq 1 60); do got=$(code_of "$url"); [ "$got" = "$want" ] && break; sleep 5; done
-  [ "$got" = "$want" ] && ok "$url answers $got through Cloudflare (after $((SECONDS - start))s)" || bad "$url answered $got after 5 minutes (wanted $want)"
-}
+# shellcheck source=install/test/settle.sh
+. "$repo/install/test/settle.sh"
 wait_for_deploy() { # number → "status|runner|error"
   local got=""
   for _ in $(seq 1 90); do
@@ -72,11 +69,12 @@ fj "/repos/houston/$app/hooks" -X POST -d "{\"type\":\"forgejo\",\"active\":true
 ok "Forgejo's webhook points at https://hooks.$base/$app"
 
 echo "== a push → Forgejo's webhook through Cloudflare → a runner deploys it"
+settle 200 "https://hooks.$base/ping" # Forgejo doesn't retry a delivery the wildcard answered
 first=$(push 'echo one > version.txt' 'one')
 result=$(wait_for_deploy 1)
 case "$result" in go\|houston-runner-*) ok "deploy #1 GO, run by ${result#go|}" ;; *) bad "deploy #1: $result"; rails "puts Project.find_by(name: '$app')&.deploys&.last&.log.to_s" 2>/dev/null | tail -20 | sed 's/^/      /' ;; esac
 [ -n "$(rails "puts Project.find_by!(name: '$app').webhook_verified_at" 2>/dev/null | tail -1)" ] && ok "the webhook's first delivery through the tunnel was verified" || bad "webhook never verified"
-wait_for 200 "https://$app.$base/up"
+settle 200 "https://$app.$base/up"
 [ "$(curl -s --max-time 10 "https://$app.$base/env/KAMAL_VERSION")" = "$first" ] && ok "https://$app.$base serves $first" || bad "serving the wrong version"
 state=$(rails "puts Project.find_by!(name: '$app').domain_states.dig('$elsewhere', 'state')" 2>/dev/null | tail -1)
 [ "$state" = "ZONE NOT IN CLOUDFLARE YET" ] && ok "$elsewhere: ZONE NOT IN CLOUDFLARE YET" || bad "$elsewhere: $state"

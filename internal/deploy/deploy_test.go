@@ -446,6 +446,9 @@ func TestDeployHoldsForMissingSecrets(t *testing.T) {
 	if !strings.Contains(h.stderr.String(), "POSTGRES_PASSWORD") || !strings.Contains(h.stderr.String(), "SECRET_KEY_BASE") {
 		t.Errorf("stderr doesn't name the missing variables:\n%s", h.stderr.String())
 	}
+	if !strings.Contains(h.stderr.String(), "houston secrets set POSTGRES_PASSWORD") {
+		t.Errorf("stderr doesn't give an agent the CLI path:\n%s", h.stderr.String())
+	}
 	if !reflect.DeepEqual(h.mission.calls, []string{"sync"}) || len(h.docker.calls) != 0 {
 		t.Errorf("mission %v, docker %v", h.mission.calls, h.docker.whats())
 	}

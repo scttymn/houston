@@ -119,8 +119,8 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		var msg string
 		switch {
 		case errors.As(err, &hold):
-			msg = fmt.Sprintf("HOLD: %s %s no value; set it in Mission Control (the project's page), then deploy again",
-				strings.Join(hold.Missing, ", "), map[bool]string{true: "has", false: "have"}[len(hold.Missing) == 1])
+			msg = fmt.Sprintf("HOLD: %s %s no value; set it on the project's page in Mission Control (or houston secrets set %s --project %s), then deploy again",
+				strings.Join(hold.Missing, ", "), map[bool]string{true: "has", false: "have"}[len(hold.Missing) == 1], hold.Missing[0], p.Name)
 		case errors.Is(err, mission.ErrUnauthorized):
 			msg = "Mission Control refused the runner token (HOUSTON_TOKEN, or ~/.config/houston/runner-token)"
 		default:

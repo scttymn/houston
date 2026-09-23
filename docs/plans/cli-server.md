@@ -234,3 +234,33 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 
 ### Open questions (answered)
 1. **`console --server` from outside the LAN.** The plan uses SSH to the server's LAN address (the installer already runs sshd, and you'd authorize your key for the houston user). From anywhere else it would need `cloudflared access ssh` and an SSH route on the tunnel. Is LAN-only fine for now?
+
+## Batch 6: An agent's run on svnmns.com
+
+### Design (short)
+- **`install/test/agent-through-tunnel.sh <machine> <base>`**, a stage of `orbstack.sh` after the push stage. It is the agent: the Mac's own `houston` (built for darwin), with only `HOUSTON_SERVER=https://admin.<base>` and `HOUSTON_API_TOKEN`, and an empty `HOME` (no saved login).
+- The token is made the way Settings › API tokens makes it (`ApiToken.issue!`); that's the only rails runner in the stage.
+- **Its own Forgejo** (`forgejo-agent`, port 3002), so the push stage's is untouched. No Forgejo webhook: every deploy in the stage is the agent's, so nothing races it. `push-through-tunnel.sh` already proves webhooks through the tunnel.
+- **The guard:** `houston-agent-test.<base>` must answer the other server's 404 first. `cloudflare.sh` preflight and cleanup know the name.
+- **A small fix found while writing it:** the runner's HOLD message only said "set it in Mission Control". An agent reads that message from `deploy --follow`, so it now also names `houston secrets set <NAME> --project <name>`.
+
+### AC ↔ test map (Batch 6)
+| # | Acceptance criterion | Check (`agent-through-tunnel.sh`) |
+|---|---|---|
+| 1 | The token reaches Mission Control through Cloudflare | `houston status` |
+| 2 | `link` prints the deploy key and NO-GO (exit 1) with the `--continue` id; after the key is added, `link --continue` links and prints the webhook URL and secret; `houston webhook` shows the same secret | link, link --continue, webhook |
+| 3 | `deploy --follow` before the secrets: NO-GO, exit 1, HOLD with the `houston secrets set` command | deploy before secrets |
+| 4 | `secrets set` from stdin (a value with `$HOME` in it) and `secrets generate`; `list` shows them set | secrets |
+| 5 | `deploy --follow`: GO, exit 0, with step 00's tests in the followed log; the app serves the secret byte-exact through Cloudflare | deploy |
+| 6 | `status`: GO; `status --json`: go, every secret set, no values anywhere | status |
+| 7 | `logs --server`: the running app's output | logs |
+| 8 | `console --server` over SSH on the LAN runs the console command in the running app container (the agent's key authorized as the login hint says) | console |
+| 9 | A push whose tests fail: `deploy --follow` NO-GO "tests failed (exit 3)", exit 1; the previous version still serves | failing push |
+| — | The HOLD message names the CLI path | `internal/deploy` `TestDeployHoldsForMissingSecrets` (red, then green) |
+
+### Done (Batch 6)
+- **The run:** `install/test/orbstack.sh ubuntu:noble` PASS, 68 checks, with the agent stage all green: link (NO-GO until the key, then linked), `webhook`, HOLD before the secrets with the command to fix it, `secrets set/generate/list`, `deploy --follow` GO with the tests in the log, the secret byte-exact through Cloudflare, `status`, `status --json`, `logs --server`, `console --server` over SSH, and a failing push NO-GO (exit 1) while the old version keeps serving (10 of 10). Cleanup left only the wildcard; `equip.svnmns.com` still answers 200.
+- **HOLD message:** red (`TestDeployHoldsForMissingSecrets`), then green; the Go suite and Mission Control (149 runs) green.
+- **Found on the way, both in the tests:**
+  - The first run's agent sat in this repo, whose `compose.yml` is the toolchain's; a file that doesn't load is exit 2 (Batch 2's decision, kept). The agent now works from its own directory.
+  - **Cloudflare edge lag** made two checks flaky: a record minutes old doesn't win over the wildcard at every edge, so some answers are the other server's 404 (one run: `200 200 404 404 404 200…` through Cloudflare while kamal-proxy answered 200). Once, Forgejo's first delivery hit the wildcard and was lost (Forgejo doesn't retry). `install/test/settle.sh` waits for 10 answers in a row, before the first push (`hooks/ping`) and before content checks. It took 11 s to 101 s. Mission Control already shows this window as HOLD for admin and hooks routes.
