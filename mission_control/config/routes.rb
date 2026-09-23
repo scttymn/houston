@@ -14,5 +14,10 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
   get "ping" => "pings#show"
 
+  namespace :api do
+    post "projects/sync", to: "projects#sync"
+    get "projects/:name/secrets/:key", to: "secrets#show", constraints: { key: %r{[^/]+} }
+  end
+
   root "projects#index"
 end

@@ -26,19 +26,16 @@ On a Houston server, `houston deploy` in a checkout of a project takes it from `
 
 ## Batches
 
-1. **Kamal config from compose, proven on a server** (below).
-2. **Mission Control's local API:**
-   - the runner token
-   - sync (upsert, variable check, name-collision rule, `<name>.<base>` record in host-by-host mode)
-   - secrets for the runner (never through the tunnel)
-   - deploy records (numbering, one in flight, stale takeover, capped log)
-3. **`houston deploy`:**
-   - ref vs deploy rule, sync, secrets, build and push
-   - accessories, release hook, Kamal deploy, post_deploy, report
-   - repairing a stale Kamal lock
-   - the installer installs the CLI
-4. **Mission Control pages:** project detail (facts, write-only secrets with Generate, deploy history), the deploy page (steps, log), and projects on the flight board.
-5. **Real run on svnmns.com:**
+1. **Kamal config from compose, proven on a server** (done).
+2. **Mission Control's local API: auth, sync, secrets.** (Split from deploy records, which would push one batch well past ~12 rows.)
+3. **Deploy records:** numbering, one in flight per project, a deploy token for ownership, heartbeat and stale takeover, capped log.
+4. **`houston deploy`:**
+   - ref vs deploy rule, sync, secrets (`CarrierValue`), build with `--label service=<name>` and push
+   - accessories (boot; reboot on changed config), release hook, `kamal deploy --skip-push --version <sha>`, post_deploy, report
+   - stale Kamal lock released only on takeover
+   - the installer installs the CLI and writes the runner token
+5. **Mission Control pages:** project detail (facts, write-only secrets with Generate, deploy history), the deploy page (steps, log), and projects on the flight board.
+6. **Real run on svnmns.com:**
    - equip and a Postgres fixture on an OrbStack VM, at `<name>.svnmns.com` through the tunnel
    - a zero-downtime redeploy
    - a failed release and a failed health check leave the old version serving (NO-GO)
@@ -162,6 +159,78 @@ The spike's fixture app is a tiny busybox `httpd` image (dev/test/production sta
   - **S8 yes:** a one-off container of the new image on `kamal` resolves the accessory.
   - **S9:** a killed deploy leaves Kamal's lock ("Deploy lock already in place!"); `kamal lock release` recovers → Batch 3 releases a stale lock only when Mission Control says the previous deploy is dead.
   - **S10:** booting again skips any accessory whose container exists ("a container already exists"). So **changed accessory config is never applied** unless Houston reboots it → Batch 3 compares and reboots.
+
+## Batch 2: Mission Control's local API (auth, sync, secrets)
+
+### Design (short)
+- **`Api::BaseController < ActionController::API`** (no cookies, CSRF, browser gate or setup redirect).
+  - **Auth:** `Authorization: Bearer <token>` compared with `ENV["HOUSTON_RUNNER_TOKEN"]` via `secure_compare`. A blank or unset env token rejects everything.
+  - **Never through the tunnel:** any request carrying `Cf-Ray` or `Cf-Connecting-Ip` (Cloudflare always adds them; clients can't remove them) gets 404, before auth, so nothing is revealed.
+  - **Setup must be finished:** the API answers 409 "finish setup" until Cloudflare is connected.
+- **Where the token comes from:** in production, the installer puts it in `/opt/houston/.env` (Batch 4). Tests set the env var.
+- **`Project`** (name unique):
+  - `app_service`, `services` (JSON array), `domains` (JSON), `variables` (JSON `[{name, required}]`, secrets only; the CLI never sends `_HOST`s)
+  - `health`, `port`, `deploy_rule` (JSON), `synced_at`
+- **`ProjectHost`** (`name` unique index, `project_id`): one row per container-name prefix the project owns:
+  - its name (Kamal app containers and the `service` label)
+  - `<name>-<service>` for each accessory
+  - Sync replaces a project's rows in one transaction; the **unique index** makes two projects claiming one name impossible even under concurrent syncs. This closes the leak where `shop` + service `db` and a project called `shop-db` collide: Kamal's accessory boot would find the other's container by its `service` label, skip booting (spike S10), and `DB_HOST` would reach the other project's database.
+- **`Secret`** (`project_id`, `key`, encrypted `value`; unique `[project_id, key]`):
+  - keys match `^[A-Za-z_][A-Za-z0-9_]*$`
+  - values Kamal can't carry (backslash, control characters) are invalid, with the base64 hint; the same rule as `kamal.CarrierValue`
+- **`POST /api/projects/sync`** (JSON, body ≤ 64 KiB):
+  - Validates the payload: name rules as the CLI's (`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`, not `admin`/`hooks`), service names, app service in services, variable names, domains as hostnames, integer port, health path.
+  - Upserts the project and its hosts in one transaction.
+  - **Then** points DNS: in host-by-host mode it ensures `<name>.<base>` is a proxied CNAME to the tunnel with comment `managed-by:houston project:<name>`. A managed record is updated; a record without the comment is a NO-GO (422, nothing written). In wildcard mode there's no Cloudflare call. This reuses the record helpers extracted from `CloudflareSetup` into `Cloudflare::Records`.
+  - **Then** checks variables: required ones with no value → 422 `{missing: [...]}` (HOLD), with the project already saved so the admin can fill them in.
+  - Success → 200 `{project, host, dns}`.
+- **`GET /api/projects/:name/secrets/:key`:** 200 `text/plain` value; 404 when the project is unknown, the key isn't one of its variables, or there's no value.
+
+### Crash-gap template (sync)
+```text
+Durable step 1 (primary): the project row + its hosts (one transaction)
+Dies before: the DNS record (Cloudflare) / the variable check
+Retry / redelivery: houston deploy syncs again; the upsert finds the row and changes nothing
+Must still accomplish: the <name>.<base> record; the missing-variables answer
+Paths that must not block repair with a hard "already done": none. DNS is ensured on every sync (find → create or update)
+After primary commits: the Cloudflare failure is a 502 with Cloudflare's message; the project stays saved
+```
+
+### Concurrency template (sync)
+```text
+Writer A: sync of shop (services app, db)      Writer B: sync of shop-db
+Ordering / lock / CAS / uniqueness: unique index on project_hosts.name
+Bad interleaving: both check "no clash" before either inserts → both commit → shared name
+Expected end state: exactly one of them owns "shop-db"; the other gets 422 naming it
+Re-check under the lock: the index is the check; RecordNotUnique → 422
+Work under the lock (same store only): project + host rows; Cloudflare is called after commit
+```
+
+### AC ↔ test map (Batch 2), `mission_control/test/…`
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | No token, wrong token, or `Bearer ` with a blank configured token → 401, no row | `integration/api_auth_test.rb` `test "the API needs the runner token"` | Authz |
+| 2 | A valid token with `Cf-Ray` or `Cf-Connecting-Ip` → 404 on sync and on a secret, no row | `test "the API never answers through the tunnel"` | Authz |
+| 3 | Before Cloudflare is connected → 409 "finish setup", no row | `test "the API waits for setup"` | Preconditions |
+| 4 | New project → 200 with host `equip.svnmns.com`; the row has every fact; hosts `equip`, `equip-db` | `integration/api_sync_test.rb` `test "sync creates the project"` | Contract |
+| 5 | Invalid payloads (table): name `Equip`/`admin`/`hooks`/`-x`, services not an array, app service not in services, variable `my.key`, domain with a scheme, port 0 or `"80"`, health without `/` → 422 naming the field; not JSON → 400; body > 64 KiB → 413; no row | `test "sync rejects what the CLI would never send"` | Contract, Scale |
+| 6 | Syncing again updates facts and hosts (a service removed drops its host) without duplicating | `test "sync again updates in place"` | Re-entry |
+| 7 | Required variable without a value → 422 `missing: [KEY]` and the project saved; optional ones aren't listed; after the value is set → 200 | `test "sync holds for missing required secrets"` | Preconditions, Signals |
+| 8 | Name clashes, both directions and accessory vs accessory (`a`+`b-c` vs `a-b`+`c`) → 422 naming the clash, the other project untouched | `test "sync refuses container names another project owns"` | Contract |
+| 9 | The index holds under a race: inserting a `ProjectHost` name another project owns raises `RecordNotUnique` | `models/project_host_test.rb` `test "a host name has one owner"` | Concurrency |
+| 10 | Host-by-host: creates the CNAME with the comment; updates Houston's own; a foreign record → 422 NO-GO, no write; wildcard mode → no Cloudflare request | `test "sync points <name>.<base> in host-by-host mode"` (table, WebMock contract stubs) | Contract, Crash & repair |
+| 11 | Cloudflare fails on the record → 502 with its message, project saved; the next sync creates the record | `test "a Cloudflare failure during sync can be retried"` | Crash & repair, Signals |
+| 12 | Secret: 200 text value; 404 for an unknown project, an unreferenced key, and no value | `integration/api_secrets_test.rb` `test "the runner reads a secret"` | Contract, Authz |
+| 13 | `Secret` rejects backslash, line break, tab, and a bad key; stores the value encrypted (raw column ≠ value) | `models/secret_test.rb` `test "secrets Kamal can carry, encrypted"` | Contract |
+
+### Done (Batch 2)
+- **Red:** all 13 rows (13 tests) failed for the missing API and models. **Green:** 75 runs, 0 failures (`houston -f mission_control/compose.yml test`). Rubocop is clean on the 17 touched files, and the migration runs down and up.
+- **Test fixes on the way (the tests were wrong, not the code):**
+  - Two sync tests used a required variable with no value, so the design correctly answered 422 HOLD. They now use optional variables; row 7 covers HOLD.
+  - The secret test matched `base64` against "Base64".
+- **Mutations, each caught:** no tunnel refusal (row 2); a blank configured token accepted (row 1); a foreign DNS record overwritten (row 10); no HOLD for missing secrets (row 7).
+- **Cut after a mutation survived:** the Ruby pre-check for container-name clashes. With it removed, row 8 still passed: the unique index raises, the sync rolls back, and the rescue names the owner. So the index is the only check, which is also what makes the race safe (row 9).
+- **Reuse:** the DNS record helpers moved from `CloudflareSetup` into `Cloudflare::Records`, shared by first-run setup and sync. All the Cloudflare setup tests pass unchanged.
 
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:

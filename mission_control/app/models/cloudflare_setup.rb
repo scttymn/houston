@@ -12,7 +12,7 @@ class CloudflareSetup
   class Stop < StandardError; end
 
   LABEL = /\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\z/
-  MANAGED = "managed-by:houston"
+  MANAGED = Cloudflare::Records::MANAGED
 
   validates :api_token, presence: true
   validate :base_domain_is_a_domain
@@ -127,17 +127,14 @@ class CloudflareSetup
     end
 
     def find_record(zone, name)
-      @client.get("/zones/#{zone}/dns_records", name:).first
+      Cloudflare::Records.new(@client, zone).find(name)
     end
 
-    def managed?(record)
-      record["comment"].to_s.start_with?(MANAGED)
-    end
+    def managed?(record) = Cloudflare::Records.managed?(record)
 
     def upsert(zone, tunnel_id, name, existing)
-      record = { type: "CNAME", name:, content: "#{tunnel_id}.cfargotunnel.com", proxied: true, comment: MANAGED }
       step("pointing #{name} at the tunnel", denied: "The token can read DNS but not change it: give it Zone · DNS · Edit on #{base_domain} (not only Read), then try again.") do
-        existing ? @client.patch("/zones/#{zone}/dns_records/#{existing["id"]}", record) : @client.post("/zones/#{zone}/dns_records", record)
+        Cloudflare::Records.new(@client, zone).point(name, tunnel_id, existing:)
       end
     end
 

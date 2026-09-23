@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_080000) do
   create_table "installations", force: :cascade do |t|
     t.string "base_domain"
     t.string "cloudflare_account_id"
@@ -22,6 +22,40 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_070000) do
     t.string "tunnel_id"
     t.text "tunnel_token"
     t.datetime "updated_at", null: false
+  end
+
+  create_table "project_hosts", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.integer "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_project_hosts_on_name", unique: true
+    t.index ["project_id"], name: "index_project_hosts_on_project_id"
+  end
+
+  create_table "projects", force: :cascade do |t|
+    t.string "app_service", null: false
+    t.datetime "created_at", null: false
+    t.json "deploy_rule", default: {}, null: false
+    t.json "domains", default: [], null: false
+    t.string "health", null: false
+    t.string "name", null: false
+    t.integer "port", null: false
+    t.json "services", default: [], null: false
+    t.datetime "synced_at"
+    t.datetime "updated_at", null: false
+    t.json "variables", default: [], null: false
+    t.index ["name"], name: "index_projects_on_name", unique: true
+  end
+
+  create_table "secrets", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.integer "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.text "value"
+    t.index ["project_id", "key"], name: "index_secrets_on_project_id_and_key", unique: true
+    t.index ["project_id"], name: "index_secrets_on_project_id"
   end
 
   create_table "sessions", force: :cascade do |t|
@@ -61,5 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_070000) do
     t.index ["email_address"], name: "index_users_on_email_address", unique: true
   end
 
+  add_foreign_key "project_hosts", "projects", on_delete: :cascade
+  add_foreign_key "secrets", "projects", on_delete: :cascade
   add_foreign_key "sessions", "users"
 end
