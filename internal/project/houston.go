@@ -1,0 +1,336 @@
+package project
+
+import (
+	"regexp"
+	"strings"
+	"unicode"
+)
+
+// Houston is the parsed x-houston block, with defaults applied.
+type Houston struct {
+	Health   string
+	Domains  []string
+	Deploy   Deploy
+	Commands Commands
+	Hooks    Hooks
+	Backups  Backups
+}
+
+type Deploy struct {
+	On     string // "commit" or "tag"
+	Branch string
+	Tags   string
+}
+
+type Commands struct {
+	Console *Console
+	Test    string
+}
+
+// Console is the console command per place; a plain string sets both.
+type Console struct {
+	Dev    string
+	Server string
+}
+
+type Hooks struct {
+	Release    string
+	PostDeploy string
+}
+
+type Backups struct {
+	Schedule   string
+	KeepAuto   int
+	KeepDeploy int
+}
+
+var (
+	scheduleRE = regexp.MustCompile(`^daily ([01][0-9]|2[0-3]):[0-5][0-9]$`)
+	labelRE    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+)
+
+// parseHouston walks x-houston strictly. It also returns x-houston.port, which
+// isn't kept on Houston: Project.AppPort is the resolved port.
+func parseHouston(raw map[string]any, ps *problems) (h Houston, port int, hasPort bool) {
+	h = Houston{
+		Deploy:  Deploy{On: "commit", Branch: "main", Tags: "v*"},
+		Backups: Backups{Schedule: "daily 03:00", KeepAuto: 14, KeepDeploy: 10},
+	}
+	v, present := raw["x-houston"]
+	if !present {
+		ps.add("x-houston", "is missing; add an x-houston block with at least `health: /up` (or run `houston init`)")
+		return h, 0, false
+	}
+	x, ok := v.(map[string]any)
+	if !ok {
+		ps.add("x-houston", "must be a mapping of keys (health:, domains:, …)")
+		return h, 0, false
+	}
+
+	if _, ok := x["health"]; !ok {
+		ps.add("x-houston.health", "is required: the path that returns 200 when the app is ready (e.g. /up)")
+	}
+	for _, k := range sortedKeys(x) {
+		path := "x-houston." + k
+		switch k {
+		case "health":
+			h.Health = parseHealth(path, x[k], ps)
+		case "port":
+			port, hasPort = parsePort(path, x[k], ps)
+		case "domains":
+			h.Domains = parseDomains(path, x[k], ps)
+		case "deploy":
+			parseDeploy(path, x[k], &h.Deploy, ps)
+		case "commands":
+			parseCommands(path, x[k], &h.Commands, ps)
+		case "hooks":
+			parseHooks(path, x[k], &h.Hooks, ps)
+		case "backups":
+			parseBackups(path, x[k], &h.Backups, ps)
+		default:
+			ps.add(path, "unknown key; x-houston takes health, port, domains, deploy, commands, hooks, backups")
+		}
+	}
+	return h, port, hasPort
+}
+
+func parseHealth(path string, v any, ps *problems) string {
+	s, ok := v.(string)
+	switch {
+	case !ok:
+		ps.add(path, "must be a path like /up")
+	case s == "":
+		ps.add(path, "is required: the path that returns 200 when the app is ready (e.g. /up)")
+	case !strings.HasPrefix(s, "/"):
+		ps.add(path, "must start with / (e.g. /up)")
+	case strings.IndexFunc(s, unicode.IsSpace) >= 0:
+		ps.add(path, "must not contain whitespace")
+	case len(s) > 256:
+		ps.add(path, "must be at most 256 characters")
+	default:
+		return s
+	}
+	return ""
+}
+
+func parsePort(path string, v any, ps *problems) (int, bool) {
+	n, ok := v.(int)
+	if !ok || n < 1 || n > 65535 {
+		ps.add(path, "must be a number from 1 to 65535")
+		return 0, false
+	}
+	return n, true
+}
+
+func parseDomains(path string, v any, ps *problems) []string {
+	list, ok := v.([]any)
+	if !ok {
+		ps.add(path, "must be a list of hostnames")
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for i, item := range list {
+		p := path + "[" + itoa(i) + "]"
+		s, _ := item.(string)
+		switch {
+		case !validHostname(s):
+			ps.add(p, "`%v` isn't a hostname; use lowercase like `example.com`, with no scheme, port, path or wildcard", item)
+		case seen[s]:
+			ps.add(p, "duplicate domain `%s`", s)
+		default:
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func validHostname(s string) bool {
+	if len(s) > 253 {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, l := range labels {
+		if !labelRE.MatchString(l) {
+			return false
+		}
+	}
+	return true
+}
+
+func parseDeploy(path string, v any, d *Deploy, ps *problems) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		ps.add(path, "must be a mapping (on:, branch:, tags:)")
+		return
+	}
+	for _, k := range sortedKeys(m) {
+		p := path + "." + k
+		s, isString := m[k].(string)
+		switch k {
+		case "on":
+			if s != "commit" && s != "tag" {
+				ps.add(p, "must be `commit` or `tag`")
+				continue
+			}
+			d.On = s
+		case "branch":
+			if !isString || s == "" || strings.IndexFunc(s, unicode.IsSpace) >= 0 || strings.Contains(s, "..") || strings.HasPrefix(s, "-") {
+				ps.add(p, "must be a branch name (no spaces, no `..`, not starting with -)")
+				continue
+			}
+			d.Branch = s
+		case "tags":
+			if !isString || s == "" {
+				ps.add(p, "must be a tag pattern like `v*`")
+				continue
+			}
+			d.Tags = s
+		default:
+			ps.add(p, "unknown key; deploy takes on, branch, tags")
+		}
+	}
+}
+
+func parseCommands(path string, v any, c *Commands, ps *problems) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		ps.add(path, "must be a mapping (console:, test:)")
+		return
+	}
+	for _, k := range sortedKeys(m) {
+		p := path + "." + k
+		switch k {
+		case "console":
+			c.Console = parseConsole(p, m[k], ps)
+		case "test":
+			s, isString := m[k].(string)
+			switch {
+			case !isString:
+				ps.add(p, "must be a string: tests run the same way everywhere")
+			case s == "":
+				ps.add(p, "must not be empty")
+			default:
+				c.Test = s
+			}
+		default:
+			ps.add(p, "unknown command; Houston runs `console` and `test` (tasks for every deploy go in hooks.release)")
+		}
+	}
+}
+
+func parseConsole(path string, v any, ps *problems) *Console {
+	switch v := v.(type) {
+	case string:
+		if v == "" {
+			ps.add(path, "must not be empty")
+			return nil
+		}
+		return &Console{Dev: v, Server: v}
+	case map[string]any:
+		c := &Console{}
+		for _, k := range sortedKeys(v) {
+			s, _ := v[k].(string)
+			switch k {
+			case "dev":
+				c.Dev = s
+			case "server":
+				c.Server = s
+			default:
+				ps.add(path+"."+k, "unknown key; console takes dev and server")
+			}
+		}
+		if c.Dev == "" || c.Server == "" {
+			ps.add(path, "needs both `dev` and `server` commands (or one string for both)")
+			return nil
+		}
+		return c
+	default:
+		ps.add(path, "must be a command string, or dev: and server: commands")
+		return nil
+	}
+}
+
+func parseHooks(path string, v any, h *Hooks, ps *problems) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		ps.add(path, "must be a mapping (release:, post_deploy:)")
+		return
+	}
+	for _, k := range sortedKeys(m) {
+		p := path + "." + k
+		s, isString := m[k].(string)
+		if k != "release" && k != "post_deploy" {
+			ps.add(p, "unknown hook; Houston runs `release` and `post_deploy`")
+			continue
+		}
+		if !isString {
+			ps.add(p, "must be a command string")
+			continue
+		}
+		if s == "" {
+			ps.add(p, "must not be empty")
+			continue
+		}
+		if k == "release" {
+			h.Release = s
+		} else {
+			h.PostDeploy = s
+		}
+	}
+}
+
+func parseBackups(path string, v any, b *Backups, ps *problems) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		ps.add(path, "must be a mapping (schedule:, keep:)")
+		return
+	}
+	for _, k := range sortedKeys(m) {
+		p := path + "." + k
+		switch k {
+		case "schedule":
+			s, _ := m[k].(string)
+			if !scheduleRE.MatchString(s) {
+				ps.add(p, "must look like `daily HH:MM` (24-hour)")
+				continue
+			}
+			b.Schedule = s
+		case "keep":
+			parseKeep(p, m[k], b, ps)
+		case "storage":
+			ps.add(p, "pick the backup target on the project page in Mission Control, not in the repo")
+		default:
+			ps.add(p, "unknown key; backups takes schedule and keep")
+		}
+	}
+}
+
+func parseKeep(path string, v any, b *Backups, ps *problems) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		ps.add(path, "must be a mapping (auto:, deploy:)")
+		return
+	}
+	for _, k := range sortedKeys(m) {
+		p := path + "." + k
+		n, isInt := m[k].(int)
+		if k != "auto" && k != "deploy" {
+			ps.add(p, "unknown key; keep takes auto and deploy")
+			continue
+		}
+		if !isInt || n < 1 || n > 1000 {
+			ps.add(p, "must be a whole number from 1 to 1000")
+			continue
+		}
+		if k == "auto" {
+			b.KeepAuto = n
+		} else {
+			b.KeepDeploy = n
+		}
+	}
+}

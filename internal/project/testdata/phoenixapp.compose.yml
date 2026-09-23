@@ -1,0 +1,40 @@
+name: phoenixapp
+
+services:
+  app:
+    build: { context: ., target: dev }
+    ports: ["4000:4000"]
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@${DB_HOST:-db}/phoenixapp
+      REDIS_URL: redis://${CACHE_HOST:-cache}:6379
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      PHX_HOST: phoenixapp.com
+    volumes:
+      - .:/app
+      - media:/media
+    depends_on: [db, cache]
+    deploy:
+      resources: { limits: { cpus: "2", memory: 2g } }
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  cache:
+    image: redis:7
+
+volumes:
+  media:
+  pgdata:
+
+x-houston:
+  health: /health
+  domains: [phoenixapp.com, www.phoenixapp.com]
+  deploy: { on: commit, branch: main }
+  commands:
+    console: { dev: iex -S mix, server: bin/phoenixapp remote }
+    test: mix test
+  hooks:
+    release: bin/phoenixapp eval "PhoenixApp.Release.migrate"
+  backups: { schedule: "daily 03:00", keep: { auto: 14, deploy: 10 } }

@@ -1,0 +1,17 @@
+# Houston's own dev tooling (not a Houston project). Use via bin/go, bin/test.
+name: houston-dev
+
+services:
+  cli:
+    build: { context: ., target: dev }
+    # Same absolute path as the host, so paths Houston hands to the host Docker daemon resolve.
+    working_dir: ${PWD}
+    volumes:
+      - ${PWD}:${PWD}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+
+volumes:
+  gomod:
+  gocache:
