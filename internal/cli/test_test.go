@@ -50,7 +50,7 @@ func TestTest_RunsInThrowawayProject(t *testing.T) {
 	dir, path := newProject(t, phoenixWithTest, nil)
 	d := &fakeDocker{runResult: byCommand(ok(3), ok(0))}
 
-	code, _, stderr := run(d, "test", "-f", path)
+	code, _, stderr := run(d, "-f", path, "test")
 
 	if code != 3 {
 		t.Errorf("exit = %d, want the test's 3 (stderr: %s)", code, stderr)
@@ -73,7 +73,7 @@ func TestTest_RunsInThrowawayProject(t *testing.T) {
 	}
 
 	again := &fakeDocker{}
-	run(again, "test", "-f", path)
+	run(again, "-f", path, "test")
 	if again.runs[0][2] == name {
 		t.Errorf("two runs used the same project name %q", name)
 	}
@@ -86,7 +86,7 @@ func TestTest_EnvironmentIsThrowaway(t *testing.T) {
 	_, path := newProject(t, phoenixWithTest, map[string]string{".env": "POSTGRES_PASSWORD=from-dotenv\n"})
 
 	d := &fakeDocker{}
-	code, _, stderr := run(d, "test", "-f", path)
+	code, _, stderr := run(d, "-f", path, "test")
 	if code != 0 || len(d.runEnvs) != 2 {
 		t.Fatalf("exit = %d, runs = %d (stderr: %s)", code, len(d.runEnvs), stderr)
 	}
@@ -113,7 +113,7 @@ func TestTest_EnvironmentIsThrowaway(t *testing.T) {
 	}
 
 	second := &fakeDocker{}
-	run(second, "test", "-f", path)
+	run(second, "-f", path, "test")
 	if envMap(second.runEnvs[0])["SECRET_KEY_BASE"] == env["SECRET_KEY_BASE"] {
 		t.Errorf("two runs got the same secret value")
 	}
@@ -123,7 +123,7 @@ func TestTest_NoTestCommand(t *testing.T) {
 	dir, path := newProject(t, phoenix, nil)
 	d := &fakeDocker{}
 
-	code, stdout, stderr := run(d, "test", "-f", path)
+	code, stdout, stderr := run(d, "-f", path, "test")
 
 	if code != 0 {
 		t.Errorf("exit = %d, want 0", code)
@@ -143,7 +143,7 @@ func TestTest_InvalidConfigAndPreflight(t *testing.T) {
 	t.Run("invalid compose file", func(t *testing.T) {
 		_, path := newProject(t, strings.Replace(phoenixWithTest, "health: /health", "health: health", 1), nil)
 		d := &fakeDocker{}
-		code, _, stderr := run(d, "test", "-f", path)
+		code, _, stderr := run(d, "-f", path, "test")
 		if code != 2 || d.calls() != 0 || !strings.Contains(stderr, "x-houston.health") {
 			t.Errorf("exit = %d, docker calls = %d, stderr = %s", code, d.calls(), stderr)
 		}
@@ -156,7 +156,7 @@ func TestTest_InvalidConfigAndPreflight(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, path := newProject(t, phoenixWithTest, nil)
-			code, _, _ := run(d, "test", "-f", path)
+			code, _, _ := run(d, "-f", path, "test")
 			if code != 1 || len(d.runs) != 0 {
 				t.Errorf("exit = %d, runs = %q; want 1 and none", code, d.runs)
 			}
@@ -171,7 +171,7 @@ func TestTest_TeardownAlwaysRuns(t *testing.T) {
 			func() (int, error) { return 1, errors.New("exec: docker: boom") },
 			ok(0),
 		)}
-		code, _, stderr := run(d, "test", "-f", path)
+		code, _, stderr := run(d, "-f", path, "test")
 		if code != 1 {
 			t.Errorf("exit = %d, want 1 (stderr: %s)", code, stderr)
 		}
@@ -182,7 +182,7 @@ func TestTest_TeardownAlwaysRuns(t *testing.T) {
 	t.Run("teardown fails", func(t *testing.T) {
 		_, path := newProject(t, phoenixWithTest, nil)
 		d := &fakeDocker{runResult: byCommand(ok(5), ok(1))}
-		code, _, stderr := run(d, "test", "-f", path)
+		code, _, stderr := run(d, "-f", path, "test")
 		if code != 5 {
 			t.Errorf("exit = %d, want the test's 5", code)
 		}
@@ -203,7 +203,7 @@ func TestTest_GeneratedFile(t *testing.T) {
 				atRun = string(b)
 			}
 		}}
-		run(d, "test", "-f", path)
+		run(d, "-f", path, "test")
 		if !strings.Contains(atRun, "target: test") {
 			t.Errorf("override when the run started =\n%s", atRun)
 		}
@@ -214,7 +214,7 @@ func TestTest_GeneratedFile(t *testing.T) {
 	t.Run(".houston is a file", func(t *testing.T) {
 		_, path := newProject(t, phoenixWithTest, map[string]string{".houston": "not a dir\n"})
 		d := &fakeDocker{}
-		code, _, stderr := run(d, "test", "-f", path)
+		code, _, stderr := run(d, "-f", path, "test")
 		if code != 1 || len(d.runs) != 0 {
 			t.Errorf("exit = %d, runs = %q; want 1 and none", code, d.runs)
 		}
@@ -243,7 +243,7 @@ func TestTest_KeepsDockersOwnEnvironment(t *testing.T) {
 	_, path := newProject(t, withHome, nil)
 	d := &fakeDocker{}
 
-	code, _, stderr := run(d, "test", "-f", path)
+	code, _, stderr := run(d, "-f", path, "test")
 
 	if code != 0 {
 		t.Fatalf("exit = %d (stderr: %s)", code, stderr)

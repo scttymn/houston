@@ -4,8 +4,10 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/sevenmoons/houston/internal/docker"
+	"github.com/sevenmoons/houston/internal/project"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +20,7 @@ const (
 // Main runs the houston command line and returns the process exit code.
 func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
 	var file string
+	var follow bool
 	code := 0
 
 	root := &cobra.Command{
@@ -25,26 +28,49 @@ func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
 		Short:         "Run and deploy a project described by compose.yml + x-houston",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Like docker compose, -f/--file goes before the command
+		// (houston -f other.yml dev), which frees -f for `logs -f`.
+		TraverseChildren: true,
+		// With TraverseChildren cobra hands unknown commands to root as
+		// arguments, so root rejects them itself; plain `houston` shows help.
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+			}
+			return cmd.Help()
+		},
 	}
-	root.PersistentFlags().StringVarP(&file, "file", "f", "compose.yml", "the project's compose file")
-	root.AddCommand(&cobra.Command{
-		Use:   "dev",
-		Short: "Run the project locally (dev build target, code mounted)",
-		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			code = runDev(file, stderr, d)
-			return nil
-		},
+	root.Flags().StringVarP(&file, "file", "f", "compose.yml", "the project's compose file (before the command)")
+
+	command := func(use, short string, run func() int) *cobra.Command {
+		return &cobra.Command{
+			Use:   use,
+			Short: short,
+			Args:  cobra.NoArgs,
+			RunE: func(*cobra.Command, []string) error {
+				code = run()
+				return nil
+			},
+		}
+	}
+	root.AddCommand(
+		command("dev", "Run the project locally (dev build target, code mounted)", func() int {
+			return runDev(file, stderr, d)
+		}),
+		command("test", "Run x-houston.commands.test in a throwaway copy of the project", func() int {
+			return runTest(file, stdout, stderr, d)
+		}),
+		command("console", "Run x-houston.commands.console in the running app", func() int {
+			return runConsole(file, stderr, d)
+		}),
+	)
+	logs := command("logs", "Show the app's logs", func() int {
+		return runLogs(file, follow, stderr, d)
 	})
-	root.AddCommand(&cobra.Command{
-		Use:   "test",
-		Short: "Run x-houston.commands.test in a throwaway copy of the project",
-		Args:  cobra.NoArgs,
-		RunE: func(*cobra.Command, []string) error {
-			code = runTest(file, stdout, stderr, d)
-			return nil
-		},
-	})
+	logs.Flags().BoolVarP(&follow, "follow", "f", false, "keep following new output")
+	root.AddCommand(logs)
+
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -54,4 +80,21 @@ func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
 		return exitUsage
 	}
 	return code
+}
+
+// loadProject loads the compose file, printing every problem on failure.
+func loadProject(file string, stderr io.Writer) (*project.Project, bool) {
+	p, err := project.Load(file)
+	if err != nil {
+		fmt.Fprint(stderr, err)
+		return nil, false
+	}
+	return p, true
+}
+
+// stdinIsTerminal reports whether Houston's stdin is a terminal. Tests
+// replace it.
+var stdinIsTerminal = func() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }

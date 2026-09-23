@@ -301,11 +301,74 @@ Commands: `bin/go test ./internal/variant/ ./internal/cli/ ./internal/project/` 
 - `docker compose run` exit code when the container is stopped by Ctrl-C (the test only pins "exits within 30 s, nothing left").
 - `down --rmi local` removes only the throwaway app image (tagged under `<P>`), never `houston dev`'s image.
 
+## Batch 4: `houston console` and `houston logs [-f]`
+
+Batch 3 is green and committed (`6aacd5e`). Batch 4 covers the two local commands that reach into what `houston dev` started. `--server` versions come with Mission Control (build step 3).
+
+### Design (short)
+
+- **Find the app container by Compose's labels, not by compose files.** `houston dev` pins the project name (`-p <name>`), so the app container is always labelled `com.docker.compose.project=<name>`, `com.docker.compose.service=<app>`, `com.docker.compose.oneoff=False`. The last label excludes `docker compose run` containers. `houston test` containers carry `<name>-test-…` and never match.
+  - console: `docker ps -q --filter …` (running only)
+  - logs: `docker ps -a -q --filter …` (a stopped app still has logs)
+  - Docker lists newest first, and Houston takes the first ID.
+  This needs no `.houston/` files and works even if the compose file changed since `dev` started.
+- **`houston console`** runs `docker exec -i [-t] <id> sh -c '<commands.console.dev>'`. `-t` only when Houston's stdin is a terminal, so `echo 'User.count' | houston console` works. The exit code is the console's. The command is already `$$`-unescaped by Load.
+- **`houston logs [-f]`** runs `docker logs [--follow] <id>`. The exit code is Docker's (Ctrl-C during `-f` is caught as in `dev`, so Docker exits first).
+- Terminal detection: `os.Stdin.Stat()` is a character device (no new dependency), behind a package variable the tests override.
+
+### Contract pin
+
+| Input / state | `console` | `logs [-f]` |
+|---|---|---|
+| Load problems | exit **2**, no Docker | same |
+| No `commands.console` | "no x-houston.commands.console", exit **2**, no Docker | — |
+| Docker preflight fails | exit **1** (same messages as `dev`) | same |
+| No running app container | "`<name>` isn't running; start it with `houston dev`", exit **1**, no exec | — |
+| No app container at all | — | "no app container for `<name>`; start it with `houston dev`", exit **1** |
+| Found | `exec -i[t] <id> sh -c <dev cmd>`, exit = console's | `logs [--follow] <id>`, exit = Docker's |
+| `--server`, `--tail`, other flags | usage error, exit **2** | same |
+
+### AC ↔ test map (Batch 4), `internal/cli/console_test.go`, `logs_test.go`
+
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | Exact `ps` query (project, service, oneoff=False, running only), then `exec -it <id> sh -c "iex -S mix"`. Exit = console's (4) | `TestConsole_ExecsInRunningApp` | Contract |
+| 2 | Stdin not a terminal → `exec -i` (no `-t`) | `TestConsole_PipedInputSkipsTTY` | Contract |
+| 3 | `{dev, server}` console runs `dev`. `$$NODE` in the file reaches exec as `$NODE` | `TestConsole_UsesDevCommand` | Contract, Parity |
+| 4 | App not running (empty `ps`) → exit 1 with the message, no exec | `TestConsole_AppNotRunning` | Preconditions, Signals |
+| 5 | No `commands.console` → exit 2, zero Docker calls | `TestConsole_NoConsoleCommand` | Preconditions |
+| 6 | Exact `ps -a` query, then `logs <id>`; `-f` → `logs --follow <id>`; exit passthrough | `TestLogs_ShowsAppLogs` | Contract |
+| 7 | No container at all → exit 1 with the message, no `logs` | `TestLogs_NoContainer` | Preconditions, Signals |
+| 8 | Several IDs → the first (newest) is used, for both commands | `TestConsoleAndLogs_UseNewestContainer` | Contract |
+| 9 | Both commands: invalid file → 2 with no Docker; preflight failures → 1 with no exec/logs; `--server` → 2 | `TestConsoleAndLogs_StopEarly` (table) | Preconditions, Honest surface |
+| 10 | **Real Docker:** with `houston dev` running the busybox fixture, `houston logs` shows the app's startup line, `houston console` (piped stdin) prints `dev` and passes through a failing console's exit code, and `houston logs -f` exits within 10 s of Ctrl-C with nothing left in its process group. After `dev` stops, `console` exits 1 with "isn't running" and `logs` still shows the stopped app's output | `internal/cli/console_integration_test.go` `TestConsoleLogsIntegration` | Parity, Crash/signals |
+
+Commands: `bin/go test ./internal/cli/` (rows 1–9); `bin/test-integration -run TestConsoleLogsIntegration` (row 10). The fixture's dev `CMD` gains a startup line and `httpd -v`, plus `commands.console: cat /stage`.
+
+### Lens run (Batch 4)
+
+| Lens | Where |
+|---|---|
+| Contract | 1–3, 6, 8 |
+| Preconditions | 4, 5, 7, 9: nothing is exec'd against a missing container |
+| Signals | 4, 7: the message says what to run |
+| Parity | 3, 10: same project name as `dev` (`-p`), same `$$` rule |
+| Honest surface | 9: no `--server` or `--tail` until they do something |
+| Crash / signals | 10: Ctrl-C on `logs -f` leaves nothing running |
+| Authz, Concurrency, At-least-once, Atomicity, Migrate | N/A: read-only against local Docker, nothing written |
+
+### Added during execute (Batch 4)
+- **`-f` clash:** Batch 2 made `-f/--file` a flag on every command, which left no `-f` for `logs -f` (follow, per the spec). Resolved as Compose does: `--file` is a root flag given before the command (`houston -f x dev`), and `logs -f` is follow. Batch 2/3 tests moved the flag; `TestCLI_FileFlagAndUsageErrors` checks that `dev -f x` is a usage error. With cobra's `TraverseChildren`, root had to reject unknown commands itself.
+- The review left one low-severity note: when `docker ps` fails after the preflight passed, the message is Docker's bare "exit status 1". It goes in the Batch 6 polish.
+
+### Check at execute time
+- `com.docker.compose.oneoff` label values (`False`/`True`) on current Compose.
+
 ## Later batches (titles only)
 
 2. **`houston dev`**: fully specified below.
 3. **`houston test`**: fully specified below.
-4. **`houston console` / `houston logs [-f]`**: find the app container by compose labels, TTY only when stdin is a TTY, and clear errors when nothing is running.
+4. **`houston console` / `houston logs [-f]`**: fully specified below.
 5. **`houston init` (Rails)**: detection, prompts, writing or extending `compose.yml` (SQLite `storage` volume, or Postgres when `pg` is in the Gemfile), Dockerfile stages, `.env` template, `.gitignore`, never overwriting silently.
 6. **`houston dev --production` + packaging**: `hou` symlink, release builds, laptop install script. Decide whether to keep cobra's built-in `completion` command (shell completions) or disable it; it's untested surface today. Also: the `cli` container runs as root, so on a Linux host files it writes (go.sum, generated code) come out root-owned. That's fine on macOS/OrbStack, and should be fixed before Linux CI or runners use this image (found in the Batch 1 review).
 
@@ -318,6 +381,6 @@ Commands: `bin/go test ./internal/variant/ ./internal/cli/ ./internal/project/` 
 ## Decisions made (say if any are wrong)
 
 - Exit codes: `0` success; `2` usage or config error; `1` any other Houston failure; `test`/`console` pass through the child's exit code.
-- The project root is the directory containing the compose file. `-f/--file` defaults to `compose.yml`.
+- The project root is the directory containing the compose file. `-f/--file` defaults to `compose.yml` and goes **before the command**, like `docker compose -f x up`: `houston -f other.yml dev`. After `logs`, `-f` means follow, like `docker compose logs -f` (decided in Batch 4, when the two clashed).
 - `houston test` ignores `.env` and gives every referenced variable a random throwaway value.
 - Precise compose-go calls (loader options, template variable extraction) are confirmed against the library at execute time. If an option doesn't exist as assumed, the plan's contract stays and only the mechanism changes.

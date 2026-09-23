@@ -29,7 +29,7 @@ func TestDevIntegration_BuildsServesAndStops(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	cmd := exec.Command(bin, "dev", "-f", composeFile)
+	cmd := exec.Command(bin, "-f", composeFile, "dev")
 	cmd.Stdout, cmd.Stderr = &output, &output
 	// Own process group, so the signal below reaches houston and compose
 	// together, the way a terminal's Ctrl-C does.

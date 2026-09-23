@@ -23,7 +23,7 @@ func TestTestIntegration_PassFailInterruptCleanup(t *testing.T) {
 		dir, composeFile, name := fixtureProject(t, "")
 		must(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("APP_SECRET=from-dotenv\nDB_HOST=nowhere\n"), 0o644))
 		for i := 1; i <= 2; i++ {
-			out, err := exec.Command(bin, "test", "-f", composeFile).CombinedOutput()
+			out, err := exec.Command(bin, "-f", composeFile, "test").CombinedOutput()
 			if code := exitCode(err); code != 0 {
 				t.Fatalf("run %d: exit %d, want 0:\n%s", i, code, out)
 			}
@@ -35,7 +35,7 @@ func TestTestIntegration_PassFailInterruptCleanup(t *testing.T) {
 
 	t.Run("failing test exits with its code", func(t *testing.T) {
 		_, composeFile, name := fixtureProject(t, "exit 7")
-		out, err := exec.Command(bin, "test", "-f", composeFile).CombinedOutput()
+		out, err := exec.Command(bin, "-f", composeFile, "test").CombinedOutput()
 		if code := exitCode(err); code != 7 {
 			t.Errorf("exit %d, want 7:\n%s", code, out)
 		}
@@ -47,7 +47,7 @@ func TestTestIntegration_PassFailInterruptCleanup(t *testing.T) {
 	t.Run("Ctrl-C tears down", func(t *testing.T) {
 		_, composeFile, name := fixtureProject(t, "sleep 300")
 		var out bytes.Buffer
-		cmd := exec.Command(bin, "test", "-f", composeFile)
+		cmd := exec.Command(bin, "-f", composeFile, "test")
 		cmd.Stdout, cmd.Stderr = &out, &out
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		must(t, cmd.Start())

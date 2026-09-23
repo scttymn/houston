@@ -13,8 +13,9 @@ import (
 // fakeDocker records what Houston asks docker to do.
 type fakeDocker struct {
 	lookErr    error
-	versionErr error // docker version
-	composeErr error // docker compose version
+	versionErr error  // docker version
+	composeErr error  // docker compose version
+	psOut      string // what `docker ps` prints
 	runExit    int
 	runs       [][]string
 	runDirs    []string
@@ -33,6 +34,8 @@ func (f *fakeDocker) Output(args ...string) ([]byte, error) {
 		return []byte("29.4.0\n"), f.versionErr
 	case len(args) > 1 && args[0] == "compose" && args[1] == "version":
 		return []byte("5.5.1\n"), f.composeErr
+	case len(args) > 0 && args[0] == "ps":
+		return []byte(f.psOut), nil
 	}
 	return nil, errors.New("unexpected Output call")
 }
@@ -113,7 +116,7 @@ func TestDev_RunsComposeWithOverride(t *testing.T) {
 		atRun = string(b)
 	}}
 
-	code, _, stderr := run(d, "dev", "-f", path)
+	code, _, stderr := run(d, "-f", path, "dev")
 
 	if code != 3 {
 		t.Errorf("exit = %d, want compose's 3 (stderr: %s)", code, stderr)
@@ -136,7 +139,7 @@ func TestDev_InvalidConfigExits2WithoutDocker(t *testing.T) {
 	dir, path := newProject(t, strings.Replace(phoenix, "health: /health", "health: health", 1), nil)
 	d := &fakeDocker{}
 
-	code, _, stderr := run(d, "dev", "-f", path)
+	code, _, stderr := run(d, "-f", path, "dev")
 
 	if code != 2 {
 		t.Errorf("exit = %d, want 2", code)
@@ -166,7 +169,7 @@ func TestDev_DockerPreflight(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, path := newProject(t, phoenix, nil)
-			code, _, stderr := run(tc.d, "dev", "-f", path)
+			code, _, stderr := run(tc.d, "-f", path, "dev")
 			if code != 1 {
 				t.Errorf("exit = %d, want 1", code)
 			}
@@ -208,7 +211,7 @@ func TestDev_WarnsAboutVariables(t *testing.T) {
 			_, path := newProject(t, phoenix, files)
 			d := &fakeDocker{}
 
-			code, _, stderr := run(d, "dev", "-f", path)
+			code, _, stderr := run(d, "-f", path, "dev")
 
 			if code != 0 || len(d.runs) != 1 {
 				t.Fatalf("exit = %d, runs = %d; warnings must not stop dev (stderr: %s)", code, len(d.runs), stderr)
@@ -237,7 +240,7 @@ func TestDev_BadDotEnvExits2(t *testing.T) {
 	_, path := newProject(t, phoenix, map[string]string{".env": "POSTGRES_PASSWORD=\"unterminated\n"})
 	d := &fakeDocker{}
 
-	code, _, stderr := run(d, "dev", "-f", path)
+	code, _, stderr := run(d, "-f", path, "dev")
 
 	if code != 2 {
 		t.Errorf("exit = %d, want 2", code)
@@ -259,7 +262,7 @@ func TestDev_IgnoresOverrideFile(t *testing.T) {
 			})
 			d := &fakeDocker{}
 
-			code, _, stderr := run(d, "dev", "-f", path)
+			code, _, stderr := run(d, "-f", path, "dev")
 
 			if code != 0 {
 				t.Fatalf("exit = %d (stderr: %s)", code, stderr)
@@ -285,9 +288,9 @@ func TestDev_GeneratedFile(t *testing.T) {
 		dir, path := newProject(t, phoenix, files)
 		generated := filepath.Join(dir, ".houston", "compose.dev.yml")
 
-		run(&fakeDocker{}, "dev", "-f", path)
+		run(&fakeDocker{}, "-f", path, "dev")
 		first, _ := os.ReadFile(generated)
-		run(&fakeDocker{}, "dev", "-f", path)
+		run(&fakeDocker{}, "-f", path, "dev")
 		second, _ := os.ReadFile(generated)
 
 		if string(first) != wantOverride || string(second) != wantOverride {
@@ -314,7 +317,7 @@ func TestDev_GeneratedFile(t *testing.T) {
 		_, path := newProject(t, phoenix, files)
 		d := &fakeDocker{}
 
-		code, _, stderr := run(d, "dev", "-f", path)
+		code, _, stderr := run(d, "-f", path, "dev")
 
 		if code != 1 {
 			t.Errorf("exit = %d, want 1", code)
@@ -338,7 +341,7 @@ func TestCLI_FileFlagAndUsageErrors(t *testing.T) {
 		t.Chdir(root)
 		d := &fakeDocker{}
 
-		code, _, stderr := run(d, "dev", "-f", "sub/compose.yml")
+		code, _, stderr := run(d, "-f", "sub/compose.yml", "dev")
 
 		if code != 0 {
 			t.Fatalf("exit = %d (stderr: %s)", code, stderr)
@@ -347,6 +350,17 @@ func TestCLI_FileFlagAndUsageErrors(t *testing.T) {
 		gotDir, _ := filepath.EvalSymlinks(d.runDirs[0])
 		if gotDir != wantDir {
 			t.Errorf("project dir = %q, want %q", d.runDirs[0], sub)
+		}
+	})
+	// Like docker compose: -f/--file goes before the command (houston -f x dev).
+	t.Run("file flag after the command", func(t *testing.T) {
+		_, path := newProject(t, phoenix, map[string]string{".env": "POSTGRES_PASSWORD=x\nSECRET_KEY_BASE=y\n"})
+		for _, args := range [][]string{{"dev", "-f", path}, {"test", "--file", path}} {
+			d := &fakeDocker{}
+			code, _, stderr := run(d, args...)
+			if code != 2 || d.calls() != 0 || !strings.Contains(stderr, "unknown") {
+				t.Errorf("%q: exit = %d, calls = %d, stderr = %q; want a usage error", args, code, d.calls(), stderr)
+			}
 		}
 	})
 	for _, args := range [][]string{{"dev", "--server"}, {"dev", "--production"}, {"dev", "--nope"}, {"bogus"}} {

@@ -25,9 +25,8 @@ func runTest(file string, stdout, stderr io.Writer, d docker.Runner) int {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
 		return exitUsage
 	}
-	p, err := project.Load(file)
-	if err != nil {
-		fmt.Fprint(stderr, err)
+	p, ok := loadProject(file, stderr)
+	if !ok {
 		return exitUsage
 	}
 	if p.Houston.Commands.Test == "" {

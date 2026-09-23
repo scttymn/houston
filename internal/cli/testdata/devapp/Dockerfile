@@ -4,7 +4,7 @@ WORKDIR /app
 
 FROM base AS dev
 RUN echo dev > /stage
-CMD ["httpd", "-f", "-p", "8080", "-h", "/app"]
+CMD ["sh", "-c", "echo houston-dev-started; exec httpd -f -v -p 8080 -h /app"]
 
 FROM base AS test
 RUN echo test > /stage

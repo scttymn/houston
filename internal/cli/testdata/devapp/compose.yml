@@ -17,4 +17,4 @@ volumes:
   data:
 x-houston:
   health: /up
-  commands: { test: 'test ! -e /data/written && test "$$(cat /stage)" = test && wget -qO- "$$DB_URL" | grep -q db-ok && test -n "$$APP_SECRET" && test "$$APP_SECRET" != from-dotenv && test ! -e /app/compose.yml && touch /data/written' }
+  commands: { test: 'test ! -e /data/written && test "$$(cat /stage)" = test && wget -qO- "$$DB_URL" | grep -q db-ok && test -n "$$APP_SECRET" && test "$$APP_SECRET" != from-dotenv && test ! -e /app/compose.yml && touch /data/written', console: sh }
