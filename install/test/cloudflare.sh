@@ -39,7 +39,7 @@ case "${1:-}" in
     echo "accounts the token sees: $(printf '%s' "$accounts" | jqr 'print(len(d.get("result") or []), "" if d.get("success") else d.get("errors"))')"
     [ -n "$zone" ] && echo "zone $base: found" || echo "zone $base: NOT found (check the token's Zone · DNS permission)"
     if [ -n "$zone" ]; then
-      for name in "*.$base" "admin.$base" "hooks.$base"; do
+      for name in "*.$base" "admin.$base" "hooks.$base" "houston-spike-test.$base" "houston-equip-test.$base"; do
         cf "$api/zones/$zone/dns_records?name=$name" | jqr "
 r=d.get('result') or []
 print('$name:', ('CAN\'T READ RECORDS: %s (give the token DNS · Edit on $base)' % d.get('errors')) if not d.get('success') else 'no record' if not r else '; '.join(f\"{x['type']} -> {x['content']} (proxied={x.get('proxied')}, comment={x.get('comment')!r})\" for x in r))"
@@ -61,16 +61,17 @@ print('tunnel $tunnel_name:', ('CAN\'T LIST TUNNELS: %s (give the token Cloudfla
     [ -n "$account" ] && [ -n "$zone" ] || { echo "can't see exactly one account and the zone; nothing done"; exit 1; }
     tunnels=$(cf "$api/accounts/$account/cfd_tunnel?name=$tunnel_name&is_deleted=false" | jqr 'print(" ".join(x["id"] for x in d.get("result") or []))')
     for id in $tunnels; do
-      for name in "*.$base" "admin.$base" "hooks.$base"; do
-        records=$(cf "$api/zones/$zone/dns_records?name=$name" | TUNNEL_ID="$id" jqr '
+      # Every record Houston made for this tunnel (admin., hooks., each project's
+      # name), and nothing else: the comment and the target must both match.
+      records=$(cf "$api/zones/$zone/dns_records?content=$id.cfargotunnel.com&per_page=100" | TUNNEL_ID="$id" jqr '
 import os
 for x in d.get("result") or []:
     if (x.get("comment") or "").startswith("managed-by:houston") and x["content"] == os.environ["TUNNEL_ID"] + ".cfargotunnel.com":
-        print(x["id"])')
-        for record in $records; do
-          cf -X DELETE "$api/zones/$zone/dns_records/$record" >/dev/null && echo "deleted $name (managed-by:houston, pointing at $tunnel_name)"
-        done
-      done
+        print(x["id"] + " " + x["name"])')
+      while read -r record record_name; do
+        [ -n "$record" ] || continue
+        cf -X DELETE "$api/zones/$zone/dns_records/$record" >/dev/null && echo "deleted $record_name (managed-by:houston, pointing at $tunnel_name)"
+      done <<<"$records"
       cf -X DELETE "$api/accounts/$account/cfd_tunnel/$id/connections" >/dev/null || true
       cf -X DELETE "$api/accounts/$account/cfd_tunnel/$id" | jqr 'print("deleted the tunnel" if d.get("success") else "tunnel delete failed: %s" % d.get("errors"))'
     done

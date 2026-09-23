@@ -34,9 +34,6 @@ class Deploy < ApplicationRecord
 
   # houston deploy's steps, in order (internal/deploy).
   STEPS = %w[Secrets Build Accessories Release Deploy Post-deploy].freeze
-  LABELS = { "in_flight" => "IN FLIGHT", "go" => "GO", "no_go" => "NO-GO" }.freeze
-
-  def label = LABELS.fetch(status)
   def short_sha = sha.first(7)
 
   # Each step as :done, :current, :failed or :pending.

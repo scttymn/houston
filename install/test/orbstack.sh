@@ -124,6 +124,8 @@ elif [ -f "$cf_file" ]; then
       sleep 5
     done
     if [ "$route" = go ]; then ok "the flight board says admin.$base reaches this Mission Control (after $((SECONDS - start))s; first seen: $first)"; else bad "the flight board's admin.$base route is '$route' after 5 minutes"; fi
+    echo "== deploys through the tunnel"
+    "$repo/install/test/deploy-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
     through 200 "https://hooks.$base/up"
     # Mission Control would redirect this; the hooks hostname only passes /<slug>, so the tunnel answers 404.
     through 404 "https://hooks.$base/setup/cloudflare"

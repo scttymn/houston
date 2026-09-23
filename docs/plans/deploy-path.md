@@ -473,6 +473,50 @@ From the design's Main (flight board), ProjectDetail and DeployLog boards. Snaps
 - **Visual check:** the three pages were rendered with sample data by a throwaway test (deleted afterwards) and viewed at 1440 px: the flight board's rows, the project page with HOLD / Save / Generate / Replace / Remove, and the deploy page with its steps and log. A real browser session needs a sign-in, which I don't do with a password.
 - Lists read deploys through `Deploy.summary`, which leaves out the log (up to 4 MiB each).
 
+## Batch 8: real run on svnmns.com
+
+### Design (short)
+- **The full check (`install/test/orbstack.sh`) gains a deploy stage** after the flight board check. It runs on the real tunnel, in host-by-host mode, as the houston user:
+  - **The spike fixture as `houston-spike-test`:** HOLD, then set secrets, then GO. Then, **through Cloudflare** from the Mac, `https://houston-spike-test.svnmns.com/env/HOSTILE` arrives byte-exact.
+  - **A copy of equip as `houston-equip-test`** (`EQUIP_SOURCE`, a Houston-ready copy; your repo is never touched): `RAILS_MASTER_KEY` comes from the copy's `config/master.key` and is never printed. Then GO, with `/up` 200 through Cloudflare.
+    - A redeploy while the Mac polls `https://houston-equip-test.svnmns.com/up` sees only 200s.
+    - A commit that breaks the health path is NO-GO, and the old version keeps answering 200.
+- **Guard:** `equip.svnmns.com` is live on your current server (200), so the test never uses a real app's name. Each test name must return the other server's 404 before its first deploy, or the stage stops.
+- **Cleanup:** `cloudflare.sh cleanup` deletes every record whose comment starts `managed-by:houston` and that points at the test tunnel. That covers `admin.`/`hooks.` and the projects' own records, and nothing without the comment or pointing elsewhere.
+
+### AC ↔ test map (Batch 8)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The installer checks from Batch 6 row 1 | `install/test/orbstack.sh` | Contract |
+| 2 | Spike: HOLD → GO; `https://houston-spike-test.svnmns.com/env/HOSTILE` byte-exact through Cloudflare | same, deploy stage | Parity |
+| 3 | Equip: GO; `/up` 200 through Cloudflare | same | Parity |
+| 4 | Equip redeploy: every poll through Cloudflare 200 | same | Parity |
+| 5 | Broken health path → NO-GO; the old version still 200 | same | Crash & repair |
+| 6 | Cleanup leaves svnmns.com as it was: the preflight matches the one before | `cloudflare.sh preflight` after | Crash & repair |
+
+### Done (Batch 8)
+- **`install/test/orbstack.sh ubuntu:noble` with `EQUIP_SOURCE`: PASS, 39 checks**, on the real svnmns.com tunnel in host-by-host mode:
+  - **Row 1:** git, the `houston` CLI (`houston` and `hou`), the runner token (in `.env`, and 0600 houston:houston in the user's file, identical), and the Kamal image. A rerun keeps `.env` byte-for-byte.
+  - **Row 2:** `houston-spike-test` held for HOSTILE and POSTGRES_PASSWORD, then went GO. `https://houston-spike-test.svnmns.com/env/HOSTILE` arrived byte-exact through Cloudflare.
+  - **Row 3:** `houston-equip-test` (a copy of equip; `RAILS_MASTER_KEY` staged 0600 in `.houston/e2e`, read inside the VM, deleted, never printed) held, then went GO: `/up` 200 through Cloudflare after 11 s of edge lag.
+  - **Row 4:** the redeploy saw 18 polls through Cloudflare, all 200.
+  - **Row 5:** a broken health path was NO-GO "kamal deploy failed", and the previous version still answered 200. Mission Control's records: equip #1 go, #2 go, #3 no_go; spike #1 go.
+  - **Row 6:** cleanup deleted `admin.`, `hooks.`, `houston-equip-test.` and `houston-spike-test.` (each managed-by:houston and pointing at the test tunnel) and the tunnel. The preflight afterwards matched the one before, and the live `equip.svnmns.com` still answered 200.
+- **Found by the first real run (a test-script bug, not Houston):**
+  - The staged equip copy excluded `storage/` entirely, `.keep` included. The image then had no `/rails/storage`, the volume's mount point was root's, and Rails (uid 1000) couldn't open SQLite ("unable to open database file" in the release hook). A real checkout keeps `storage/.keep` (Rails' `.gitignore`), so the script now copies the `.keep` files.
+  - The failure itself behaved as designed: NO-GO "release hook failed (exit 1)", nothing switched.
+- **Guard added before running:** `equip.svnmns.com` is a live app on the other server (200). Host-by-host mode would have made an explicit record for a test project named `equip` and taken that name over. The test names are `houston-*-test`, and the stage refuses to deploy a name that doesn't answer the other server's 404 first.
+
+## Review (build step 3, scotty-review over `7b7f79f..HEAD`)
+- **Cut:** `Deploy#label` and `Deploy::LABELS` had no caller (the view helper labels states). The Ruby pre-check for host clashes was cut earlier (Batch 2).
+- **Cold pass:**
+  - 4a (sync, deploy start and pages called twice) is covered by re-entry tests.
+  - 4b: the dead API above is cut. Every Go export has a production caller in `internal/deploy`.
+  - 4c: no inert flags.
+  - 4d (stuck-alive) is covered by the deadline (Batch 5).
+  - 4e: finalize ownership is checked in the writing transaction (Batch 3).
+- **Follow-up (not blocking):** `houston deploy` assumes it runs as the houston user (SSH key at `~/.ssh`). Run as root, Kamal's SSH would fail with Kamal's own message. A check with a clear message belongs with the runners in build step 4, which run as houston by construction.
+
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:
 - **What "localhost only" means for the runner's secrets route.** Mission Control runs in a container, so its callers show up as Docker addresses, and cloudflared sits on the same network as the runners.
