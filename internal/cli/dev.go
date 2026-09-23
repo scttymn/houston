@@ -44,7 +44,7 @@ func runDev(file string, stderr io.Writer, d docker.Runner) int {
 	}
 	// -p pins the project name: compose would otherwise let a stray
 	// COMPOSE_PROJECT_NAME (shell or .env) rename the containers.
-	code, err := d.Run(dir, "compose", "-p", p.Name, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
+	code, err := d.Run(dir, nil, "compose", "-p", p.Name, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
 		return exitFailure

@@ -215,7 +215,7 @@ func parseCommands(path string, v any, c *Commands, ps *problems) {
 			case s == "":
 				ps.add(p, "must not be empty")
 			default:
-				c.Test = s
+				c.Test = shellCommand(p, s, ps)
 			}
 		default:
 			ps.add(p, "unknown command; Houston runs `console` and `test` (tasks for every deploy go in hooks.release)")
@@ -230,16 +230,17 @@ func parseConsole(path string, v any, ps *problems) *Console {
 			ps.add(path, "must not be empty")
 			return nil
 		}
-		return &Console{Dev: v, Server: v}
+		cmd := shellCommand(path, v, ps)
+		return &Console{Dev: cmd, Server: cmd}
 	case map[string]any:
 		c := &Console{}
 		for _, k := range sortedKeys(v) {
 			s, _ := v[k].(string)
 			switch k {
 			case "dev":
-				c.Dev = s
+				c.Dev = shellCommand(path+".dev", s, ps)
 			case "server":
-				c.Server = s
+				c.Server = shellCommand(path+".server", s, ps)
 			default:
 				ps.add(path+"."+k, "unknown key; console takes dev and server")
 			}
@@ -277,9 +278,9 @@ func parseHooks(path string, v any, h *Hooks, ps *problems) {
 			continue
 		}
 		if k == "release" {
-			h.Release = s
+			h.Release = shellCommand(p, s, ps)
 		} else {
-			h.PostDeploy = s
+			h.PostDeploy = shellCommand(p, s, ps)
 		}
 	}
 }
@@ -333,4 +334,17 @@ func parseKeep(path string, v any, b *Backups, ps *problems) {
 			b.KeepDeploy = n
 		}
 	}
+}
+
+// shellCommand returns an x-houston command as the shell will run it. Compose
+// interpolates this file too, x-houston included, so a bare $NAME would be
+// replaced by compose (blank, with a warning) before anyone saw it. Commands
+// follow compose's own rule: $$ is a literal $, and a bare $NAME is an error.
+func shellCommand(path, s string, ps *problems) string {
+	var uses []use
+	scan(s, path, &uses)
+	for _, u := range uses {
+		ps.add(path, "write `$$%s`: compose reads this file too and would replace `$%s` with a value from your shell or .env", u.name, u.name)
+	}
+	return strings.ReplaceAll(s, "$$", "$")
 }

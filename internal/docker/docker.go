@@ -16,8 +16,8 @@ type Runner interface {
 	// Output runs docker with args and returns its stdout.
 	Output(args ...string) ([]byte, error)
 	// Run runs docker with args in dir, attached to Houston's stdio, and
-	// returns its exit code.
-	Run(dir string, args ...string) (int, error)
+	// returns its exit code. A nil env inherits Houston's environment.
+	Run(dir string, env []string, args ...string) (int, error)
 }
 
 // New returns a Runner for the real docker CLI.
@@ -38,13 +38,14 @@ func (cliRunner) Output(args ...string) ([]byte, error) {
 // docker as well, and docker needs time to stop containers; returning early
 // would hand the prompt back mid-shutdown. The signal is caught rather than
 // ignored so the child starts with the default disposition.
-func (cliRunner) Run(dir string, args ...string) (int, error) {
+func (cliRunner) Run(dir string, env []string, args ...string) (int, error) {
 	interrupts := make(chan os.Signal, 1)
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
 
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = dir
+	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Run()
 

@@ -18,6 +18,8 @@ type fakeDocker struct {
 	runExit    int
 	runs       [][]string
 	runDirs    []string
+	runEnvs    [][]string
+	runResult  func(args []string) (int, error) // optional; default is runExit, nil
 	outputs    [][]string
 	onRun      func() // called when Run is invoked, to inspect the filesystem
 }
@@ -35,11 +37,15 @@ func (f *fakeDocker) Output(args ...string) ([]byte, error) {
 	return nil, errors.New("unexpected Output call")
 }
 
-func (f *fakeDocker) Run(dir string, args ...string) (int, error) {
+func (f *fakeDocker) Run(dir string, env []string, args ...string) (int, error) {
 	f.runs = append(f.runs, args)
 	f.runDirs = append(f.runDirs, dir)
+	f.runEnvs = append(f.runEnvs, env)
 	if f.onRun != nil {
 		f.onRun()
+	}
+	if f.runResult != nil {
+		return f.runResult(args)
 	}
 	return f.runExit, nil
 }

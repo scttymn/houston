@@ -64,7 +64,7 @@ func Load(path string) (*Project, error) {
 	}
 
 	name := checkName(raw, &ps)
-	model, err := loadCompose(path, data, name)
+	model, err := loadCompose(path, data, raw, name)
 	if err != nil {
 		// compose-go stops at its first error; report it alone rather than
 		// piling Houston's checks on top of a file Docker itself rejects.
@@ -176,7 +176,7 @@ func checkName(raw map[string]any, ps *problems) string {
 
 // loadCompose runs Docker's own loader with interpolation and environment
 // resolution off, so the model keeps ${VAR} exactly as written.
-func loadCompose(path string, data []byte, name string) (*types.Project, error) {
+func loadCompose(path string, data []byte, raw map[string]any, name string) (*types.Project, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -188,6 +188,9 @@ func loadCompose(path string, data []byte, name string) (*types.Project, error) 
 		WorkingDir:  filepath.Dir(abs),
 		ConfigFiles: []types.ConfigFile{{Filename: abs, Content: data}},
 		Environment: types.Mapping{},
+	}
+	if rewritten, changed := variableBinds(raw); changed {
+		details.ConfigFiles[0] = types.ConfigFile{Filename: abs, Config: rewritten}
 	}
 	return loader.LoadWithContext(context.Background(), details, func(o *loader.Options) {
 		o.SkipInterpolation = true
@@ -207,6 +210,92 @@ func composeMessage(path string, err error) string {
 		msg = strings.TrimPrefix(msg, "validating "+abs+": ")
 	}
 	return msg
+}
+
+// variableBinds returns a deep copy of raw (compose-go modifies the document
+// it's given) with short-syntax service volumes whose source starts with a
+// variable (${HOME}/.ssh:/root/.ssh) rewritten into long syntax with type:
+// bind. Compose decides bind vs named volume after interpolation; Houston
+// loads without interpolating, so it decides here: a variable-led source is a
+// host path. The source text is kept as written.
+func variableBinds(raw map[string]any) (map[string]any, bool) {
+	doc := deepCopy(raw).(map[string]any)
+	services, _ := doc["services"].(map[string]any)
+	changed := false
+	for _, svc := range services {
+		fields, _ := svc.(map[string]any)
+		volumes, _ := fields["volumes"].([]any)
+		for i, v := range volumes {
+			s, _ := v.(string)
+			if spec, ok := bindSpec(s); ok {
+				volumes[i] = spec
+				changed = true
+			}
+		}
+	}
+	return doc, changed
+}
+
+func deepCopy(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		m := make(map[string]any, len(v))
+		for k, item := range v {
+			m[k] = deepCopy(item)
+		}
+		return m
+	case []any:
+		list := make([]any, len(v))
+		for i, item := range v {
+			list[i] = deepCopy(item)
+		}
+		return list
+	default:
+		return v
+	}
+}
+
+// bindSpec turns "${HOME}/.ssh:/root/.ssh:ro" into long syntax. It only
+// handles variable-led sources with an optional ro/rw mode.
+func bindSpec(s string) (map[string]any, bool) {
+	if !strings.HasPrefix(s, "$") || strings.HasPrefix(s, "$$") {
+		return nil, false
+	}
+	parts := splitVolume(s)
+	if len(parts) < 2 || len(parts) > 3 {
+		return nil, false
+	}
+	spec := map[string]any{"type": "bind", "source": parts[0], "target": parts[1]}
+	if len(parts) == 3 {
+		switch parts[2] {
+		case "ro":
+			spec["read_only"] = true
+		case "rw":
+		default:
+			return nil, false
+		}
+	}
+	return spec, true
+}
+
+// splitVolume splits a short-syntax volume on the colons outside ${...}, so
+// "${DATA:-./x}:/data" is two parts.
+func splitVolume(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '$' && i+1 < len(s) && s[i+1] == '{':
+			depth++
+			i++
+		case s[i] == '}' && depth > 0:
+			depth--
+		case s[i] == ':' && depth == 0:
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(parts, s[start:])
 }
 
 var allowedTopLevel = map[string]bool{"name": true, "services": true, "volumes": true, "x-houston": true}

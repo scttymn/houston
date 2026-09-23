@@ -36,6 +36,15 @@ func Main(args []string, stdout, stderr io.Writer, d docker.Runner) int {
 			return nil
 		},
 	})
+	root.AddCommand(&cobra.Command{
+		Use:   "test",
+		Short: "Run x-houston.commands.test in a throwaway copy of the project",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			code = runTest(file, stdout, stderr, d)
+			return nil
+		},
+	})
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)

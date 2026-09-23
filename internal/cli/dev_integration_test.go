@@ -4,8 +4,6 @@ package cli
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,36 +18,15 @@ import (
 // same path as on the host, so the project must live under the repo (not /tmp)
 // for the host daemon to see its bind mount.
 func TestDevIntegration_BuildsServesAndStops(t *testing.T) {
-	repo, err := filepath.Abs("../..")
-	must(t, err)
-	scratch := filepath.Join(repo, ".houston", "test-tmp")
-	must(t, os.MkdirAll(scratch, 0o755))
-	dir, err := os.MkdirTemp(scratch, "devapp-")
-	must(t, err)
-	t.Cleanup(func() { os.RemoveAll(dir) })
-
-	name := "houston-it-" + randomHex(t)
-	for _, f := range []string{"Dockerfile", "compose.yml"} {
-		b, err := os.ReadFile(filepath.Join("testdata", "devapp", f))
-		must(t, err)
-		b = bytes.ReplaceAll(b, []byte("NAME_SET_BY_TEST"), []byte(name))
-		must(t, os.WriteFile(filepath.Join(dir, f), b, 0o644))
-	}
-	composeFile := filepath.Join(dir, "compose.yml")
-
-	bin := filepath.Join(t.TempDir(), "houston")
-	if out, err := exec.Command("go", "build", "-o", bin, "github.com/sevenmoons/houston/cmd/houston").CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	dir, composeFile, name := fixtureProject(t, "")
+	must(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("APP_SECRET=dev-secret\n"), 0o644))
+	bin := buildHouston(t)
 
 	compose := func(args ...string) (string, error) {
 		base := []string{"compose", "-p", name, "--project-directory", dir, "-f", composeFile, "-f", filepath.Join(dir, ".houston", "compose.dev.yml")}
-		out, err := exec.Command("docker", append(base, args...)...).CombinedOutput()
+		out, err := exec.Command("docker", append(base, args...)...).Output() // stdout only: compose warns on stderr
 		return strings.TrimSpace(string(out)), err
 	}
-	t.Cleanup(func() {
-		exec.Command("docker", "compose", "-p", name, "down", "-v", "--rmi", "local", "--remove-orphans").Run()
-	})
 
 	var output bytes.Buffer
 	cmd := exec.Command(bin, "dev", "-f", composeFile)
@@ -86,6 +63,7 @@ func TestDevIntegration_BuildsServesAndStops(t *testing.T) {
 		t.Errorf("bind mount isn't live: %q %v", out, err)
 	}
 	var db string
+	var err error
 	for i := 0; i < 20; i++ {
 		if db, err = compose("exec", "-T", "app", "sh", "-c", "wget -qO- $DB_URL"); err == nil && db == "db-ok" {
 			break
@@ -112,11 +90,4 @@ func TestDevIntegration_BuildsServesAndStops(t *testing.T) {
 	if out, _ := compose("ps", "-q"); out != "" {
 		t.Errorf("containers still running after Ctrl-C: %s", out)
 	}
-}
-
-func randomHex(t *testing.T) string {
-	b := make([]byte, 4)
-	_, err := rand.Read(b)
-	must(t, err)
-	return hex.EncodeToString(b)
 }

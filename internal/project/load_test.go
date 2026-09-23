@@ -449,7 +449,7 @@ func TestLoad_VariableKinds(t *testing.T) {
 		{"nested default", "      A: ${A:-${B}}\n", "", "", []Variable{{"A", false, Secret}, {"B", true, Secret}}},
 		{"message isn't scanned", "      A: ${V:?set $OTHER}\n", "", "", []Variable{{"V", true, Secret}}},
 		{"required wins over optional", "      A: ${V}\n      B: ${V:-d}\n", "", "", []Variable{{"V", true, Secret}}},
-		{"x-houston ignored", "", "", "  health: /up\n  hooks: { release: echo $HOME }\n", nil},
+		{"x-houston ignored", "", "", "  health: /up\n  hooks: { release: echo $$HOME }\n", nil},
 		{"service host", "      U: ${DB_HOST:-db}\n", db, "", []Variable{{"DB_HOST", false, ServiceHost}}},
 		{"host var without service", "      U: ${DB_HOST:-db}\n", "", "", []Variable{{"DB_HOST", false, Secret}}},
 		{"dashed service", "      U: ${MY_DB_HOST:-my-db}\n", "  my-db:\n    image: postgres:17\n", "", []Variable{{"MY_DB_HOST", false, ServiceHost}}},
@@ -490,3 +490,81 @@ func TestLoad_VariableKinds(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestLoad_XHoustonDollarEscaping(t *testing.T) {
+	t.Run("$$ becomes $, $( stays", func(t *testing.T) {
+		xh := "  health: /up\n" +
+			"  commands:\n" +
+			"    test: 'test \"$$(cat /stage)\" = test && wget -qO- $$DB_URL && echo $(date)'\n" +
+			"    console: { dev: 'iex --sname $$NODE', server: bin/app remote }\n" +
+			"  hooks: { release: 'echo $${HOME}', post_deploy: bin/notify }\n"
+		p := mustLoad(t, writeCompose(t, doc{xh: xh}.String()))
+		if want := `test "$(cat /stage)" = test && wget -qO- $DB_URL && echo $(date)`; p.Houston.Commands.Test != want {
+			t.Errorf("Test = %q, want %q", p.Houston.Commands.Test, want)
+		}
+		if want := "iex --sname $NODE"; p.Houston.Commands.Console.Dev != want {
+			t.Errorf("Console.Dev = %q, want %q", p.Houston.Commands.Console.Dev, want)
+		}
+		if want := "echo ${HOME}"; p.Houston.Hooks.Release != want {
+			t.Errorf("Release = %q, want %q", p.Houston.Hooks.Release, want)
+		}
+		if p.Variables != nil {
+			t.Errorf("x-houston commands produced variables: %+v", p.Variables)
+		}
+	})
+	invalid := []struct {
+		name string
+		xh   string
+		path string
+		msg  string
+	}{
+		{"bare $NAME in test", "  health: /up\n  commands: { test: 'wget -qO- $DB_URL' }\n", "x-houston.commands.test", "$$DB_URL"},
+		{"braced in release", "  health: /up\n  hooks: { release: 'echo ${HOME}' }\n", "x-houston.hooks.release", "$$HOME"},
+		{"bare in console dev", "  health: /up\n  commands: { console: { dev: 'x $A', server: y } }\n", "x-houston.commands.console.dev", "$$A"},
+		{"bare in console string", "  health: /up\n  commands: { console: 'x $A' }\n", "x-houston.commands.console", "$$A"},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			assertProblem(t, loadProblems(t, writeCompose(t, doc{xh: tc.xh}.String())), tc.path, tc.msg)
+		})
+	}
+}
+
+func TestLoad_VariableLedBindMounts(t *testing.T) {
+	d := doc{
+		app: "    volumes:\n" +
+			"      - ${HOME}/.ssh:/root/.ssh:ro\n" +
+			"      - ${PWD}:/app\n" +
+			"      - ${DATA_DIR:-./data}:/data\n" +
+			"      - media:/media\n",
+		top: "volumes:\n  media:\n",
+	}
+	p := mustLoad(t, writeCompose(t, d.String()))
+
+	type mount struct {
+		Type, Source, Target string
+		ReadOnly             bool
+	}
+	var got []mount
+	for _, v := range p.Compose.Services["app"].Volumes {
+		got = append(got, mount{v.Type, v.Source, v.Target, v.ReadOnly})
+	}
+	want := []mount{
+		{"bind", "${HOME}/.ssh", "/root/.ssh", true},
+		{"bind", "${PWD}", "/app", false},
+		{"bind", "${DATA_DIR:-./data}", "/data", false},
+		{"volume", "media", "/media", false},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("volumes =\n%+v\nwant\n%+v", got, want)
+	}
+	wantVars := []Variable{{"DATA_DIR", false, Secret}, {"HOME", true, Secret}, {"PWD", true, Secret}}
+	if !reflect.DeepEqual(p.Variables, wantVars) {
+		t.Errorf("Variables = %+v, want %+v", p.Variables, wantVars)
+	}
+
+	t.Run("still a bind mount on a service", func(t *testing.T) {
+		d := doc{services: "  db:\n    image: postgres:17\n    volumes: [\"${HOME}/init.sql:/docker-entrypoint-initdb.d/init.sql\"]\n"}
+		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.db.volumes", "disappear on the server")
+	})
+}
