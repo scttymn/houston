@@ -1,8 +1,10 @@
 require "test_helper"
 require_relative "../support/project_helpers"
+require_relative "../support/fake_git"
 
 class ProjectPagesTest < ActionDispatch::IntegrationTest
   include ProjectHelpers
+  include FakeGitHelper
 
   setup do
     sign_in_as users(:one)
@@ -84,5 +86,35 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     delete project_secret_path("equip", "RAILS_MASTER_KEY")
     assert_redirected_to project_path("equip")
     assert_nil @project.secrets.find_by(key: "RAILS_MASTER_KEY")
+  end
+
+  test "connect pushes" do
+    linked = make_linked_project("garage")
+
+    get project_path("garage")
+    assert_select ".webhook", /https:\/\/hooks\.svnmns\.com\/garage/
+    assert_select ".webhook", /#{WEBHOOK_SECRET}/
+    assert_select ".webhook", /application\/json/
+
+    linked.update!(webhook_verified_at: Time.current)
+    get project_path("garage")
+    assert_not_includes response.body, WEBHOOK_SECRET
+    assert_select ".webhook", /Rotate secret/
+
+    post rotate_webhook_project_path("garage")
+    assert_redirected_to project_path("garage")
+    linked.reload
+    assert_not_equal WEBHOOK_SECRET, linked.webhook_secret
+    assert_nil linked.webhook_verified_at
+    follow_redirect!
+    assert_select ".webhook", /#{linked.webhook_secret}/
+
+    ls = FakeGit.new { |args, _| args[1] == "ls-remote" ? git_ok("#{"a" * 40}\trefs/heads/main\n") : git_ok }
+    use_fake_git(ls) { post check_project_path("garage") }
+    assert_redirected_to project_path("garage")
+    assert_equal "queued", linked.deploys.sole.status
+
+    get project_path("equip")
+    assert_select ".webhook", 0
   end
 end

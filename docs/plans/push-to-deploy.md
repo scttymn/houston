@@ -122,6 +122,74 @@ Retry: Save again → the project exists and is linked to this repo → idempote
   - Forgejo recreated with new host keys → NO-GO, "host key changed".
   - The first run failed every POST with a CSRF 422, for a script reason. Rails' tokens are per form, and my helper took the header's sign-out form token. The script now takes the token from the form it posts to.
 
+## Batch 2: Webhooks and check for changes
+
+### Design (short)
+- **`hooks.<base>` serves only two routes:** `POST /<name>` (the webhook) and `GET /ping` (the reachability probe; Mission Control's identity, as for `admin.`). Everything else on that host is a 404, before any other route.
+  - This closes a gap: the tunnel lets any `^/[a-z0-9-]+$` path through to Mission Control, so `hooks.<base>/session` reached the sign-in page.
+  - Routes on the admin host and the LAN address are unchanged.
+- **`WebhooksController < ActionController::API`** (no cookies or CSRF):
+  - Reads the raw body up to 5 MiB (more → 413).
+  - Rate limited to 30 per minute per project name (429).
+  - Accepts any one of:
+    - `X-Hub-Signature-256: sha256=<hex>` (GitHub, and also Gitea/Forgejo)
+    - `X-Gitea-Signature` / `X-Forgejo-Signature: <hex>`, the HMAC-SHA256 of the body with the project's webhook secret
+    - `X-Gitlab-Token` / `X-Houston-Token`, equal to the secret
+  - All comparisons are constant-time.
+  - An unknown project, an unlinked one, or a bad or missing signature all get the same empty 404, so the endpoint never says which.
+  - Verified → 202 (empty). `webhook_verified_at` is set on the first one, and `CheckForChangesJob` is enqueued. **The payload is never read**: it's a doorbell.
+- **`ChangeCheck`** (the job, and the Check for changes button):
+  - `GitRemote.refs(project)` runs `git ls-remote --heads --tags` with the project's deploy key and the same guards as Batch 1.
+  - The refs the deploy rule matches (`commit` → `refs/heads/<branch>`; `tag` → `refs/tags/*` matching the glob, `^{}` peeled refs used for tags) are compared with `projects.seen_refs`.
+  - Each moved or new ref queues a deploy of its SHA. `seen_refs` is updated in the same transaction.
+  - A failed ls-remote queues nothing and records `last_check_error`, shown on the project page.
+- **The queue:** `Deploy` gains a `queued` status and a partial unique index (one queued per project).
+  - Queueing while one is queued **switches that one to the newest SHA and ref**, with a log line saying so. It's still one record, and it keeps its number.
+  - Queueing while one is in flight creates a queued one.
+  - Runners claim queued deploys in Batch 3. Until then, the page shows QUEUED.
+  - `houston deploy` by hand is unchanged: it ignores the queue, and one in flight per project still holds.
+- **Project page → Connect pushes** (the design's section 04):
+  - the webhook URL `https://hooks.<base>/<name>`
+  - the secret shown in full until the first verified delivery, then masked with **Rotate secret** (a new secret, shown again until its first delivery)
+  - "Send push events as application/json"
+  - a Check for changes button
+  - the `hooks.<base>` route state
+- **`SystemStatus`** generalizes the admin route probe to `route(host)`; the empty board's pre-flight gets a "Route to hooks.<base>" row.
+
+### Concurrency template (queueing)
+```text
+Writer A: ChangeCheck from a webhook      Writer B: ChangeCheck from the button (or a second webhook)
+Ordering / lock: IMMEDIATE transaction (Rails 8.1 SQLite) + partial unique index on deploys(project_id) WHERE status='queued'
+Bad interleaving: both see no queued deploy, both insert
+Expected end state: one queued deploy with the newest SHA; seen_refs updated once per moved ref
+Re-check under the lock: find-or-update the queued row and write seen_refs in the same transaction
+Work under the lock: only deploys + projects rows; git ls-remote runs before the transaction
+```
+
+### AC ↔ test map (Batch 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | On `hooks.<base>`: `GET /session/new`, `GET /`, `POST /link`, `GET /projects/x`, `GET /up` → 404; `GET /ping` → the identity; the admin host is unchanged | `integration/hooks_host_test.rb` | Authz |
+| 2 | Signatures (table): GitHub `sha256=`, Forgejo, Gitea, GitLab token, Houston token → 202, empty, job enqueued. Wrong HMAC, HMAC of another body, a missing header, an unknown project, an unlinked project → 404, empty, no job | `controllers/webhooks_controller_test.rb` `test "only a signed push rings the doorbell"` | Authz, Contract |
+| 3 | The first verified delivery sets `webhook_verified_at`; later ones don't move it | `test "the first delivery is remembered"` | Signals |
+| 4 | Body > 5 MiB → 413, no job; the 31st in a minute → 429 | `test "webhooks are bounded"` | Scale |
+| 5 | ChangeCheck, commit rule: the branch moved → one queued deploy (SHA, ref); no move → nothing; other branches ignored; `seen_refs` updated | `models/change_check_test.rb` `test "a moved branch queues its commit"` | Contract |
+| 6 | Tag rule: a new tag matching the glob → queued (peeled SHA); non-matching tags ignored | `test "a new tag queues its commit"` | Contract |
+| 7 | Coalescing: a second move while queued → the same record switched to the newest SHA (count 1, log line); while in flight → a new queued one | `test "one queued deploy, always the newest"` | At-least-once |
+| 8 | The partial unique index allows one queued deploy per project | `models/deploy_test.rb` `test "one queued deploy per project"` | Concurrency |
+| 9 | ls-remote fails → nothing queued; `last_check_error` recorded and shown | `test "a failed check queues nothing"` | Signals |
+| 10 | Project page: URL, secret visible until verified then masked; Rotate → new secret visible and `verified_at` cleared; Check for changes runs the check | `controllers/project_pages_test.rb` `test "connect pushes"` | Contract |
+| 11 | `SystemStatus.route("hooks…")`: GO / HOLD / NO-GO as the admin route; the pre-flight row | `models/system_status_admin_route_test.rb` (generalized) | Signals |
+
+### Done (Batch 2)
+- **Red:** all 11 rows failed (4 failures, 7 errors). **Green:** 114 runs. Rubocop is clean on the 22 touched files, and the migration runs down and up.
+- **Found on the way:**
+  - The rate limiter's `by:` read `params`, which made Rails parse the body as JSON, so an oversized or malformed body errored before the doorbell ran. The controller reads the name from the path only, with `wrap_parameters false`. The payload is never parsed.
+  - The oversized request counts toward the rate limit, which is right. The test clears the limiter between its two parts.
+- **Mutations, each caught:** the hooks host serving other routes; any signature accepted; `seen_refs` never saved; no coalescing (the unique index raises); annotated tags deploying the tag object instead of the commit; `webhook_verified_at` moving on every push.
+- **Visual check:** a linked project's page, with Connect pushes (the URL, the secret until the first push, Check for changes, Rotate secret) and a QUEUED deploy, at 1440 px. A queued deploy's duration shows "—".
+- **Queued deploys wait for Batch 3's runners.** Until then, the page shows them as QUEUED.
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.

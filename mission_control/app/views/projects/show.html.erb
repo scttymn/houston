@@ -41,7 +41,7 @@
                 <% if deploy.error.present? %><small><%= deploy.error %></small><% end %>
               </span>
               <%= state_chip(deploy.status) %>
-              <span class="mono"><%= deploy.status == "in_flight" ? mission_elapsed(deploy.duration) : duration_words(deploy.duration) %></span>
+              <span class="mono"><%= { "queued" => "—", "in_flight" => mission_elapsed(deploy.duration) }.fetch(deploy.status) { duration_words(deploy.duration) } %></span>
               <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
             </li>
           <% end %>
@@ -56,6 +56,29 @@
       </section>
     </div>
 
+    <div class="column column--side">
+    <% if @project.repo_url.present? %>
+      <section class="panel webhook">
+        <h2 class="disp panel__title">Connect pushes</h2>
+        <p class="panel__row">Your git host calls this address on every push. Houston checks the secret, reads the repo's refs itself, and deploys what the deploy rule matches.</p>
+        <dl class="facts">
+          <dt class="mono">WEBHOOK URL</dt><dd class="mono">https://hooks.<%= @installation.base_domain %>/<%= @project.name %></dd>
+          <dt class="mono">SECRET</dt>
+          <dd class="mono"><%= @project.webhook_verified_at ? "•••••••• (shown until the first push arrived)" : @project.webhook_secret %></dd>
+          <dt class="mono">SEND</dt><dd>Push events, as application/json</dd>
+          <dt class="mono">REPO</dt><dd class="mono"><%= @project.repo_url %> · <%= @project.branch %></dd>
+        </dl>
+        <p class="panel__row panel__row--muted">
+          <% if @project.webhook_verified_at %>First push arrived <%= time_ago_in_words(@project.webhook_verified_at) %> ago.<% else %>Waiting for the first push. The secret is shown in full only until one arrives.<% end %>
+          <% if @hooks_route && @hooks_route.state != :go %><br><%= state_chip(@hooks_route.state == :hold ? :queued : :no_go) %> hooks.<%= @installation.base_domain %>: <%= @hooks_route.reason %><% end %>
+          <% if @project.last_check_error %><br><span class="field__error">Last check: <%= @project.last_check_error %></span><% end %>
+        </p>
+        <div class="panel__row webhook__actions">
+          <%= button_to "Check for changes", check_project_path(@project.name), class: "button button--small" %>
+          <%= button_to "Rotate secret", rotate_webhook_project_path(@project.name), class: "button button--small" %>
+        </div>
+      </section>
+    <% end %>
     <aside class="panel secrets">
       <h2 class="disp panel__title">Secrets</h2>
       <p class="panel__row panel__row--muted">Values are write-only: Houston never shows them again.</p>
@@ -87,5 +110,6 @@
         </div>
       <% end %>
     </aside>
+    </div>
   </div>
 </main>

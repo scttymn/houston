@@ -14,5 +14,6 @@ module ProjectPage
       @variables = project.variables.sort_by { |v| [ v["required"] ? 0 : 1, v["name"] ] }
       @missing = project.missing_secrets
       @secret_errors = secret_errors
+      @hooks_route = SystemStatus.route(@installation, "hooks") if project.repo_url.present?
     end
 end

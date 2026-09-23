@@ -137,6 +137,12 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "the pre-flight checks the route to hooks.<base>" do
+    stub_tunnel
+    get root_path
+    assert_select ".preflight li[data-check=hooks-route][data-state=go]", /Route to hooks\.svnmns\.com/
+  end
+
   test "on admin.<base> the route row is GO without probing" do
     stub_tunnel
     sign_in_on_admin_host

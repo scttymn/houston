@@ -23,6 +23,7 @@ module ActiveSupport
     def stub_local_services
       stub_request(:get, "http://registry:5000/v2/").to_return(status: 200, body: "{}")
       stub_request(:get, "https://admin.svnmns.com/ping").to_return(body: Installation.identity)
+      stub_request(:get, "https://hooks.svnmns.com/ping").to_return(body: Installation.identity)
     end
   end
 end

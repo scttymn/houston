@@ -12,7 +12,7 @@ class Deploy < ApplicationRecord
     end
   end
 
-  STATUSES = %w[in_flight go no_go].freeze
+  STATUSES = %w[queued in_flight go no_go].freeze
   # houston deploy reports at least every 30 s; after this long without a
   # word, the next deploy may take over.
   STALE_AFTER = 2.minutes
@@ -38,6 +38,7 @@ class Deploy < ApplicationRecord
 
   # Each step as :done, :current, :failed or :pending.
   def step_states
+    return STEPS.index_with(:pending) if status == "queued"
     at = STEPS.index(step) || 0
     STEPS.each_with_index.to_h do |name, i|
       state = if status == "go" || i < at then :done
@@ -71,6 +72,21 @@ class Deploy < ApplicationRecord
       number = (project.deploys.maximum(:number) || 0) + 1
       deploy = project.deploys.create!(number:, sha:, ref:, token_digest: digest(token), heartbeat_at: Time.current)
       [ deploy, token, took_over ]
+    end
+  end
+
+  # Queues a deploy of sha for a runner (build step 4). One queued deploy per
+  # project: a newer push switches it, so a burst of pushes deploys once,
+  # the newest. Runs in the caller's transaction when there is one.
+  def self.queue!(project, sha:, ref:)
+    transaction do
+      if (queued = project.deploys.find_by(status: "queued"))
+        queued.update!(sha:, ref:, log: queued.log + "A newer push switched to #{sha.first(7)} (#{ref}).\n")
+        queued
+      else
+        number = (project.deploys.maximum(:number) || 0) + 1
+        project.deploys.create!(number:, sha:, ref:, status: "queued", token_digest: "", heartbeat_at: Time.current)
+      end
     end
   end
 

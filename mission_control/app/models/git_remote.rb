@@ -9,6 +9,7 @@ class GitRemote
   Result = Data.define(:success, :output)
   Access = Data.define(:ok, :message)
   Read = Data.define(:ok, :sha, :inspection, :problems)
+  Refs = Data.define(:ok, :refs, :error)
 
   class Runner
     def call(args, env)
@@ -35,6 +36,17 @@ class GitRemote
       else
         Access.new(ok: false, message: "Houston can read the repo, but it has no branch #{link.branch}")
       end
+    end
+  end
+
+  # Every branch and tag, ref → sha (with peeled ^{} entries for tags).
+  def self.refs(project)
+    with_key(project) do |env, key|
+      result = runner.call([ "git", "ls-remote", "--heads", "--tags", "--", project.repo_url ], env)
+      next Refs.new(ok: false, refs: {}, error: explain(result.output, key)) unless result.success
+
+      refs = result.output.lines.filter_map { |line| sha, ref = line.strip.split("\t", 2); [ ref, sha ] if ref && sha.to_s.match?(/\A\h{40}\z/) }.to_h
+      Refs.new(ok: true, refs:, error: nil)
     end
   end
 

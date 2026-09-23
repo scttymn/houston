@@ -219,7 +219,7 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 /* Projects, project detail, deploys (build step 3) */
 .state--in-flight { color: var(--link); }
 .state--no-go { color: var(--nogo-fg); }
-.state--standby { color: var(--muted); }
+.state--standby, .state--queued { color: var(--muted); }
 .crumbs a { color: inherit; }
 .hosts { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 14px; }
 .flight { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -257,3 +257,7 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .deploy-key { margin: 0; padding: 10px 12px; background: var(--ink); color: var(--on-dark); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .problems pre { margin: 0; white-space: pre-wrap; color: var(--nogo-fg); font-size: 13px; }
 .link-save { display: flex; justify-content: flex-end; align-items: center; gap: 16px; flex-wrap: wrap; }
+.webhook .mono { overflow-wrap: anywhere; }
+.column--side { flex: 0 0 min(420px, 100%); }
+.column--side .secrets { width: auto; }
+.webhook__actions { flex-direction: row; flex-wrap: wrap; gap: 8px; }

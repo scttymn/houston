@@ -36,12 +36,19 @@ module SystemStatus
   # The probe's result is cached, not the state: HOLD turns into NO-GO with
   # the clock.
   def self.admin_route(installation = Installation.current, on_admin: false)
-    return unless installation.connected? && installation.base_domain.present?
-    return Route.new(state: :go, reason: nil) if on_admin
+    route(installation, "admin", on_host: on_admin)
+  end
 
-    miss = Rails.cache.read([ "system_status/admin_route", installation.base_domain ]) || begin
-      miss = probe_admin(installation.base_domain)
-      Rails.cache.write([ "system_status/admin_route", installation.base_domain ], miss, expires_in: miss.empty? ? CACHE_FOR : RECHECK_MISS_AFTER)
+  # The same probe for <label>.<base> (admin, hooks): both route /ping to
+  # Mission Control.
+  def self.route(installation, label, on_host: false)
+    return unless installation.connected? && installation.base_domain.present?
+    return Route.new(state: :go, reason: nil) if on_host
+
+    key = [ "system_status/route", label, installation.base_domain ]
+    miss = Rails.cache.read(key) || begin
+      miss = probe("#{label}.#{installation.base_domain}")
+      Rails.cache.write(key, miss, expires_in: miss.empty? ? CACHE_FOR : RECHECK_MISS_AFTER)
       miss
     end
 
@@ -51,9 +58,8 @@ module SystemStatus
     end
   end
 
-  # "" when admin.<base> answered as this install, otherwise what happened.
-  def self.probe_admin(base_domain)
-    host = "admin.#{base_domain}"
+  # "" when host answered as this install, otherwise what happened.
+  def self.probe(host)
     response = Net::HTTP.start(host, 443, use_ssl: true, open_timeout: TIMEOUT, read_timeout: TIMEOUT) { |http| http.get("/ping") }
     code = response.code.to_i
     if code == 200 && ActiveSupport::SecurityUtils.secure_compare(response.body.to_s.strip, Installation.identity) then ""
@@ -67,7 +73,7 @@ module SystemStatus
   rescue SystemCallError, OpenSSL::SSL::SSLError => e
     "couldn't connect to #{host} from this server (#{e.message})"
   end
-  private_class_method :probe_admin
+  private_class_method :probe
 
   def self.registry_up?
     Rails.cache.fetch("system_status/registry", expires_in: CACHE_FOR) do

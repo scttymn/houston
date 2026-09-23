@@ -1,4 +1,13 @@
 Rails.application.routes.draw do
+  # hooks.<base> answers only the webhook and the ping; everything else there
+  # is an empty 404, before any other route.
+  constraints(HooksHost) do
+    get "ping", to: "pings#show"
+    post ":name", to: "webhooks#create", constraints: { name: /[a-z][a-z0-9-]*/ }
+    match "/", to: "webhooks#not_found", via: :all
+    match "*path", to: "webhooks#not_found", via: :all, format: false
+  end
+
   resource :session, only: %i[ new create destroy ]
   resource :setup, only: %i[ show create ], controller: "setup"
   namespace :setup do
@@ -28,6 +37,10 @@ Rails.application.routes.draw do
   post "link", to: "project_links#create"
 
   resources :projects, only: :show, param: :name do
+    member do
+      post :check
+      post :rotate_webhook
+    end
     resources :deploys, only: :show, param: :number
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member

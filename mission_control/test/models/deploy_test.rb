@@ -15,4 +15,14 @@ class DeployTest < ActiveSupport::TestCase
     Deploy.insert!(row.(other, 1, "in_flight"))
     assert_equal 3, Deploy.count
   end
+
+  test "one queued deploy per project" do
+    equip = Project.create!(name: "equip", app_service: "app", services: %w[app], health: "/up", port: 80)
+    other = Project.create!(name: "other", app_service: "app", services: %w[app], health: "/up", port: 80)
+    row = ->(project, number) { { project_id: project.id, number:, sha: "a" * 40, ref: "refs/heads/main", status: "queued", token_digest: "", heartbeat_at: Time.current } }
+
+    Deploy.insert!(row.(equip, 1))
+    assert_raises(ActiveRecord::RecordNotUnique) { Deploy.insert!(row.(equip, 2)) }
+    Deploy.insert!(row.(other, 1))
+  end
 end

@@ -12,4 +12,15 @@ module ProjectHelpers
                             heartbeat_at: started, created_at: started,
                             finished_at: (status == "in_flight" ? nil : started + 90.seconds))
   end
+
+  WEBHOOK_SECRET = "whsec-#{"x" * 40}"
+
+  # A project Add project linked: a repo, a deploy key, a webhook secret.
+  def make_linked_project(name, deploy_rule: { "on" => "commit", "branch" => "main" }, **options)
+    make_project(name, deploy_rule:, **options).tap do |project|
+      project.update!(repo_url: "git@forgejo:houston/#{name}.git", branch: "main", compose_path: "compose.yml",
+                      deploy_key_private: "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n",
+                      deploy_key_public: "ssh-ed25519 AAAAfake houston@svnmns.com", webhook_secret: WEBHOOK_SECRET)
+    end
+  end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_110000) do
   create_table "deploys", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "error"
@@ -28,6 +28,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_100000) do
     t.index ["project_id", "number"], name: "index_deploys_on_project_id_and_number", unique: true
     t.index ["project_id"], name: "index_deploys_on_project_id"
     t.index ["project_id"], name: "index_deploys_one_in_flight", unique: true, where: "status = 'in_flight'"
+    t.index ["project_id"], name: "index_deploys_one_queued", unique: true, where: "status = 'queued'"
   end
 
   create_table "installations", force: :cascade do |t|
@@ -62,9 +63,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_100000) do
     t.json "deploy_rule", default: {}, null: false
     t.json "domains", default: [], null: false
     t.string "health", null: false
+    t.string "last_check_error"
+    t.datetime "last_checked_at"
     t.string "name", null: false
     t.integer "port", null: false
     t.string "repo_url"
+    t.json "seen_refs", default: {}, null: false
     t.json "services", default: [], null: false
     t.datetime "synced_at"
     t.datetime "updated_at", null: false

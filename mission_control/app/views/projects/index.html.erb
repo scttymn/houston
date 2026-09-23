@@ -139,7 +139,18 @@
               <span><span>Route to admin.<%= base %></span><small><%= detail %></small></span>
             </li>
           <% end %>
-          <% if @installation.dns_mode == "per_host" %>
+          <% if @hooks_route %>
+          <% hooks_label, hooks_detail = case @hooks_route.state
+             when :go then [ "GO", "Webhooks reach this Mission Control through Cloudflare" ]
+             when :hold then [ "HOLD", "Switching over, which can take a few minutes. Last check: #{@hooks_route.reason}" ]
+             else [ "NO-GO", @hooks_route.reason.upcase_first ]
+             end %>
+          <li data-check="hooks-route" data-state="<%= @hooks_route.state %>">
+            <span class="mono state state--<%= @hooks_route.state %>"><%= hooks_label %></span>
+            <span><span>Route to hooks.<%= base %></span><small><%= hooks_detail %></small></span>
+          </li>
+        <% end %>
+        <% if @installation.dns_mode == "per_host" %>
             <li><span class="mono state state--go">GO</span><span><span>admin.<%= base %> and hooks.<%= base %></span><small>Sharing the domain: another server has *.<%= base %>, so each app gets its own record when it's first deployed</small></span></li>
           <% else %>
             <li><span class="mono state state--go">GO</span><span><span>*.<%= base %></span><small>New apps get a subdomain automatically</small></span></li>

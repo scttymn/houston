@@ -67,4 +67,12 @@ class SystemStatusAdminRouteTest < ActiveSupport::TestCase
     travel(6.seconds) { SystemStatus.admin_route(@installation) }
     assert_requested ping, times: 2
   end
+
+  test "the route to hooks.<base> is probed the same way" do
+    stub_request(:get, "https://hooks.svnmns.com/ping").to_return(status: 404, body: "404 page not found")
+    travel(1.minute) { assert_equal :hold, SystemStatus.route(@installation, "hooks").state }
+    Rails.cache.clear
+    stub_request(:get, "https://hooks.svnmns.com/ping").to_return(body: Installation.identity)
+    assert_equal :go, SystemStatus.route(@installation, "hooks").state
+  end
 end
