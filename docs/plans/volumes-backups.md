@@ -373,3 +373,54 @@ The snapshot goes **after Build and before Accessories**, not just before Releas
 - **scotty-review (cold pass):** nothing to fix.
   - Ownership and "in flight" are checked before a run is created. A takeover mid-wait stops as any stop does. The wait is bounded by the deploy's deadline, and an API blip mid-wait is logged and retried until then.
   - **Noted:** a very large snapshot counts against the deploy's 30-minute deadline. Batch 8's real run will show real durations.
+
+## Batch 6: Volume placement
+
+### Design (short)
+- **Where a volume can live:** local disk (built in; no location), or an acknowledged location of kind `nfs` or `local` (a host path): `StorageLocation#live?`. s3 and b2 hold backups only (spec §9).
+- **`ProjectVolume`** (`project_id`, `name`, `location_id` null = local disk, `placed_at`; unique `(project_id, name)`). A row is made for each app volume at sync (local disk unless chosen), or earlier when chosen.
+- **Choosing** is allowed until the volume is placed (`placed_at` set); after that it's fixed ("moving a volume is a later feature", spec §12):
+  - Add project's Save form: a select per volume the preview found (local disk or a live location)
+  - the project page's Volumes panel: the same select per volume, until it's placed
+  - `PATCH /api/v1/projects/:name/volumes/:volume {location: <name> | null}`, and `houston volumes place VOLUME LOCATION` / `--local-disk`
+- **Placing, at sync** (`VolumePlacement`, after `ProjectSync#save!`, before DNS; a refusal is the sync's 422, so the deploy stops before Kamal). For each app volume, `docker volume inspect --format '{{json .Options}}' <name>_<volume>`:
+  - **Absent:**
+    - local disk → `docker volume create <name>_<volume>`
+    - `nfs` → make `volumes/<name>/<volume>` on the export (a helper container, root, with the location's `houston-storage-<location>` volume), then `docker volume create --driver local --opt type=nfs --opt o=addr=<server>,rw,nfsvers=4 --opt device=:<export>/volumes/<name>/<volume> <name>_<volume>`
+    - `local` path → make `<path>/volumes/<name>/<volume>` (a helper, root, the path mounted), then `--opt type=none --opt o=bind --opt device=<path>/volumes/<name>/<volume>`
+    - Then `placed_at` is set.
+  - **Present and matching** (no options for local disk; the same device for a location) → `placed_at` is set; nothing is created. A crash between create and record lands here.
+  - **Present elsewhere** → refused: "<name>_<volume> already exists on <where>, not <chosen>; Houston doesn't move volumes yet: choose <where>, or move it yourself". Nothing is created.
+  - The helper's mkdir failing → refused with its words.
+  - Postgres data (accessory volumes) isn't an app volume, so it stays where Kamal makes it: local disk.
+- **The SQLite-on-NFS warning:** on the Volumes panel, next to an NFS location: "Live SQLite over a network share risks corruption". It's stronger when the last GO backup found SQLite files in that volume.
+- **`GET /api/v1/projects/:name/volumes`** → `[{name, path, location, placed}]`; `houston volumes` lists them.
+
+### AC ↔ test map (Batch 6)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Placing on local disk, NFS, a host path: the exact commands (mkdir as root through the location, then create with those options); `placed_at` set; the volume names from the project and the volume only | `models/volume_placement_test.rb` `test "placing new volumes"` | Contract |
+| 2 | An existing matching volume → placed, nothing created. One elsewhere → refused with where it is, nothing created. mkdir failing → refused with its words | `test "a volume that's already somewhere"` | Crash & repair, Preconditions |
+| 3 | Sync places the volumes and a refusal is its 422 (DNS untouched); volumes of an older sync without the field → none | `integration/api_sync_test.rb` `test "sync places the volumes"` | Contract |
+| 4 | Only live, acknowledged locations can be chosen; a placed volume can't be changed (409); an unknown volume → 404 | `models/project_volume_test.rb`, `integration/api_v1_volumes_test.rb` | Preconditions |
+| 5 | The project page: a select per unplaced volume, saving it; a placed one read-only with its location; the SQLite-on-NFS warning; signed out → sign-in | `controllers/project_volumes_test.rb` `test "choosing where a volume lives"` | Authz, Contract |
+| 6 | Add project's Save: the chosen locations are stored for the new project | `controllers/project_links_test.rb` `test "choosing volume locations when saving"` | Contract |
+| 7 | API: list, place by name or null, refused choices → 422/409 | `integration/api_v1_volumes_test.rb` `test "volumes over the API"` | Contract, Authz |
+| 8 | CLI: `houston volumes` lists; `volumes place media unas-nfs` and `--local-disk`; errors → exit 1 | `internal/cli` `TestVolumes` | Contract |
+
+### Done (Batch 6)
+- **Red:** the Go CLI failed; Mission Control had 2 failures and 6 errors in the new tests. **Green:** Mission Control 206 runs and the Go suite. The migration runs down and up. rubocop and gofmt are clean.
+- **Found on the way:**
+  - **The location's own NFS volume is made sure of before the mkdir** (`ensure_volume`, from setup). `docker run -v houston-storage-<location>:/location` with that volume missing (a `docker volume prune`, say) quietly makes an empty local one. The mkdir would "succeed" into it, and the app's volume would point at a directory that doesn't exist on the NFS server.
+  - **The existing sync test** that sends volumes now fakes docker. Placement would otherwise run the real docker CLI in the dev container and make a real volume on this machine.
+- **Mutations, each caught:**
+  - an existing volume elsewhere accepted
+  - no mkdir before a location volume
+  - the location's volume not ensured
+  - a placed volume changeable
+  - backup-only locations holding live volumes
+  - sync skipping placement
+  - Add project ignoring the choices
+- **scotty-review (cold pass):** one LOW finding, fixed: two syncs of one project at once (a hand deploy beside a runner) could race to create a volume's row and hit its unique index as a 500. Both sites use `create_or_find_by!` now.
+  - Volume names are sync-validated (no `/`, no leading `.`), so the directory path can't escape `volumes/<project>/`.
+  - A volume dropped from compose.yml keeps its row and its data; the lists show the file's volumes.

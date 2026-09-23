@@ -170,3 +170,41 @@ func readBody(r *http.Request) string {
 	b, _ := io.ReadAll(r.Body)
 	return string(b)
 }
+
+func TestVolumes(t *testing.T) {
+	var body string
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/equip/volumes": respond(`{"volumes":[{"name":"storage","path":"/rails/storage","location":null,"placed":false},{"name":"media","path":"/media","location":"unas-nfs","placed":true}]}`),
+		"/api/v1/projects/equip/volumes/storage": func(w http.ResponseWriter, r *http.Request) {
+			body = readBody(r)
+			w.Write([]byte(`{"name":"storage","path":"/rails/storage","location":"unas-nfs","placed":false}`))
+		},
+		"/api/v1/projects/equip/volumes/media": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"error":"media is already on unas-nfs; moving a volume is a later feature"}`))
+		},
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, _ := run(&fakeDocker{}, "volumes", "--project", "equip")
+	if code != 0 || !regexp.MustCompile(`(?m)^storage +/rails/storage +local disk +not yet placed$`).MatchString(out) ||
+		!regexp.MustCompile(`(?m)^media +/media +unas-nfs +placed$`).MatchString(out) {
+		t.Errorf("list: exit %d\n%s", code, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "volumes", "place", "storage", "unas-nfs", "--project", "equip")
+	if code != 0 || body != `{"location":"unas-nfs"}` || !strings.Contains(out, "storage will be placed on unas-nfs") {
+		t.Errorf("place: exit %d, body %s\n%s", code, body, out)
+	}
+	code, _, _ = run(&fakeDocker{}, "volumes", "place", "storage", "--local-disk", "--project", "equip")
+	if code != 0 || body != `{"location":null}` {
+		t.Errorf("--local-disk: exit %d, body %s", code, body)
+	}
+	code, _, errOut := run(&fakeDocker{}, "volumes", "place", "media", "--local-disk", "--project", "equip")
+	if code != 1 || !strings.Contains(errOut, "moving a volume is a later feature") {
+		t.Errorf("placed: exit %d, %q", code, errOut)
+	}
+	code, _, errOut = run(&fakeDocker{}, "volumes", "place", "storage", "--project", "equip")
+	if code != 2 || !strings.Contains(errOut, "a location, or --local-disk") {
+		t.Errorf("no location: exit %d, %q", code, errOut)
+	}
+}

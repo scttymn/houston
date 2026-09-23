@@ -135,3 +135,52 @@ func runSettings(timeZone string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "base domain  %s\ntime zone    %s\n", s.BaseDomain, s.TimeZone)
 	return 0
 }
+
+// runVolumes lists a project's volumes and where they live.
+func runVolumes(file, projectFlag string, stdout, stderr io.Writer) int {
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	volumes, err := client.Volumes(context.Background(), name)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	for _, v := range volumes {
+		where, placed := v.Location, "placed"
+		if where == "" {
+			where = "local disk"
+		}
+		if !v.Placed {
+			placed = "not yet placed"
+		}
+		fmt.Fprintf(stdout, "%-16s %-24s %-16s %s\n", v.Name, v.Path, where, placed)
+	}
+	return 0
+}
+
+// runVolumePlace chooses where a volume lives, until it's made.
+func runVolumePlace(file, projectFlag string, args []string, localDisk bool, stdout, stderr io.Writer) int {
+	if (len(args) == 2) == localDisk {
+		fmt.Fprintln(stderr, "houston volumes place VOLUME LOCATION: give a location, or --local-disk")
+		return exitUsage
+	}
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	location := ""
+	if !localDisk {
+		location = args[1]
+	}
+	v, err := client.PlaceVolume(context.Background(), name, args[0], location)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	where := v.Location
+	if where == "" {
+		where = "local disk"
+	}
+	fmt.Fprintf(stdout, "%s will be placed on %s at the next deploy.\n", v.Name, where)
+	return 0
+}

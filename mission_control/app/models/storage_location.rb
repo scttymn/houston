@@ -20,6 +20,9 @@ class StorageLocation < ApplicationRecord
     where(acknowledged_at: nil).where.not(verified_at: nil).order(:id).last
   end
 
+  # Can hold a project's live volumes (spec §9); s3 and b2 hold backups only.
+  def live? = kind.in?(%w[nfs local])
+
   def verified? = verified_at.present?
   def acknowledged? = acknowledged_at.present?
   def settings = super || {}

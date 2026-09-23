@@ -89,6 +89,29 @@
         </div>
       </section>
     <% end %>
+    <% if @project.volumes.any? %>
+      <section class="panel volumes">
+        <h2 class="disp panel__title">Volumes</h2>
+        <% sqlite_volumes = @last_good_backup&.found.to_h.fetch("sqlite", []).map { |f| f["volume"] } %>
+        <% @project.volume_rows.each do |volume, row| %>
+          <div class="panel__row" data-volume="<%= volume["name"] %>">
+            <span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span>
+            <% if row&.placed_at %>
+              <span><%= row.where_words %> · <small>moving a volume is a later feature</small></span>
+            <% else %>
+              <%= form_with url: project_volume_path(@project.name, volume["name"]), method: :patch, class: "secret__form" do |f| %>
+                <%= f.select :location, [ [ "Local disk", "" ] ] + @live_locations.map { |l| [ l.name, l.name ] }, selected: row&.location&.name.to_s %>
+                <%= f.submit "Save", class: "button button--small" %>
+              <% end %>
+            <% end %>
+            <% if row&.location&.kind == "nfs" %>
+              <small class="field__error">Live SQLite over a network share risks corruption<%= ": this volume holds SQLite databases" if sqlite_volumes.include?(volume["name"]) %>.</small>
+            <% end %>
+          </div>
+        <% end %>
+        <p class="panel__row panel__row--muted">Where each volume lives is chosen before Houston makes it (at the next deploy). Postgres data always stays on local disk.</p>
+      </section>
+    <% end %>
     <section class="panel backup-plan">
       <h2 class="disp panel__title">Backup plan</h2>
       <dl class="facts">

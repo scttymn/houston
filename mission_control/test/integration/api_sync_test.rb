@@ -1,10 +1,12 @@
 require "test_helper"
 require_relative "../support/api_helpers"
 require_relative "../support/cloudflare_stubs"
+require_relative "../support/fake_docker"
 
 class ApiSyncTest < ActionDispatch::IntegrationTest
   include ApiHelpers
   include CloudflareStubs
+  include FakeDockerHelper
 
   test "sync creates the project" do
     sync(equip_payload(variables: [ { name: "RAILS_MASTER_KEY", required: false }, { name: "SENTRY_DSN", required: false } ]))
@@ -26,7 +28,8 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
   # Build step 5: what a backup holds. Absent (an older sync) is none.
   test "sync records the data to back up" do
     optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
-    sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ], databases: [ { service: "db", image: "postgres:17" } ]))
+    placing = FakeDocker.new { |args| args[0..1] == %w[volume inspect] ? DockerCommand::Result.new(success: true, output: "null\n") : nil }
+    use_fake_docker(placing) { sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ], databases: [ { service: "db", image: "postgres:17" } ])) }
     assert_response :success
     project = Project.find_by!(name: "equip")
     assert_equal [ { "name" => "storage", "path" => "/rails/storage" } ], project.volumes
@@ -86,6 +89,25 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
       assert_response :unprocessable_entity, schedule.inspect
       assert_includes json["errors"].keys, "backups"
     end
+  end
+
+  test "sync places the volumes" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    missing = FakeDocker.new { |args| args[0..1] == %w[volume inspect] ? failure("Error response from daemon: get equip_storage: no such volume\n") : nil }
+    use_fake_docker(missing) { sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ])) }
+    assert_response :success
+    assert_includes missing.calls.map(&:args), [ "volume", "create", "equip_storage" ]
+    assert Project.find_by!(name: "equip").project_volumes.find_by!(name: "storage").placed_at
+
+    # Chosen elsewhere than where it is: the sync is refused, DNS untouched.
+    nfs = storage_locations(:unas)
+    other = Project.create!(name: "other", app_service: "app", services: %w[app], health: "/up", port: 80)
+    other.project_volumes.create!(name: "media", location: nfs)
+    plain = FakeDocker.new { |args| args[0..1] == %w[volume inspect] ? DockerCommand::Result.new(success: true, output: "null\n") : nil }
+    use_fake_docker(plain) { sync(equip_payload(name: "other", variables: optional, volumes: [ { name: "media", path: "/media" } ])) }
+    assert_response :unprocessable_entity
+    assert_match "other_media already exists on local disk, not unas-nfs", json["error"]
+    assert_not plain.calls.any? { |c| c.args[0..1] == %w[volume create] }
   end
 
   test "sync rejects what the CLI would never send" do

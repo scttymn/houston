@@ -73,6 +73,18 @@
   <% if @save_error %><p class="field__error"><%= @save_error %></p><% end %>
   <% if @link %>
     <%= form_with url: link_path, class: "link-save" do |f| %>
+      <% volumes = @link.found? ? @link.preview.dig("sync", "volumes").to_a : [] %>
+      <% if volumes.any? %>
+        <fieldset class="link-volumes">
+          <legend class="mono eyebrow">VOLUMES · where each one lives</legend>
+          <% live = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?) %>
+          <% volumes.each do |volume| %>
+            <label><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span>
+              <%= select_tag "locations[#{volume["name"]}]", options_for_select([ [ "Local disk", "" ] ] + live.map { |l| [ l.name, l.name ] }) %>
+            </label>
+          <% end %>
+        </fieldset>
+      <% end %>
       <%= link_to "Cancel", root_path %>
       <%= f.button "Save", class: "button button--primary", disabled: !found %>
     <% end %>

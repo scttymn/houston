@@ -5,8 +5,10 @@
 class ProjectLinking
   class Refused < StandardError; end
 
-  def initialize(link)
+  # locations: volume name → a location's name, or blank for local disk.
+  def initialize(link, locations: {})
     @link = link
+    @locations = locations.to_h
   end
 
   def save!
@@ -25,9 +27,12 @@ class ProjectLinking
       deploy_key_private: @link.deploy_key_private, deploy_key_public: @link.deploy_key_public,
       webhook_secret: existing&.webhook_secret.presence || SecureRandom.urlsafe_base64(32)
     })
+    @locations.each do |volume, name|
+      ProjectVolume.choose!(project, volume.to_s, name.presence && StorageLocation.find_by!(name:))
+    end
     @link.destroy!
     project
-  rescue ProjectSync::Refused => e
+  rescue ProjectSync::Refused, ProjectVolume::Refused, ProjectVolume::Placed => e
     raise Refused, e.message
   end
 end

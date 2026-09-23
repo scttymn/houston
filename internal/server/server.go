@@ -236,6 +236,40 @@ type Settings struct {
 	TimeZone   string `json:"time_zone"`
 }
 
+// Volume is one of a project's named volumes and where it lives (Location
+// empty: local disk).
+type Volume struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Location string `json:"location"`
+	Placed   bool   `json:"placed"`
+}
+
+func (cl *Client) Volumes(ctx context.Context, project string) ([]Volume, error) {
+	var body struct {
+		Volumes []Volume `json:"volumes"`
+	}
+	return body.Volumes, cl.getJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/volumes", &body)
+}
+
+// PlaceVolume chooses where a volume will live (location "": local disk),
+// until Houston has made it.
+func (cl *Client) PlaceVolume(ctx context.Context, project, volume, location string) (Volume, error) {
+	var v Volume
+	var loc any
+	if location != "" {
+		loc = location
+	}
+	status, body, err := cl.do(ctx, http.MethodPatch, "/api/v1/projects/"+url.PathEscape(project)+"/volumes/"+url.PathEscape(volume), map[string]any{"location": loc})
+	if err != nil {
+		return v, err
+	}
+	if status != http.StatusOK {
+		return v, fmt.Errorf("%s", message(body))
+	}
+	return v, json.Unmarshal(body, &v)
+}
+
 func (cl *Client) Settings(ctx context.Context) (Settings, error) {
 	var s Settings
 	return s, cl.getJSON(ctx, "/api/v1/settings", &s)

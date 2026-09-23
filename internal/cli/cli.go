@@ -217,6 +217,24 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	settings.Flags().StringVar(&timeZone, "time-zone", "", "an IANA name, like Europe/Berlin")
 	root.AddCommand(settings)
+
+	volumes := command("volumes", "A project's named volumes on the server, and where each lives", func() int {
+		return runVolumes(file, projectFlag, stdout, stderr)
+	})
+	volumes.PersistentFlags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	var localDisk bool
+	place := &cobra.Command{
+		Use:   "place VOLUME [LOCATION]",
+		Short: "Choose where a volume lives (a storage location, or --local-disk), until the next deploy makes it",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runVolumePlace(file, projectFlag, args, localDisk, stdout, stderr)
+			return nil
+		},
+	}
+	place.Flags().BoolVar(&localDisk, "local-disk", false, "on the server's own disk (the default)")
+	volumes.AddCommand(place)
+	root.AddCommand(volumes)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

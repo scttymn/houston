@@ -46,6 +46,7 @@ Rails.application.routes.draw do
         resources :deploys, only: %i[ index show create ], param: :number
         resources :snapshots, only: :index
         resources :backups, only: %i[ create show ]
+        resources :volumes, only: %i[ index update ], param: :name
         resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
@@ -71,6 +72,7 @@ Rails.application.routes.draw do
     resources :deploys, only: :show, param: :number
     resources :backups, only: :create, controller: "project_backups"
     resources :snapshots, only: :index, controller: "project_snapshots"
+    resources :volumes, only: :update, param: :name, controller: "project_volumes"
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_180000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_190000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -92,6 +92,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_180000) do
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_project_hosts_on_name", unique: true
     t.index ["project_id"], name: "index_project_hosts_on_project_id"
+  end
+
+  create_table "project_volumes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "location_id"
+    t.string "name", null: false
+    t.datetime "placed_at"
+    t.integer "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["location_id"], name: "index_project_volumes_on_location_id"
+    t.index ["project_id", "name"], name: "index_project_volumes_on_project_id_and_name", unique: true
+    t.index ["project_id"], name: "index_project_volumes_on_project_id"
   end
 
   create_table "projects", force: :cascade do |t|
@@ -198,6 +210,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_180000) do
   add_foreign_key "backup_runs", "storage_locations", column: "location_id"
   add_foreign_key "deploys", "projects", on_delete: :cascade
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
+  add_foreign_key "project_volumes", "projects"
+  add_foreign_key "project_volumes", "storage_locations", column: "location_id"
   add_foreign_key "secrets", "projects", on_delete: :cascade
   add_foreign_key "sessions", "users"
 end

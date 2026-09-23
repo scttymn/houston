@@ -34,7 +34,8 @@ module FakeGitHelper
     {
       "sync" => { "name" => "garage", "app_service" => "app", "services" => %w[app db], "domains" => [ "rideclubgarage.com" ],
                   "variables" => [ { "name" => "POSTGRES_PASSWORD", "required" => true }, { "name" => "SENTRY_DSN", "required" => false } ],
-                  "health" => "/up", "port" => 3000, "deploy_rule" => { "on" => "commit", "branch" => "main", "tags" => "v*" } },
+                  "health" => "/up", "port" => 3000, "deploy_rule" => { "on" => "commit", "branch" => "main", "tags" => "v*" },
+                  "volumes" => [ { "name" => "storage", "path" => "/rails/storage" } ] },
       "preview" => { "services" => [ { "name" => "app", "image" => "", "app" => true }, { "name" => "db", "image" => "postgres:17", "app" => false } ],
                      "port" => 3000, "health" => "/up", "cpus" => "1", "memory" => "1 GB", "test" => true,
                      "backups" => { "schedule" => "daily 03:00", "keep_auto" => 14, "keep_deploy" => 10, "volumes" => %w[pgdata storage] } }

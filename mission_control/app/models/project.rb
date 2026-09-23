@@ -5,6 +5,7 @@ class Project < ApplicationRecord
   has_many :secrets, dependent: :delete_all
   has_many :deploys, dependent: :delete_all
   has_many :backup_runs, dependent: :delete_all
+  has_many :project_volumes, dependent: :delete_all
 
   encrypts :deploy_key_private, :webhook_secret
 
@@ -35,6 +36,12 @@ class Project < ApplicationRecord
   # Where this project's backups go: the default location, once setup's
   # storage step is finished.
   def backup_location = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+
+  # Each named volume of the app with where it lives: [volume, ProjectVolume or nil].
+  def volume_rows
+    chosen = project_volumes.includes(:location).index_by(&:name)
+    volumes.map { |v| [ v, chosen[v["name"]] ] }
+  end
 
   # Services a backup doesn't hold (they start empty after a restore).
   def not_backed_up = accessories - databases.map { |d| d["service"] }

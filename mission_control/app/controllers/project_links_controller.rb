@@ -35,7 +35,7 @@ class ProjectLinksController < ApplicationController
   end
 
   def create
-    project = ProjectLinking.new(@link).save!
+    project = ProjectLinking.new(@link, locations: params.fetch(:locations, {}).permit!.to_h).save!
     session.delete(:repo_link_id)
     redirect_to project_path(project.name), notice: "#{project.name} is linked to #{project.repo_url}."
   rescue ProjectLinking::Refused => e

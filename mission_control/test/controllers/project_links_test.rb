@@ -153,6 +153,17 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "choosing volume locations when saving" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      assert_select "select[name='locations[storage]'] option", 2
+      post link_path, params: { locations: { storage: "unas-nfs" } }
+      assert_redirected_to project_path("garage")
+    end
+    assert_equal storage_locations(:unas), Project.find_by!(name: "garage").project_volumes.find_by!(name: "storage").location
+  end
+
   test "saving refuses a container-name clash and links a project houston deploy registered" do
     make_project("garage-db")
     use_fake_git(FakeGit.new(&responder)) do
