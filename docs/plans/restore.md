@@ -55,6 +55,12 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
   - **The page:** Houston's clean default, or the project's own (`x-houston.maintenance: public/maintenance.html`, read at sync, served as-is with `{{project}}` and `{{message}}` filled in, HTML-escaped). It can't use the app's own assets (the app may be down): self-contained, or a CDN. The project page previews it.
   - A restore takes its safety snapshot just before the switch either way. With the page up, nothing was written after it; without it, only the seconds between snapshot and switch.
 
+- **The snapshot's commit is checked, three times** (your note: "we'd have to validate the SHA before restore. If for some reason the repo drifted or changed"). A commit's SHA is a hash of its contents, so the same SHA is the same code. Drift shows up as the commit being gone, never as different code.
+  1. **When the restore is asked for:** Mission Control fetches that one commit from the linked repo (shallow, into a scratch directory, with the deploy key, as Add project's read does). If it's gone, the restore is refused before it's queued: "commit a07b2d1 isn't in <repo> any more (was history rewritten, or the repo relinked?)".
+  2. **On the runner:** after the checkout, `git rev-parse HEAD` must be the snapshot's full 40-character SHA, or the restore is NO-GO before anything changes. This covers the branch fallback too.
+  3. **Before the data goes back:** the manifest's `sha` must match the snapshot's `sha:` tag and the checked-out commit.
+  - **Later (named, not now):** when the commit is truly gone but its image is still in Houston's registry, restore from the image and a compose.yml saved in the snapshot. That would need the compose file stored with each backup.
+
 ## Batches
 
 1. **Maintenance mode, and the spike** (below).
@@ -64,13 +70,13 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
    - sync carries the generation
    - reserved `-g<n>` service names
    - generation 1 behaves exactly as today (the step 3–5 suites unchanged, plus tests at generation 2)
-4. **The data engine:** Mission Control's `RestoreData` into a given generation (volumes, SQLite, Postgres into the new generation's Postgres once it's ready), from the runner's request, with the manifest checked before anything is touched.
+4. **The data engine:** Mission Control's `RestoreData` into a given generation (volumes, SQLite, Postgres into the new generation's Postgres once it's ready), from the runner's request, with the manifest checked before anything is touched (its project, its paths, and its `sha` against the snapshot's tag and the restore's commit).
 5. **Asking for a restore:**
    - the restore kind on deploys, and its snapshot
    - the Restore button on each snapshot and the confirm page (the design's, noting whether the maintenance page is up), `/api/v1`, and `houston restore <snapshot> --confirm <name> [--follow]`
-   - the preconditions: a linked repo, the snapshot in a location the project's backups used (the snapshot list reads all of them now), nothing queued or in flight
+   - the preconditions: a linked repo, **the snapshot's commit still in it** (a shallow fetch by SHA), the snapshot in a location the project's backups used (the snapshot list reads all of them now), nothing queued or in flight
    - while a restore is queued or in flight: pushes don't queue deploys (the next check does), and backups wait (except its safety snapshot)
-6. **The runner's restore:** the steps above in Go, the generation switch, cleanup, every failure path, and the deploy page's restore steps.
+6. **The runner's restore:** the steps above in Go (the checkout verified against the snapshot's full SHA), the generation switch, cleanup, every failure path, and the deploy page's restore steps.
 7. **The real run:** on OrbStack, restore the spike (Postgres, an NFS volume, SQLite) and equip, with and without the maintenance page up. It checks:
    - the zero-downtime restore (every request through it answered by one version or the other)
    - the data rolled back
@@ -78,6 +84,7 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
    - the maintenance page (the default, and a project's own) staying up through a restore, a deploy, a failed one, and the app's containers stopped, until it's turned off
    - restoring the safety snapshot to go back
    - a restore whose image was pruned
+   - a restore refused because its commit was force-pushed away
 
 ## Batch 1: Houston's maintenance page, and the spike
 
