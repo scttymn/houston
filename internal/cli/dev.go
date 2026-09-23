@@ -41,7 +41,7 @@ func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int
 	name, content := "compose.dev.yml", variant.DevOverride(p)
 	if production {
 		name, content = "compose.production.yml", variant.ProductionOverride(p)
-		noteRailsMasterKey(p, values, stderr)
+		noteBlankOptional(p, values, stderr)
 	}
 	override := filepath.Join(dir, ".houston", name)
 	if err := writeGenerated(override, content); err != nil {
@@ -115,22 +115,27 @@ func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) (map[s
 	return values, true
 }
 
-// noteRailsMasterKey explains the one thing a Rails app needs to boot from
-// its production image locally: Rails' .dockerignore keeps config/master.key
-// out of it, so the key has to come from .env.
-func noteRailsMasterKey(p *project.Project, values map[string]string, stderr io.Writer) {
+// noteBlankOptional names the optional variables that come out blank in
+// dev --production: in dev an app may fall back without them (a key file its
+// .dockerignore keeps out of the image, say), but the production image may
+// need them.
+func noteBlankOptional(p *project.Project, values map[string]string, stderr io.Writer) {
+	var blank []string
 	for _, v := range p.Variables {
-		if v.Name != "RAILS_MASTER_KEY" {
+		if v.Kind != project.Secret || !v.BlankDefault || values[v.Name] != "" {
 			continue
 		}
-		if values["RAILS_MASTER_KEY"] != "" {
-			return
+		if shell, ok := os.LookupEnv(v.Name); ok && shell != "" {
+			continue
 		}
-		if shell, ok := os.LookupEnv("RAILS_MASTER_KEY"); ok && shell != "" {
-			return
-		}
-		fmt.Fprintln(stderr, "note: the production image has no config/master.key; set RAILS_MASTER_KEY in .env for Rails to boot")
-		return
+		blank = append(blank, v.Name)
+	}
+	switch len(blank) {
+	case 0:
+	case 1:
+		fmt.Fprintf(stderr, "note: %s is blank in .env; the production image may need it\n", blank[0])
+	default:
+		fmt.Fprintf(stderr, "note: %s are blank in .env; the production image may need them\n", strings.Join(blank, ", "))
 	}
 }
 

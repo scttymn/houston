@@ -23,7 +23,7 @@ func TestProductionOverride(t *testing.T) {
 			"      - \"4000:4000\"\n" +
 			"    volumes: !override\n" +
 			"      - media:/media\n"},
-		{"rails on port 80", "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"3000:3000\"]\n    volumes: [\".:/rails\", \"storage:/rails/storage\"]\nvolumes:\n  storage:\nx-houston:\n  health: /up\n  port: 80\n", header +
+		{"rails on port 80", "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"3000:3000\"]\n    volumes: [\".:/rails\", \"storage:/rails/storage\"]\nvolumes:\n  storage:\nx-houston:\n  health: /up\n  app_port: 80\n", header +
 			"  app:\n" +
 			"    build:\n" +
 			"      target: production\n" +
@@ -31,7 +31,7 @@ func TestProductionOverride(t *testing.T) {
 			"      - \"3000:80\"\n" +
 			"    volumes: !override\n" +
 			"      - storage:/rails/storage\n"},
-		{"host IP is kept", "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"127.0.0.1:3000:3000\"]\nx-houston:\n  health: /up\n  port: 80\n", header +
+		{"host IP is kept", "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"127.0.0.1:3000:3000\"]\nx-houston:\n  health: /up\n  app_port: 80\n", header +
 			"  app:\n" +
 			"    build:\n" +
 			"      target: production\n" +

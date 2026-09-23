@@ -109,7 +109,7 @@ func render(doc *yaml.Node) []byte {
 // ProductionOverride is the compose file Houston layers on top of compose.yml
 // for `houston dev --production`: the production build target, no bind mounts
 // (the code is baked into the image), and the app's published host port
-// pointed at the port the production image listens on (x-houston.port).
+// pointed at the port the production image listens on (x-houston.app_port).
 func ProductionOverride(p *project.Project) []byte {
 	app := p.Compose.Services[p.AppService]
 	port := strconv.Itoa(p.AppPort)

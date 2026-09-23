@@ -13,8 +13,6 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/sevenmoons/houston/internal/project"
-	"github.com/sevenmoons/houston/internal/stack"
-	"go.yaml.in/yaml/v3"
 )
 
 // change is one file init will write, with the line it prints afterwards.
@@ -24,9 +22,13 @@ type change struct {
 	message string
 }
 
-// runInit implements `houston init` for Rails + SQLite. Every file is its own
-// idempotent step, so a rerun finishes what an interrupted run started. All
-// changes are planned and checked before anything is written.
+// runInit implements `houston init`: it upserts what Houston needs to run
+// and deploy the folder (a Dockerfile's stages, compose.yml with x-houston,
+// .env, .gitignore), with generic defaults that serve a static site. It knows
+// no frameworks: the developer changes the defaults for their project. What
+// exists is never replaced, only completed. Every change is planned and
+// checked before anything is written, and a rerun finishes what an
+// interrupted run started (docs/plans/init-generic.md).
 func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 	composePath, err := filepath.Abs(file)
 	if err != nil {
@@ -39,39 +41,38 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return exitFailure
 	}
 
-	if err := stack.DetectRails(dir); err != nil {
-		return fail("%v", err)
-	}
-	dockerfilePath := filepath.Join(dir, "Dockerfile")
-	src, err := os.ReadFile(dockerfilePath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return fail("no Dockerfile; Rails 7.1+ generates one with `rails new`. Add it, then run `houston init` again")
-	} else if err != nil {
-		return fail("can't read the Dockerfile: %v", err)
-	}
-	docker, err := stack.RailsDockerfile(string(src))
-	if err != nil {
-		return fail("%v", err)
-	}
-
+	// The compose file first: it says which Dockerfile the app builds.
 	var changes []change
-	if docker.AddedStages || docker.NamedFinal {
-		msg := "added dev and test stages to Dockerfile"
-		switch {
-		case docker.AddedStages && docker.NamedFinal:
-			msg += "; named the final stage production"
-		case docker.NamedFinal:
-			msg = "named the final Dockerfile stage production"
-		}
-		changes = append(changes, change{dockerfilePath, docker.Content, msg})
-	}
-
-	compose, composeChange, code := planCompose(composePath, dir, docker, stdin, stdout, stderr)
+	compose, composeChange, code := planCompose(composePath, dir, stdin, stdout, stderr)
 	if code != 0 {
 		return code
 	}
+	contextDir, dockerfilePath, err := buildFiles(compose, dir)
+	if err != nil {
+		return fail("%v", err)
+	}
+	dockerChange, err := planDockerfile(dockerfilePath, dir)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if dockerChange != nil {
+		changes = append(changes, *dockerChange)
+	}
 	if composeChange != nil {
 		changes = append(changes, *composeChange)
+	}
+	// BuildKit reads <Dockerfile>.dockerignore instead of .dockerignore
+	// when there is one.
+	ignorePath := filepath.Join(contextDir, ".dockerignore")
+	if _, err := os.Stat(dockerfilePath + ".dockerignore"); err == nil {
+		ignorePath = dockerfilePath + ".dockerignore"
+	}
+	ignoreDocker, err := planDockerignore(ignorePath, dir)
+	if err != nil {
+		return fail("%v", err)
+	}
+	if ignoreDocker != nil {
+		changes = append(changes, *ignoreDocker)
 	}
 	envChange, err := planDotEnv(filepath.Join(dir, ".env"), compose)
 	if err != nil {
@@ -96,57 +97,171 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, c.message)
 	}
-	fmt.Fprintln(stdout, "Next: houston dev")
+	fmt.Fprintln(stdout, "Next: edit the defaults for your project, then houston dev")
 	return 0
 }
 
+// buildFiles is where the app is built from, as deploy reads it: the build
+// context (default: the compose file's folder) and its Dockerfile (default:
+// Dockerfile in the context). init completes only local files.
+func buildFiles(p *project.Project, dir string) (contextDir, dockerfile string, err error) {
+	build := p.Compose.Services[p.AppService].Build
+	context, file := ".", "Dockerfile"
+	if build != nil && build.Context != "" {
+		context = build.Context
+	}
+	if build != nil && build.DockerfileInline != "" {
+		return "", "", errors.New("the app's Dockerfile is written inline in the compose file (dockerfile_inline); houston init completes Dockerfile files: add dev, test and production stages to it by hand")
+	}
+	if build != nil && build.Dockerfile != "" {
+		file = build.Dockerfile
+	}
+	for _, p := range []string{context, file} {
+		if strings.Contains(p, "$") {
+			return "", "", fmt.Errorf("the app builds from %s, which Houston can't resolve here (a variable); write the path, or complete its Dockerfile by hand", p)
+		}
+	}
+	for _, remote := range []string{"http://", "https://", "git://", "ssh://", "git@", "github.com/"} {
+		if strings.HasPrefix(context, remote) {
+			return "", "", fmt.Errorf("the app builds from %s; houston init only completes a Dockerfile in this folder", context)
+		}
+	}
+	if !filepath.IsAbs(context) {
+		context = filepath.Join(dir, context)
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(context, file)
+	}
+	for _, p := range []string{context, file} {
+		if rel, err := filepath.Rel(dir, p); err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", "", fmt.Errorf("the app builds from %s, outside this folder; houston init only completes a Dockerfile in this folder", relName(p, dir))
+		}
+	}
+	return context, file, nil
+}
+
+// planDockerfile writes the default Dockerfile where there's none, and adds
+// the stages Houston builds to one that lacks them. Messages name it
+// relative to dir.
+func planDockerfile(path, dir string) (*change, error) {
+	name := relName(path, dir)
+	src, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return &change{path, defaultDockerfile, "created " + name}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("can't read %s: %w", name, err)
+	}
+	content, summary, err := upsertDockerfile(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if summary == "" {
+		return nil, nil
+	}
+	return &change{path, content, name + ": " + summary}, nil
+}
+
+func relName(path, dir string) string {
+	if rel, err := filepath.Rel(dir, path); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return path
+}
+
+// defaultDockerignore keeps what the default production stage mustn't
+// serve out of the image.
+const defaultDockerignore = `# Kept out of the image: the default production stage copies this folder and serves it.
+.git
+.env
+.houston
+`
+
+// dockerignoreHas: the patterns that already exclude each entry.
+var dockerignoreHas = map[string][]string{
+	".git":     {".git", ".git/", "/.git", "/.git/", ".git*", "/.git*"},
+	".env":     {".env", "/.env", ".env*", "/.env*"},
+	".houston": {".houston", ".houston/", "/.houston", "/.houston/"},
+}
+
+// planDockerignore writes the default .dockerignore, or appends the entries
+// an existing one doesn't already exclude.
+func planDockerignore(path, dir string) (*change, error) {
+	name := relName(path, dir)
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return &change{path, defaultDockerignore, "created " + name}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("can't read %s: %w", name, err)
+	}
+	have := map[string]bool{}
+	for _, l := range strings.Split(string(existing), "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
+	var missing []string
+	for _, entry := range []string{".git", ".env", ".houston"} {
+		covered := false
+		for _, pattern := range dockerignoreHas[entry] {
+			covered = covered || have[pattern]
+		}
+		if !covered {
+			missing = append(missing, entry)
+		}
+	}
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	return &change{path, withNewline(string(existing)) + strings.Join(missing, "\n") + "\n", "added " + andList(missing) + " to " + name}, nil
+}
+
 // planCompose returns the project the compose file will describe, and the
-// change to make (nil when it already has x-houston). The result is checked
-// with project.Parse before anything is written.
-func planCompose(path, dir string, docker stack.DockerfileResult, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
+// change to make (nil when nothing's missing). The result is checked with
+// project.Parse before anything is written.
+func planCompose(path, dir string, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
 	existing, err := os.ReadFile(path)
 	var content, message string
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		// Another compose file here is the project's, not a blank slate.
+		if filepath.Base(path) == "compose.yml" {
+			for _, other := range []string{"compose.yaml", "docker-compose.yml", "docker-compose.yaml"} {
+				if _, err := os.Stat(filepath.Join(dir, other)); err == nil {
+					fmt.Fprintf(stderr, "houston: this folder has %s; Houston reads compose.yml: rename it, or run houston -f %s init\n", other, other)
+					return nil, nil, exitFailure
+				}
+			}
+		}
 		name, ok := askName(dir, stdin, stdout, stderr)
 		if !ok {
 			return nil, nil, exitUsage
 		}
-		content = stack.RailsCompose(name, docker.Workdir, docker.ProductionPort)
-		message = "created " + filepath.Base(path)
+		content, message = defaultCompose(name), "created "+filepath.Base(path)
 	case err != nil:
 		fmt.Fprintf(stderr, "houston: can't read %s: %v\n", filepath.Base(path), err)
 		return nil, nil, exitFailure
-	case hasXHouston(existing):
-		p, err := project.Parse(path, existing)
+	default:
+		var added []string
+		var appended bool
+		content, added, appended, err = upsertXHouston(string(existing))
 		if err != nil {
-			fmt.Fprint(stderr, err)
+			fmt.Fprintf(stderr, "houston: %s: %v\n", filepath.Base(path), err)
 			return nil, nil, exitFailure
 		}
-		return p, nil, 0
-	default:
-		content = string(existing)
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
+		switch {
+		case appended:
+			message = "added x-houston to " + filepath.Base(path)
+		case len(added) > 0:
+			message = "added " + andList(added) + " to x-houston in " + filepath.Base(path)
 		}
-		content += "\n" + stack.RailsXHouston(docker.ProductionPort)
-		message = "added x-houston to " + filepath.Base(path)
 	}
 	p, err := project.Parse(path, []byte(content))
 	if err != nil {
 		fmt.Fprint(stderr, err)
 		return nil, nil, exitFailure
 	}
-	return p, &change{path, content, message}, 0
-}
-
-func hasXHouston(data []byte) bool {
-	var top map[string]any
-	if yaml.Unmarshal(data, &top) != nil {
-		return false
+	if message == "" {
+		return p, nil, 0
 	}
-	_, ok := top["x-houston"]
-	return ok
+	return p, &change{path, content, message}, 0
 }
 
 var notNameChars = regexp.MustCompile(`[^a-z0-9-]+`)

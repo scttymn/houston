@@ -1,0 +1,20 @@
+name: demo
+
+services:
+  app:
+    build: { context: ., target: dev }
+    ports: ["127.0.0.1:8080:8080"] # this machine only: in dev the folder is mounted and served
+    volumes:
+      - .:/app
+
+x-houston:
+  health: /
+  # app_port: 8080                # the port the app listens on, when it has no single `ports` entry
+  # domains: [example.com]
+  # deploy: { on: commit, branch: main }
+  # commands:
+  #   console: sh
+  #   test: "true"
+  # hooks:
+  #   release: ./migrate
+  # backups: { schedule: "daily 03:00", keep: { auto: 14, deploy: 10 } }

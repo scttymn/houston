@@ -57,8 +57,8 @@ var (
 	labelRE    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
-// parseHouston walks x-houston strictly. It also returns x-houston.port, which
-// isn't kept on Houston: Project.AppPort is the resolved port.
+// parseHouston walks x-houston strictly. It also returns x-houston.app_port,
+// which isn't kept on Houston: Project.AppPort is the resolved port.
 // dir is compose.yml's directory: x-houston.maintenance is relative to it.
 func parseHouston(raw map[string]any, dir string, ps *problems) (h Houston, port int, hasPort bool) {
 	h = Houston{
@@ -84,8 +84,10 @@ func parseHouston(raw map[string]any, dir string, ps *problems) (h Houston, port
 		switch k {
 		case "health":
 			h.Health = parseHealth(path, x[k], ps)
-		case "port":
+		case "app_port":
 			port, hasPort = parsePort(path, x[k], ps)
+		case "port":
+			ps.add(path, "`port` is now `app_port`: the port the app listens on inside its container")
 		case "domains":
 			h.Domains = parseDomains(path, x[k], ps)
 		case "deploy":
@@ -99,7 +101,7 @@ func parseHouston(raw map[string]any, dir string, ps *problems) (h Houston, port
 		case "maintenance":
 			h.MaintenancePage = parseMaintenancePage(path, x[k], dir, ps)
 		default:
-			ps.add(path, "unknown key; x-houston takes health, port, domains, deploy, commands, hooks, backups, maintenance")
+			ps.add(path, "unknown key; x-houston takes health, app_port, domains, deploy, commands, hooks, backups, maintenance")
 		}
 	}
 	return h, port, hasPort

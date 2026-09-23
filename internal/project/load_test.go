@@ -2,6 +2,7 @@ package project
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -271,22 +272,22 @@ func TestLoad_AppServiceAndPort(t *testing.T) {
 		d := doc{services: "  worker:\n    build: .\n"}
 		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services", "only one built service")
 	})
-	t.Run("two ports without x-houston.port", func(t *testing.T) {
+	t.Run("two ports without x-houston.app_port", func(t *testing.T) {
 		d := doc{appBase: "    build: .\n    ports: [\"3000:3000\", \"3001:3001\"]\n"}
-		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.ports", "x-houston.port")
+		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.ports", "x-houston.app_port")
 	})
-	t.Run("no ports without x-houston.port", func(t *testing.T) {
+	t.Run("no ports without x-houston.app_port", func(t *testing.T) {
 		d := doc{appBase: "    build: .\n"}
-		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.ports", "x-houston.port")
+		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.ports", "x-houston.app_port")
 	})
-	t.Run("x-houston.port overrides ports", func(t *testing.T) {
-		d := doc{appBase: "    build: .\n    ports: [\"3000:3000\", \"3001:3001\"]\n", xh: "  health: /up\n  port: 3001\n"}
+	t.Run("x-houston.app_port overrides ports", func(t *testing.T) {
+		d := doc{appBase: "    build: .\n    ports: [\"3000:3000\", \"3001:3001\"]\n", xh: "  health: /up\n  app_port: 3001\n"}
 		if p := mustLoad(t, writeCompose(t, d.String())); p.AppPort != 3001 {
 			t.Errorf("AppPort = %d, want 3001", p.AppPort)
 		}
 	})
-	t.Run("x-houston.port without ports", func(t *testing.T) {
-		d := doc{appBase: "    build: .\n", xh: "  health: /up\n  port: 8080\n"}
+	t.Run("x-houston.app_port without ports", func(t *testing.T) {
+		d := doc{appBase: "    build: .\n", xh: "  health: /up\n  app_port: 8080\n"}
 		if p := mustLoad(t, writeCompose(t, d.String())); p.AppPort != 8080 {
 			t.Errorf("AppPort = %d, want 8080", p.AppPort)
 		}
@@ -298,11 +299,18 @@ func TestLoad_AppServiceAndPort(t *testing.T) {
 		}
 	})
 	for _, port := range []string{"0", "70000", "\"3000\""} {
-		t.Run("x-houston.port "+port, func(t *testing.T) {
-			d := doc{xh: "  health: /up\n  port: " + port + "\n"}
-			assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "x-houston.port", "")
+		t.Run("x-houston.app_port "+port, func(t *testing.T) {
+			d := doc{xh: "  health: /up\n  app_port: " + port + "\n"}
+			assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "x-houston.app_port", "")
 		})
 	}
+}
+
+// x-houston.port was renamed app_port (docs/plans/init-generic.md): there's
+// no alias, and the old key says what it's called now.
+func TestAppPortRenamed(t *testing.T) {
+	d := doc{appBase: "    build: .\n", xh: "  health: /up\n  port: 8080\n"}
+	assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "x-houston.port", "`port` is now `app_port`")
 }
 
 func TestLoad_UnsupportedCompose(t *testing.T) {
@@ -437,22 +445,23 @@ func TestLoad_VariableKinds(t *testing.T) {
 		xh       string
 		want     []Variable
 	}{
-		{"braced", "      A: ${V}\n", "", "", []Variable{{"V", true, Secret}}},
-		{"unbraced", "      A: $V\n", "", "", []Variable{{"V", true, Secret}}},
-		{"required with message", "      A: ${V:?set it}\n", "", "", []Variable{{"V", true, Secret}}},
-		{"required unset only", "      A: ${V?x}\n", "", "", []Variable{{"V", true, Secret}}},
-		{"default", "      A: ${V:-d}\n", "", "", []Variable{{"V", false, Secret}}},
-		{"empty default", "      A: ${V:-}\n", "", "", []Variable{{"V", false, Secret}}},
-		{"default if unset", "      A: ${V-d}\n", "", "", []Variable{{"V", false, Secret}}},
-		{"presence value", "      A: ${V:+x}\n", "", "", []Variable{{"V", false, Secret}}},
+		{"braced", "      A: ${V}\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"unbraced", "      A: $V\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"required with message", "      A: ${V:?set it}\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"required unset only", "      A: ${V?x}\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"default", "      A: ${V:-d}\n", "", "", []Variable{{"V", false, Secret, false}}},
+		{"empty default", "      A: ${V:-}\n", "", "", []Variable{{"V", false, Secret, true}}},
+		{"required and empty default", "      A: ${V}\n      B: ${V:-}\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"default if unset", "      A: ${V-d}\n", "", "", []Variable{{"V", false, Secret, false}}},
+		{"presence value", "      A: ${V:+x}\n", "", "", []Variable{{"V", false, Secret, false}}},
 		{"escaped", "      A: $$V\n", "", "", nil},
-		{"nested default", "      A: ${A:-${B}}\n", "", "", []Variable{{"A", false, Secret}, {"B", true, Secret}}},
-		{"message isn't scanned", "      A: ${V:?set $OTHER}\n", "", "", []Variable{{"V", true, Secret}}},
-		{"required wins over optional", "      A: ${V}\n      B: ${V:-d}\n", "", "", []Variable{{"V", true, Secret}}},
+		{"nested default", "      A: ${A:-${B}}\n", "", "", []Variable{{"A", false, Secret, false}, {"B", true, Secret, false}}},
+		{"message isn't scanned", "      A: ${V:?set $OTHER}\n", "", "", []Variable{{"V", true, Secret, false}}},
+		{"required wins over optional", "      A: ${V}\n      B: ${V:-d}\n", "", "", []Variable{{"V", true, Secret, false}}},
 		{"x-houston ignored", "", "", "  health: /up\n  hooks: { release: echo $$HOME }\n", nil},
-		{"service host", "      U: ${DB_HOST:-db}\n", db, "", []Variable{{"DB_HOST", false, ServiceHost}}},
-		{"host var without service", "      U: ${DB_HOST:-db}\n", "", "", []Variable{{"DB_HOST", false, Secret}}},
-		{"dashed service", "      U: ${MY_DB_HOST:-my-db}\n", "  my-db:\n    image: postgres:17\n", "", []Variable{{"MY_DB_HOST", false, ServiceHost}}},
+		{"service host", "      U: ${DB_HOST:-db}\n", db, "", []Variable{{"DB_HOST", false, ServiceHost, false}}},
+		{"host var without service", "      U: ${DB_HOST:-db}\n", "", "", []Variable{{"DB_HOST", false, Secret, false}}},
+		{"dashed service", "      U: ${MY_DB_HOST:-my-db}\n", "  my-db:\n    image: postgres:17\n", "", []Variable{{"MY_DB_HOST", false, ServiceHost, false}}},
 	}
 	for _, tc := range valid {
 		t.Run(tc.name, func(t *testing.T) {
@@ -558,7 +567,7 @@ func TestLoad_VariableLedBindMounts(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("volumes =\n%+v\nwant\n%+v", got, want)
 	}
-	wantVars := []Variable{{"DATA_DIR", false, Secret}, {"HOME", true, Secret}, {"PWD", true, Secret}}
+	wantVars := []Variable{{"DATA_DIR", false, Secret, false}, {"HOME", true, Secret, false}, {"PWD", true, Secret, false}}
 	if !reflect.DeepEqual(p.Variables, wantVars) {
 		t.Errorf("Variables = %+v, want %+v", p.Variables, wantVars)
 	}
@@ -567,4 +576,40 @@ func TestLoad_VariableLedBindMounts(t *testing.T) {
 		d := doc{services: "  db:\n    image: postgres:17\n    volumes: [\"${HOME}/init.sql:/docker-entrypoint-initdb.d/init.sql\"]\n"}
 		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.db.volumes", "disappear on the server")
 	})
+}
+
+// Every compose file in the repo outside testdata loads (review R6): a stale
+// key, like x-houston.port after its rename, can't hide in one.
+func TestRepoComposeFilesLoad(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	err = filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() && (e.Name() == "testdata" || e.Name() == "node_modules" || strings.HasPrefix(e.Name(), ".")) && path != root {
+			return filepath.SkipDir
+		}
+		if e.Name() != "compose.yml" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(data), "x-houston:") {
+			return err
+		}
+		found++
+		if _, err := Load(path); err != nil {
+			t.Errorf("%s doesn't load:\n%v", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == 0 {
+		t.Errorf("found no compose.yml with x-houston; the walk is wrong")
+	}
 }

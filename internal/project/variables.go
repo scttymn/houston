@@ -38,6 +38,7 @@ func collectVariables(raw map[string]any, hosts map[string]string, ps *problems)
 			byName[u.name] = v
 		}
 		v.Required = v.Required || u.required
+		v.BlankDefault = v.BlankDefault || (u.hasDefault && u.def == "")
 		if service, isHost := hosts[u.name]; isHost && (!u.hasDefault || u.def != service) {
 			ps.add(u.path, "write `${%s:-%s}` so plain `docker compose` finds the `%s` service; Houston sets %s on the server", u.name, service, service, u.name)
 		}
@@ -45,6 +46,7 @@ func collectVariables(raw map[string]any, hosts map[string]string, ps *problems)
 
 	var vars []Variable
 	for _, v := range byName {
+		v.BlankDefault = v.BlankDefault && !v.Required
 		vars = append(vars, *v)
 	}
 	sort.Slice(vars, func(i, j int) bool { return vars[i].Name < vars[j].Name })

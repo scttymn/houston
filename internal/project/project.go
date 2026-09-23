@@ -44,6 +44,9 @@ type Variable struct {
 	Name     string
 	Required bool
 	Kind     VariableKind
+	// BlankDefault: optional, and blank when unset (${V:-}), not a default
+	// value (${V:-dev}).
+	BlankDefault bool
 }
 
 const maxFileSize = 1 << 20
@@ -453,7 +456,7 @@ func appPort(model *types.Project, app string, xPort int, hasXPort bool, ps *pro
 	}
 	ports := model.Services[app].Ports
 	if len(ports) != 1 {
-		ps.add("services."+app+".ports", "Houston needs the app's port: publish exactly one, or set x-houston.port")
+		ps.add("services."+app+".ports", "Houston needs the port the app listens on: publish exactly one, or set x-houston.app_port")
 		return 0
 	}
 	return int(ports[0].Target)

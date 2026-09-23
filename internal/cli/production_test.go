@@ -41,20 +41,31 @@ func TestDevProduction_RunsCompose(t *testing.T) {
 			t.Errorf("exit = %d, stderr = %s", code, stderr)
 		}
 	})
-	t.Run("RAILS_MASTER_KEY note", func(t *testing.T) {
-		rails := "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"3000:3000\"]\n    environment:\n      RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}\nx-houston:\n  health: /up\n  port: 80\n"
-		_, path := newProject(t, rails, map[string]string{".env": "RAILS_MASTER_KEY=\n"})
+	// Generic (docs/plans/init-generic.md): an optional variable left blank
+	// may be what the production image needs (a key dev falls back without).
+	t.Run("blank optional variables note", func(t *testing.T) {
+		app := "name: demo\nservices:\n  app:\n    build: .\n    ports: [\"3000:3000\"]\n    environment:\n      APP_KEY: ${APP_KEY:-}\n      MODE: ${MODE:-dev}\n      TOKEN: ${TOKEN}\nx-houston:\n  health: /up\n  app_port: 80\n"
+		_, path := newProject(t, app, map[string]string{".env": "APP_KEY=\nTOKEN=t\n"})
 		_, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production")
-		if !strings.Contains(stderr, "RAILS_MASTER_KEY") || !strings.Contains(stderr, ".env") {
-			t.Errorf("no note about RAILS_MASTER_KEY: %s", stderr)
+		if !strings.Contains(stderr, "note: APP_KEY is blank in .env") || strings.Contains(stderr, "MODE") {
+			t.Errorf("stderr = %s", stderr)
 		}
-		_, path = newProject(t, rails, map[string]string{".env": "RAILS_MASTER_KEY=abc\n"})
+		_, path = newProject(t, app, map[string]string{".env": "APP_KEY=abc\nTOKEN=t\n"})
 		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production"); stderr != "" {
-			t.Errorf("note shown although the key is set: %s", stderr)
+			t.Errorf("note shown although it's set: %s", stderr)
 		}
-		_, path = newProject(t, rails, map[string]string{".env": "RAILS_MASTER_KEY=\n"})
+		_, path = newProject(t, app, map[string]string{".env": "APP_KEY=\nTOKEN=t\n"})
 		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev"); stderr != "" {
 			t.Errorf("plain dev shows a production note: %s", stderr)
+		}
+		two := strings.Replace(app, "      MODE: ${MODE:-dev}\n", "      OTHER: ${OTHER:-}\n", 1)
+		_, path = newProject(t, two, map[string]string{".env": "TOKEN=t\n"})
+		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production"); !strings.Contains(stderr, "note: APP_KEY, OTHER are blank in .env; the production image may need them") {
+			t.Errorf("plural: %s", stderr)
+		}
+		t.Setenv("OTHER", "from-the-shell")
+		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production"); !strings.Contains(stderr, "note: APP_KEY is blank") || strings.Contains(stderr, "OTHER") {
+			t.Errorf("a variable set in the shell is named: %s", stderr)
 		}
 	})
 }

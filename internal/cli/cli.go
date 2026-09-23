@@ -79,7 +79,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		}),
 		consoleCmd,
 	)
-	root.AddCommand(command("init", "Set up this Rails app for Houston (compose.yml, Dockerfile stages, .env)", func() int {
+	root.AddCommand(command("init", "Set up this folder for Houston: adds what's missing (Dockerfile stages, compose.yml, x-houston, .env) with defaults to edit", func() int {
 		return runInit(file, stdin, stdout, stderr)
 	}))
 	var asJSON bool
