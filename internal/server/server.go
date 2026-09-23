@@ -270,6 +270,56 @@ func (cl *Client) PlaceVolume(ctx context.Context, project, volume, location str
 	return v, json.Unmarshal(body, &v)
 }
 
+// Location is a storage location, as the API lists it: never a password or
+// a credential.
+type Location struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Where      string `json:"where"`
+	Live       bool   `json:"live"`
+	Default    bool   `json:"default"`
+	Confirmed  bool   `json:"confirmed"`
+	UsedBy     int    `json:"used_by"`
+	PruneError string `json:"prune_error"`
+}
+
+func (cl *Client) Storage(ctx context.Context) ([]Location, error) {
+	var body struct {
+		Locations []Location `json:"locations"`
+	}
+	return body.Locations, cl.getJSON(ctx, "/api/v1/storage", &body)
+}
+
+// MakeDefault makes a location the default backup target.
+func (cl *Client) MakeDefault(ctx context.Context, name string) error {
+	return cl.patch(ctx, "/api/v1/storage/"+url.PathEscape(name), map[string]any{"default": true}, &struct{}{})
+}
+
+// UseStorage sets where a project backs up (location "": the default) and
+// returns where that is now.
+func (cl *Client) UseStorage(ctx context.Context, project, location string) (string, error) {
+	var loc any
+	if location != "" {
+		loc = location
+	}
+	var body struct {
+		BackupLocation string `json:"backup_location"`
+	}
+	err := cl.patch(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/backup_target", map[string]any{"location": loc}, &body)
+	return body.BackupLocation, err
+}
+
+func (cl *Client) patch(ctx context.Context, path string, payload, into any) error {
+	status, body, err := cl.do(ctx, http.MethodPatch, path, payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("%s", message(body))
+	}
+	return json.Unmarshal(body, into)
+}
+
 func (cl *Client) Settings(ctx context.Context) (Settings, error) {
 	var s Settings
 	return s, cl.getJSON(ctx, "/api/v1/settings", &s)

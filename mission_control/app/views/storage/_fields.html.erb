@@ -1,0 +1,70 @@
+<%# The storage location form's fields: first-run setup and Settings › Storage. %>
+    <fieldset class="kinds">
+      <legend>Type</legend>
+      <% StorageLocation::KINDS.each do |kind| %>
+        <label class="kinds__option mono"><%= form.radio_button :kind, kind %><%= kind %></label>
+      <% end %>
+    </fieldset>
+
+    <div class="field">
+      <%= form.label :name %>
+      <%= form.text_field :name, class: "mono", placeholder: "unas-nfs", required: true, "aria-invalid": setup.errors[:name].any? %>
+      <% if setup.errors[:name].any? %><span class="field__error">Name <%= setup.errors[:name].to_sentence %>.</span><% end %>
+    </div>
+
+    <div class="kind kind--nfs">
+      <div class="field">
+        <%= form.label :nfs_server, "NFS server" %>
+        <%= form.text_field :nfs_server, class: "mono", placeholder: "10.0.1.20" %>
+      </div>
+      <div class="field">
+        <%= form.label :nfs_export, "Export path" %>
+        <%= form.text_field :nfs_export, class: "mono", placeholder: "/volume1/houston" %>
+        <span class="field__hint">Houston connects to it directly. Nothing to set up on this server.</span>
+      </div>
+    </div>
+
+    <div class="kind kind--local">
+      <div class="field">
+        <%= form.label :local_path, "Path on this server" %>
+        <%= form.text_field :local_path, class: "mono", placeholder: "/srv/houston-backups" %>
+        <span class="field__hint">Fine for a second disk. A copy on the same disk as your apps won't survive that disk dying.</span>
+      </div>
+    </div>
+
+    <div class="kind kind--s3">
+      <div class="field">
+        <%= form.label :s3_endpoint, "Endpoint (optional)" %>
+        <%= form.text_field :s3_endpoint, class: "mono", placeholder: "https://s3.amazonaws.com" %>
+      </div>
+      <div class="field"><%= form.label :s3_bucket, "Bucket" %><%= form.text_field :s3_bucket, class: "mono" %></div>
+      <div class="field-pair">
+        <div class="field"><%= form.label :s3_access_key_id, "Access key ID" %><%= form.text_field :s3_access_key_id, class: "mono", autocomplete: "off" %></div>
+        <div class="field"><%= form.label :s3_secret_access_key, "Secret access key" %><%= form.password_field :s3_secret_access_key, class: "mono", autocomplete: "off" %></div>
+      </div>
+    </div>
+
+    <div class="kind kind--b2">
+      <div class="field"><%= form.label :b2_bucket, "Bucket" %><%= form.text_field :b2_bucket, class: "mono" %></div>
+      <div class="field-pair">
+        <div class="field"><%= form.label :b2_key_id, "Key ID" %><%= form.text_field :b2_key_id, class: "mono", autocomplete: "off" %></div>
+        <div class="field"><%= form.label :b2_application_key, "Application key" %><%= form.password_field :b2_application_key, class: "mono", autocomplete: "off" %></div>
+      </div>
+    </div>
+
+    <% details = setup.errors.to_hash.except(:name) %>
+    <% if details.any? %>
+      <div class="checks" role="alert">
+        <% details.each do |attribute, messages| %>
+          <p class="check"><span class="mono check__state check__state--nogo">NO-GO</span><span><%= StorageSetup.human_attribute_name(attribute) %> <%= messages.to_sentence %>.</span></p>
+        <% end %>
+      </div>
+    <% end %>
+    <% if setup.checks.any? %>
+      <div class="checks" role="alert">
+        <% setup.checks.each do |check| %>
+          <p class="check"><span class="mono check__state check__state--nogo">NO-GO</span><span><%= check.label %></span></p>
+        <% end %>
+      </div>
+    <% end %>
+

@@ -1,0 +1,18 @@
+<%# A location's restic password, shown once until the admin says it's saved: first-run setup and Settings › Storage. %>
+<section class="shown-once" aria-labelledby="password-title" data-controller="clipboard">
+  <div class="mono shown-once__tag">SHOWN ONCE</div>
+  <div class="shown-once__body">
+    <h2 id="password-title" class="disp">Save this password now</h2>
+    <p>Every backup on <span class="mono"><%= location.name %></span> is encrypted with this password. Mission Control keeps an encrypted copy, but if this server's disk dies, this is the only way to read your backups.</p>
+    <div id="password" class="mono shown-once__password" data-clipboard-target="source"><%= location.restic_password %></div>
+    <div class="shown-once__actions">
+      <button type="button" class="button" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+      <%= link_to "Download .txt", download, class: "button", data: { turbo: false } %>
+    </div>
+    <%= form_with url: confirm, class: "finish" do |form| %>
+      <label class="finish__saved"><%= check_box_tag :saved, "1", false, id: "saved" %> I saved it somewhere off this server, like a password manager.</label>
+      <% if unsaved %><span class="field__error" role="alert">Tick the box once the password is saved somewhere off this server.</span><% end %>
+      <div><%= form.submit submit, class: "button button--primary" %></div>
+    <% end %>
+  </div>
+</section>

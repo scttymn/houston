@@ -42,11 +42,13 @@ Rails.application.routes.draw do
         end
       end
       resource :settings, only: %i[ show update ]
+      resources :storage, only: %i[ index update ], param: :name
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
         resources :snapshots, only: :index
         resources :backups, only: %i[ create show ]
         resources :volumes, only: %i[ index update ], param: :name
+        resource :backup_target, only: :update
         resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
@@ -73,6 +75,7 @@ Rails.application.routes.draw do
     resources :backups, only: :create, controller: "project_backups"
     resources :snapshots, only: :index, controller: "project_snapshots"
     resources :volumes, only: :update, param: :name, controller: "project_volumes"
+    resource :backup_target, only: :update, controller: "project_backup_targets"
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end
@@ -80,6 +83,13 @@ Rails.application.routes.draw do
 
   namespace :settings do
     resource :general, only: %i[ show update ], controller: "general"
+    resources :storage_locations, path: "storage", param: :name, only: %i[ index new create show ], controller: "storage" do
+      member do
+        get :password
+        post :acknowledge
+        post :default, action: :make_default
+      end
+    end
     resources :tokens, only: %i[ index create destroy ]
   end
 

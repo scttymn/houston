@@ -1,0 +1,14 @@
+<% content_for :title, "Add storage · Settings" %>
+<main class="page board">
+  <%= render "settings/nav" %>
+  <div class="board__title">
+    <h1 class="disp">Add storage location</h1>
+    <p>Houston writes a test repository there before saving it.</p>
+  </div>
+  <section class="panel">
+    <%= form_with model: @setup, scope: :storage, url: settings_storage_locations_path, class: "storage-form panel__row" do |form| %>
+      <%= render "storage/fields", form:, setup: @setup %>
+      <div><%= form.submit "Test and save", class: "button button--primary" %></div>
+    <% end %>
+  </section>
+</main>

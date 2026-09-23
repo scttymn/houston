@@ -424,3 +424,50 @@ The snapshot goes **after Build and before Accessories**, not just before Releas
 - **scotty-review (cold pass):** one LOW finding, fixed: two syncs of one project at once (a hand deploy beside a runner) could race to create a volume's row and hit its unique index as a 500. Both sites use `create_or_find_by!` now.
   - Volume names are sync-validated (no `/`, no leading `.`), so the directory path can't escape `volumes/<project>/`.
   - A volume dropped from compose.yml keeps its row and its data; the lists show the file's volumes.
+
+## Batch 7: Storage locations in Settings, and each project's backup target
+
+### Design (short)
+- **Settings › Storage** (`/settings/storage`, in the Settings sub-nav):
+  - Each location: name, type, where, what it holds ("live volumes · backups" for nfs and local, "backups" for s3 and b2), DEFAULT, used by N projects, the last backup written there, and the last prune (or its error, from Batch 2).
+  - **Add** (`/settings/storage/new`): the first-run form, as a shared partial, and the same `StorageSetup` (restic init, or opening an existing repository with the saved password).
+    - Then the location's page (`/settings/storage/:name`) shows the password once: copy, download, and "I saved it", as in setup, as shared partials.
+    - Confirming acknowledges the location. It does **not** make it the default.
+    - An unconfirmed location can't be chosen anywhere, and its password page is gone once it's confirmed.
+  - **Make default** (acknowledged only): projects without their own target follow it.
+- **Each project's backup target:** `projects.backup_location_id` (null = the default). `Project#backup_location` is that location if it's acknowledged, else the default.
+  - It's chosen on the Backup plan panel (a select of acknowledged locations, and "Default (<name>)"). The panel says that earlier snapshots stay where they were written.
+  - The snapshot list and backups follow it; each run already records its location.
+- **API and CLI:**
+  - `GET /api/v1/storage` → the list, **never a password or credential**. `houston storage` prints it.
+  - `PATCH /api/v1/storage/:name {default: true}` → `houston storage default NAME`.
+  - `PATCH /api/v1/projects/:name/backup_target {location | null}` → `houston storage use NAME` / `--default` (with `--project`).
+- **Adding a location stays on the Settings page for now** (a question for you, below).
+
+### Question (for you)
+**Adding a storage location from the CLI or API.** Adding one generates its restic password, which has to be shown once and saved. The remote API's rule so far is "never returns a secret value"; the one exception is the webhook secret, until its first delivery. A CLI `houston storage add` would print the backup password into an agent's terminal and transcript. I've kept adding on the Settings page, and made list, make default and per-project target available from the CLI. Should the CLI also add locations (printing the password once, with a `confirm` step)?
+
+### AC ↔ test map (Batch 7)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The Storage list: each location's type, where, holds, DEFAULT, used by, last write, prune error; the sub-nav; signed out → sign-in | `controllers/settings/storage_controller_test.rb` `test "the storage list"` | Contract, Authz |
+| 2 | Add: runs restic init (fake docker) and shows the password once on its page; confirming acknowledges it (not default) and the page then redirects; bad input → 422 with the field; a name already used → 422 | `test "adding a location"` | Contract, Preconditions |
+| 3 | Make default: moves the default; an unconfirmed location can't be; projects without a target now back up there | `test "making a location the default"` | Preconditions |
+| 4 | A project's target: chosen on the page, used by `request!` and the snapshot list; an unconfirmed location refused; back to the default | `controllers/project_backups_test.rb` `test "choosing a project's backup target"`, `models/backup_run_test.rb` | Contract |
+| 5 | API: the list (no `restic_password` or credential anywhere in the JSON), make default, a project's target, errors (404, 422) | `integration/api_v1_storage_test.rb` `test "storage over the API"` | Authz, Contract |
+| 6 | CLI: `houston storage`, `storage default NAME`, `storage use NAME` / `--default` | `internal/cli` `TestStorage` | Contract |
+| 7 | First-run setup still works with the shared partials | `controllers/setup/storage_controller_test.rb` (unchanged, green) | Parity |
+
+### Done (Batch 7)
+- **Red:** Mission Control had 2 failures and 4 errors in the new tests. **Green:** Mission Control 212 runs and the Go suite. The migration runs down and up. rubocop and gofmt are clean.
+  - **Not verified:** the Go CLI's red. Its output was cut off in that run, so mutations stand in.
+- **First-run setup and Settings share the form and the shown-once panel** (`storage/_fields`, `storage/_shown_once`). Setup's own tests pass unchanged.
+- **Test mistakes fixed:** two regexes with the wrong order or case. The pages were right.
+- `Project::Refused` for a target that isn't confirmed (it had borrowed `ProjectVolume::Refused`).
+- **Mutations, each caught:**
+  - Rails: the API listing the password; confirming making a location the default; an unconfirmed location becoming the default; the password page after confirming; a project's target ignored; an unconfirmed target accepted.
+  - Go: `--default` sending a name; the list hiding DEFAULT.
+- **scotty-review (cold pass):** nothing to fix.
+  - The restic password shows only on an unconfirmed location's page (admin, `no-store`), and never in the API.
+  - **For step 6 (restore):** after a project's target or the default changes, its earlier snapshots stay where they were written, and the page says so. Restore will need to list across the locations the project's runs used (each run records its location).
+- **Open question** (above): whether the CLI should add locations too.

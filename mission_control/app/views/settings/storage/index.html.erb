@@ -1,0 +1,39 @@
+<% content_for :title, "Storage · Settings" %>
+<main class="page board">
+  <%= render "settings/nav" %>
+  <div class="board__top">
+    <div class="board__title">
+      <h1 class="disp">Storage locations</h1>
+      <p>Where backups go, and where live volumes can live. Each location has its own restic password, shown once when it's added.</p>
+    </div>
+    <%= link_to "Add storage location", new_settings_storage_location_path, class: "button button--primary" %>
+  </div>
+
+  <% if notice %><div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div><% end %>
+  <% if alert %><div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= alert %></span></div><% end %>
+
+  <section class="panel">
+    <ul class="rows">
+      <% @locations.each do |location| %>
+        <% used = location.projects_using %>
+        <% last = location.last_write %>
+        <li data-location="<%= location.name %>" class="storage-row">
+          <span class="mono"><%= location.name %><% if location.default? %> <small class="mono badge">DEFAULT</small><% end %></span>
+          <span class="mono"><%= location.kind %></span>
+          <span class="mono"><%= location.where_it_is %></span>
+          <span><%= location.holds_words %></span>
+          <span><%= used.zero? ? "not used yet" : pluralize(used, "project") %></span>
+          <span><%= last ? l(last, format: :short) : "—" %></span>
+          <span>
+            <% if !location.acknowledged? %>
+              <%= link_to "Save its password", settings_storage_location_path(location.name) %>
+            <% elsif !location.default? %>
+              <%= button_to "Make default", default_settings_storage_location_path(location.name), class: "button button--small" %>
+            <% end %>
+          </span>
+          <% if location.prune_error.present? %><small class="field__error">Last prune failed: <%= location.prune_error %></small><% end %>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+</main>

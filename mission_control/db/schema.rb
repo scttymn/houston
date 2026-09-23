@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_200000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -108,6 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_190000) do
 
   create_table "projects", force: :cascade do |t|
     t.string "app_service", null: false
+    t.integer "backup_location_id"
     t.string "backup_schedule", default: "daily 03:00", null: false
     t.string "branch"
     t.string "compose_path"
@@ -134,6 +135,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_190000) do
     t.json "volumes", default: [], null: false
     t.text "webhook_secret"
     t.datetime "webhook_verified_at"
+    t.index ["backup_location_id"], name: "index_projects_on_backup_location_id"
     t.index ["name"], name: "index_projects_on_name", unique: true
   end
 
@@ -212,6 +214,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_190000) do
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
   add_foreign_key "project_volumes", "projects"
   add_foreign_key "project_volumes", "storage_locations", column: "location_id"
+  add_foreign_key "projects", "storage_locations", column: "backup_location_id"
   add_foreign_key "secrets", "projects", on_delete: :cascade
   add_foreign_key "sessions", "users"
 end

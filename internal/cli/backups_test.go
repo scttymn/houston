@@ -208,3 +208,38 @@ func TestVolumes(t *testing.T) {
 		t.Errorf("no location: exit %d, %q", code, errOut)
 	}
 }
+
+func TestStorage(t *testing.T) {
+	var body string
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/storage": respond(`{"locations":[{"name":"b2-offsite","kind":"b2","where":"b2:sm:houston","live":false,"default":false,"confirmed":true,"used_by":0},
+			{"name":"unas-nfs","kind":"nfs","where":"10.0.1.20:/volume1/houston","live":true,"default":true,"confirmed":true,"used_by":3,"prune_error":"Fatal: unable to create lock"}]}`),
+		"/api/v1/storage/b2-offsite": func(w http.ResponseWriter, r *http.Request) {
+			body = readBody(r)
+			w.Write([]byte(`{"name":"b2-offsite","default":true}`))
+		},
+		"/api/v1/projects/equip/backup_target": func(w http.ResponseWriter, r *http.Request) {
+			body = readBody(r)
+			w.Write([]byte(`{"backup_location":"b2-offsite"}`))
+		},
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, _ := run(&fakeDocker{}, "storage")
+	if code != 0 || !regexp.MustCompile(`(?m)^unas-nfs +nfs +10\.0\.1\.20:/volume1/houston +live volumes · backups +DEFAULT +3 projects +prune failed: Fatal: unable to create lock$`).MatchString(out) ||
+		!regexp.MustCompile(`(?m)^b2-offsite +b2 +b2:sm:houston +backups +0 projects$`).MatchString(out) {
+		t.Errorf("list: exit %d\n%s", code, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "storage", "default", "b2-offsite")
+	if code != 0 || body != `{"default":true}` || !strings.Contains(out, "b2-offsite is the default") {
+		t.Errorf("default: exit %d, body %s\n%s", code, body, out)
+	}
+	code, out, _ = run(&fakeDocker{}, "storage", "use", "b2-offsite", "--project", "equip")
+	if code != 0 || body != `{"location":"b2-offsite"}` || !strings.Contains(out, "equip backs up to b2-offsite") {
+		t.Errorf("use: exit %d, body %s\n%s", code, body, out)
+	}
+	code, _, _ = run(&fakeDocker{}, "storage", "use", "--default", "--project", "equip")
+	if code != 0 || body != `{"location":null}` {
+		t.Errorf("use --default: exit %d, body %s", code, body)
+	}
+}

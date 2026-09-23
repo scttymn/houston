@@ -235,6 +235,32 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	place.Flags().BoolVar(&localDisk, "local-disk", false, "on the server's own disk (the default)")
 	volumes.AddCommand(place)
 	root.AddCommand(volumes)
+
+	storage := command("storage", "Storage locations on the server (add one in Settings › Storage)", func() int {
+		return runStorage(stdout, stderr)
+	})
+	var useDefault bool
+	use := &cobra.Command{
+		Use:   "use [LOCATION]",
+		Short: "Choose where a project backs up: a location, or --default",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runStorageUse(file, projectFlag, args, useDefault, stdout, stderr)
+			return nil
+		},
+	}
+	use.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	use.Flags().BoolVar(&useDefault, "default", false, "the default location")
+	storage.AddCommand(use, &cobra.Command{
+		Use:   "default LOCATION",
+		Short: "Make a location the default backup target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runStorageDefault(args[0], stdout, stderr)
+			return nil
+		},
+	})
+	root.AddCommand(storage)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

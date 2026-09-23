@@ -23,6 +23,17 @@ class StorageLocation < ApplicationRecord
   # Can hold a project's live volumes (spec §9); s3 and b2 hold backups only.
   def live? = kind.in?(%w[nfs local])
 
+  def holds_words = live? ? "live volumes · backups" : "backups"
+
+  # Projects backing up here: their own target, or the default for those without one.
+  def projects_using
+    ids = Project.where(backup_location_id: id).pluck(:id)
+    ids += Project.where(backup_location_id: nil).pluck(:id) if default? && acknowledged?
+    ids.uniq.size
+  end
+
+  def last_write = BackupRun.where(location_id: id, status: "go").maximum(:finished_at)
+
   def verified? = verified_at.present?
   def acknowledged? = acknowledged_at.present?
   def settings = super || {}

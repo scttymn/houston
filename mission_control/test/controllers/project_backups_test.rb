@@ -88,4 +88,27 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     assert_select ".backup-plan", /production\.sqlite3.*\.backup/m
     assert_select ".backup-plan", /NOT BACKED UP.*cache/m
   end
+
+  test "choosing a project's backup target" do
+    sign_in_as users(:one)
+    offsite = StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "sm" }, restic_password: "pw", verified_at: Time.current, acknowledged_at: Time.current)
+    StorageLocation.create!(name: "later", kind: "b2", settings: { "bucket" => "sm2" }, restic_password: "pw", verified_at: Time.current)
+
+    get project_path("equip")
+    assert_select ".backup-plan select[name=location] option", 2 # the default, b2-offsite
+    patch project_backup_target_path("equip"), params: { location: "b2-offsite" }
+    assert_redirected_to project_path("equip")
+    assert_equal offsite, @project.reload.backup_location
+    follow_redirect!
+    assert_select ".backup-plan", /Backing up to b2-offsite\. Earlier snapshots stay where they were written/
+    assert_equal offsite, BackupRun.request!(@project).location
+
+    patch project_backup_target_path("equip"), params: { location: "later" }
+    follow_redirect!
+    assert_select ".notice--nogo", /later isn't set up yet/
+    assert_equal offsite, @project.reload.backup_location
+
+    patch project_backup_target_path("equip"), params: { location: "" }
+    assert_equal storage_locations(:unas), @project.reload.backup_location
+  end
 end

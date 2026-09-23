@@ -117,7 +117,16 @@
       <dl class="facts">
         <dt class="mono">SCHEDULE</dt><dd><%= BackupSchedule.new(@project, @installation.zone).words %>, plus Back up now</dd>
         <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
-        <dt class="mono">STORAGE</dt><dd class="mono"><%= @storage&.name || "none yet" %></dd>
+        <dt class="mono">STORAGE</dt>
+        <dd>
+          <%= form_with url: project_backup_target_path(@project.name), method: :patch, class: "secret__form" do |f| %>
+            <% default = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
+            <%= f.select :location, [ [ "Default (#{default&.name || "none yet"})", "" ] ] + StorageLocation.where.not(acknowledged_at: nil).where.not(id: default&.id).order(:name).map { |l| [ l.name, l.name ] },
+                         selected: @project.chosen_backup_location&.acknowledged? ? @project.chosen_backup_location.name : "" %>
+            <%= f.submit "Save", class: "button button--small" %>
+          <% end %>
+          <small>Backing up to <span class="mono"><%= @storage&.name || "none yet" %></span>. Earlier snapshots stay where they were written.</small>
+        </dd>
         <dt class="mono">VOLUMES</dt>
         <dd><% if @project.volumes.empty? %>none<% end %><% @project.volumes.each do |volume| %><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span><br><% end %></dd>
         <dt class="mono">DATABASES</dt>

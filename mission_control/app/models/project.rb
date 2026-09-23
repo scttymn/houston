@@ -1,6 +1,8 @@
 # A project Houston deploys, as last synced from its compose.yml by houston
 # deploy. Facts only; secret values live in Secret.
 class Project < ApplicationRecord
+  class Refused < StandardError; end
+
   has_many :hosts, class_name: "ProjectHost", dependent: :delete_all
   has_many :secrets, dependent: :delete_all
   has_many :deploys, dependent: :delete_all
@@ -33,9 +35,20 @@ class Project < ApplicationRecord
 
   def accessories = services - [ app_service ]
 
-  # Where this project's backups go: the default location, once setup's
-  # storage step is finished.
-  def backup_location = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+  belongs_to :chosen_backup_location, class_name: "StorageLocation", foreign_key: :backup_location_id, optional: true
+
+  # Where this project's backups go: its own target once confirmed, else the
+  # default (once setup's storage step is finished).
+  def backup_location
+    return chosen_backup_location if chosen_backup_location&.acknowledged?
+    StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+  end
+
+  # Chooses the project's backup target (nil: the default).
+  def choose_backup_location!(location)
+    raise Refused, "#{location.name} isn't set up yet" if location && !location.acknowledged?
+    update!(chosen_backup_location: location)
+  end
 
   # Each named volume of the app with where it lives: [volume, ProjectVolume or nil].
   def volume_rows

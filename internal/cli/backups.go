@@ -184,3 +184,67 @@ func runVolumePlace(file, projectFlag string, args []string, localDisk bool, std
 	fmt.Fprintf(stdout, "%s will be placed on %s at the next deploy.\n", v.Name, where)
 	return 0
 }
+
+// runStorage lists the storage locations (never a password or credential).
+func runStorage(stdout, stderr io.Writer) int {
+	client, _, code := remote("", "", false, stderr)
+	if code != 0 {
+		return code
+	}
+	locations, err := client.Storage(context.Background())
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	for _, l := range locations {
+		holds, marks := "backups", ""
+		if l.Live {
+			holds = "live volumes · backups"
+		}
+		if l.Default {
+			marks += "  DEFAULT"
+		}
+		if !l.Confirmed {
+			marks += "  not confirmed (save its password in Settings › Storage)"
+		}
+		line := fmt.Sprintf("%-16s %-6s %-32s %-24s%s  %d projects", l.Name, l.Kind, l.Where, holds, marks, l.UsedBy)
+		if l.PruneError != "" {
+			line += "  prune failed: " + l.PruneError
+		}
+		fmt.Fprintln(stdout, line)
+	}
+	return 0
+}
+
+func runStorageDefault(name string, stdout, stderr io.Writer) int {
+	client, _, code := remote("", "", false, stderr)
+	if code != 0 {
+		return code
+	}
+	if err := client.MakeDefault(context.Background(), name); err != nil {
+		return remoteFailed(err, stderr)
+	}
+	fmt.Fprintf(stdout, "%s is the default: projects without their own target back up there.\n", name)
+	return 0
+}
+
+// runStorageUse sets where a project backs up: a location, or the default.
+func runStorageUse(file, projectFlag string, args []string, useDefault bool, stdout, stderr io.Writer) int {
+	if (len(args) == 1) == useDefault {
+		fmt.Fprintln(stderr, "houston storage use LOCATION: give a location, or --default")
+		return exitUsage
+	}
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	location := ""
+	if !useDefault {
+		location = args[0]
+	}
+	where, err := client.UseStorage(context.Background(), name, location)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	fmt.Fprintf(stdout, "%s backs up to %s.\n", name, where)
+	return 0
+}
