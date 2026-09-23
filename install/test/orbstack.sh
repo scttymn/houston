@@ -69,10 +69,11 @@ next=$(vm curl -s -o /dev/null -w '%{redirect_url}' -b "$jar" "http://$ip:3000/"
 if [ "$next" = "http://$ip:3000/setup/cloudflare" ]; then ok "signed in; next is the Cloudflare step"; else bad "signed in; next step (got $next)"; fi
 
 cf_file="$repo/mission_control/.houston/cloudflare-check.env"
-if [ -f "$cf_file" ]; then
+if [ -f "$cf_file" ] && ! "$repo/install/test/cloudflare.sh" preflight; then
+  bad "Cloudflare preflight (step 2 skipped; see above)"
+elif [ -f "$cf_file" ]; then
   echo "== setup step 2 against the real Cloudflare API (token read from a file, never printed)"
   base=$(sed -n 's/^BASE_DOMAIN=//p' "$cf_file")
-  "$repo/install/test/cloudflare.sh" preflight
   cf_created=yes
   vm sh -c "umask 077; sed -n 's/^CLOUDFLARE_API_TOKEN=//p' '$cf_file' | tr -d '\r\n' > /tmp/cf-token"
   step2=$(vm curl -s -o /tmp/houston-step2.html -w '%{http_code} %{redirect_url}' -c "$jar" -b "$jar" -X POST "http://$ip:3000/setup/cloudflare" \

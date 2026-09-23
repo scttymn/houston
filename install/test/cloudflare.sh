@@ -24,6 +24,12 @@ cf() { curl -sS -H @"$auth" -H "Content-Type: application/json" "$@"; }
 jqr() { python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
 
 accounts=$(cf "$api/accounts?per_page=50")
+rejected=$(printf '%s' "$accounts" | jqr 'e=d.get("errors") or []; print("; ".join(x.get("message","") for x in e) if not d.get("success") else "")')
+if [ -n "$rejected" ]; then
+  echo "Cloudflare rejected the token: $rejected"
+  echo "(nothing else checked; fix the token first — repeated rejected calls get this machine temporarily blocked)"
+  exit 1
+fi
 account=$(printf '%s' "$accounts" | jqr 'r=d.get("result") or []; print(r[0]["id"] if len(r)==1 else "")')
 zone=$(cf "$api/zones?name=$base" | jqr 'r=d.get("result") or []; print(r[0]["id"] if r else "")')
 

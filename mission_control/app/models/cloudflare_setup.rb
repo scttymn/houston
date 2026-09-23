@@ -37,6 +37,7 @@ class CloudflareSetup
 
     @client = Cloudflare::Client.new(api_token)
     account = check_account
+    raise Stop if @token_rejected # every other check would fail the same way
     check_tunnel_access(account)
     zone = check_zone
     raise Stop unless checks.all?(&:ok)
@@ -71,7 +72,8 @@ class CloudflareSetup
       else fail!("The token can see more than one account; make one for just the account that holds #{base_domain}.")
       end
     rescue Cloudflare::Error => e
-      fail!(e.status.in?([ 400, 401, 403 ]) ? "The token isn't valid (Cloudflare: #{e.message})." : "Cloudflare: #{e.message}")
+      @token_rejected = e.status.in?([ 400, 401, 403 ])
+      fail!(@token_rejected ? "The token isn't valid (Cloudflare: #{e.message}). Copy the token's value again (not its ID), or check it's active in Cloudflare." : "Cloudflare: #{e.message}")
     end
 
     def check_tunnel_access(account)

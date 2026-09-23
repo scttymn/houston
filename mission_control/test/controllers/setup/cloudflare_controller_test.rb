@@ -78,6 +78,18 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a rejected token is the only NO-GO shown" do
+    stub_token_checks(accounts_status: 401, accounts: nil)
+    zones = cf(:get, "/zones", query: { "name" => "svnmns.com" }, status: 401, errors: [ { code: 9109, message: "Invalid access token" } ])
+
+    submit
+
+    assert_response :unprocessable_entity
+    assert_select ".check", 1
+    assert_select ".check", /isn't valid/
+    assert_not_requested zones
+  end
+
   test "the base domain must be a domain" do
     [ "localhost", "https://svnmns.com", "*.svnmns.com", "" ].each do |bad|
       submit(base_domain: bad)
