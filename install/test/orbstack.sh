@@ -129,7 +129,11 @@ elif [ -f "$cf_file" ]; then
     if [ "$route" = go ]; then ok "the flight board says admin.$base reaches this Mission Control (after $((SECONDS - start))s; first seen: $first)"; else bad "the flight board's admin.$base route is '$route' after 5 minutes"; fi
     echo "== deploys through the tunnel"
     "$repo/install/test/deploy-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
-    through 200 "https://hooks.$base/up"
+    echo "== push to deploy through the tunnel"
+    "$repo/install/test/push-through-tunnel.sh" "$name" "$base" || failures=$((failures + 1))
+    # hooks.<base> answers only the webhook and /ping (build step 4); /up is a 404 there.
+    through 200 "https://hooks.$base/ping"
+    through 404 "https://hooks.$base/up"
     # Mission Control would redirect this; the hooks hostname only passes /<slug>, so the tunnel answers 404.
     through 404 "https://hooks.$base/setup/cloudflare"
   else

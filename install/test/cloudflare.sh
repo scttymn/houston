@@ -39,7 +39,7 @@ case "${1:-}" in
     echo "accounts the token sees: $(printf '%s' "$accounts" | jqr 'print(len(d.get("result") or []), "" if d.get("success") else d.get("errors"))')"
     [ -n "$zone" ] && echo "zone $base: found" || echo "zone $base: NOT found (check the token's Zone · DNS permission)"
     if [ -n "$zone" ]; then
-      for name in "*.$base" "admin.$base" "hooks.$base" "houston-spike-test.$base" "houston-equip-test.$base"; do
+      for name in "*.$base" "admin.$base" "hooks.$base" "houston-spike-test.$base" "houston-equip-test.$base" "houston-push-test.$base"; do
         cf "$api/zones/$zone/dns_records?name=$name" | jqr "
 r=d.get('result') or []
 print('$name:', ('CAN\'T READ RECORDS: %s (give the token DNS · Edit on $base)' % d.get('errors')) if not d.get('success') else 'no record' if not r else '; '.join(f\"{x['type']} -> {x['content']} (proxied={x.get('proxied')}, comment={x.get('comment')!r})\" for x in r))"

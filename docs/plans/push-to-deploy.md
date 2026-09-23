@@ -380,6 +380,38 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 - **Fallout:** the sync response gained `domains` (the "sync creates" test pins the full shape). Go's `SyncResult` holds a map now, so the client test compares it with `reflect.DeepEqual`.
 - **The real proof,** a domain in a zone that isn't in Cloudflare showing its state, is Batch 8's run on svnmns.com.
 
+## Batch 8: real run on svnmns.com
+
+A stage of `install/test/orbstack.sh` (`install/test/push-through-tunnel.sh`), after build step 3's deploys. Guards as before:
+- The test name (`houston-push-test`) must answer the other server's 404 first.
+- Cleanup deletes only `managed-by:houston` records pointing at the test tunnel.
+- The custom domain is `houston-push-test.example.invalid`, in no Cloudflare zone.
+
+### Done (Batch 8)
+- **Final run: PASS, 55 checks.** Ubuntu 24.04 with the real svnmns.com tunnel in host-by-host mode:
+  - **Build step 4's installer checks** (Batch 5 row 2): two runners running as houston's uid, with git, ssh, the CLI and `docker compose`; Mission Control expecting 2 runners with 8 threads.
+  - **Step 3's deploys**, unchanged: the spike and equip through Cloudflare, the zero-downtime redeploy, and NO-GO with the old version serving.
+  - **Push to deploy:**
+    - A private Forgejo repo was linked with Mission Control's models, and Forgejo's own webhook pointed at `https://hooks.svnmns.com/houston-push-test`.
+    - A push → the webhook out through Cloudflare and back in → verified → a runner (`houston-runner-1`) tested and deployed it → `https://houston-push-test.svnmns.com` served the commit.
+    - The next push → #2 GO, with 59 polls through Cloudflare during it, all 200.
+    - `houston-push-test.example.invalid` → ZONE NOT IN CLOUDFLARE YET.
+  - **`hooks.svnmns.com`:** `/ping` 200, `/up` 404, `/setup/cloudflare` 404.
+  - **Cleanup** deleted `admin.`, `hooks.`, and the three test projects' records, plus the tunnel. The preflight afterwards matched the one before, and the live `equip.svnmns.com` answered 200.
+- **The first run's one failure** was a stale check from build step 3: `hooks.svnmns.com/up` → 200. Batch 2 deliberately made that a 404. The check now expects `/ping` → 200 and `/up` → 404.
+
+## Review (build step 4, scotty-review over `353c6fd..HEAD`)
+- **Finding, fixed test-first:** the project page saves a secret as the form param `value`, which Rails' `filter_parameters` didn't cover, so **every secret saved through the page was written to the production log in plain text**. The bug dates from build step 3's Batch 7.
+  - `LogFilterTest` went red, then green with `:value` added. It also pins `deploy_key`, `webhook_secret` and `token` as filtered, and `repo_url` as logged.
+- **Cold pass:**
+  - 4a (re-entry): Save, sync, claim, check for changes and rotate are all idempotent or tested for a second call.
+  - 4b (dead API): none. `GitRemote.refs` / `known_hosts_for`, `Runner.seen!`, `Deploy#abandon!`, `DomainDns#remove` and `DeployBroadcast` all have production callers.
+  - 4c (inert): none.
+  - 4d (stuck-alive): a runner's deploy has the deadline, and a silent runner's deploy is taken over at the next claim.
+  - 4e (ownership at finalize): unchanged from step 3; claims are conditional flips.
+- **Noted, not changed:** a runner keeps each project's deploy key unencrypted in its workspace (0600, houston-owned). Anything that can read it already controls the Docker socket; the key never leaves the server.
+- **Suites:** the Go suite green (8 packages); Mission Control 130 runs, 0 failures.
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.
