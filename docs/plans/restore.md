@@ -41,7 +41,7 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
   7. **Commit:** the project's generation becomes g+1
   8. **Clean up:** generation g's accessories and volumes are removed (a failure here is a warning; the restore stands)
   - **A failure in steps 1–6** removes whatever generation g+1 got. Generation g keeps serving, untouched, and the restore is NO-GO.
-  - **Writes made to the live app while the restore runs:** the ones after the safety snapshot and before the switch (seconds) are lost. That's what the maintenance option is for.
+  - **Writes made to the live app while the restore runs:** the ones after the safety snapshot and before the switch (seconds) are lost. Putting the maintenance page up first prevents that.
 - **The maintenance page** (out of band, the admin's switch):
   - On or off at any time: the project page, `PUT /api/v1/projects/:name/maintenance`, `houston maintenance on|off`. The project shows MAINTENANCE on the flight board, with who turned it on and since when.
   - **A deploy or restore never changes it.** If kamal-proxy drops the maintenance state when a new version is deployed (the spike checks), the runner puts it back right after the switch.
