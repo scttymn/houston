@@ -88,6 +88,15 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	deployCmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
 	root.AddCommand(deployCmd)
+	var runnerName, workspace string
+	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
+		return runRunner(runnerName, workspace, stderr, d)
+	})
+	runnerCmd.Flags().StringVar(&runnerName, "name", "", "this runner's name, houston-runner-N")
+	runnerCmd.Flags().StringVar(&workspace, "workspace", "", "where checkouts and deploy keys live (the same path on the host)")
+	runnerCmd.MarkFlagRequired("name")
+	runnerCmd.MarkFlagRequired("workspace")
+	root.AddCommand(runnerCmd)
 	logs := command("logs", "Show the app's logs", func() int {
 		return runLogs(file, follow, stderr, d)
 	})

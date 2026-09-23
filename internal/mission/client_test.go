@@ -164,3 +164,42 @@ func TestFromEnvironment(t *testing.T) {
 		t.Errorf("from env: %+v, %v", c, err)
 	}
 }
+
+func TestClientClaims(t *testing.T) {
+	ctx := context.Background()
+	answer := http.StatusOK
+	c := server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		if r.Method+" "+r.URL.Path != "POST /api/runner/jobs/claim" || body["runner"] != "houston-runner-1" || body["wait"] != float64(25) {
+			t.Errorf("claim request: %s %s %v", r.Method, r.URL.Path, body)
+		}
+		w.WriteHeader(answer)
+		if answer == http.StatusOK {
+			io.WriteString(w, `{"deploy":{"id":7,"number":3,"token":"tok","sha":"`+strings.Repeat("a", 40)+`","ref":"refs/heads/main","took_over":2},
+				"project":{"name":"garage","repo_url":"git@forgejo:houston/garage.git","branch":"main","compose_path":"compose.yml","deploy_key":"KEY"},
+				"known_hosts":["forgejo ssh-ed25519 AAAA"]}`)
+		}
+	})
+
+	job, ok, err := c.Claim(ctx, "houston-runner-1", 25)
+	if err != nil || !ok {
+		t.Fatalf("Claim = %v, %v", ok, err)
+	}
+	want := Job{
+		Deploy:     Deploy{ID: 7, Number: 3, Token: "tok", TookOver: 2},
+		SHA:        strings.Repeat("a", 40),
+		Ref:        "refs/heads/main",
+		Project:    JobProject{Name: "garage", RepoURL: "git@forgejo:houston/garage.git", Branch: "main", ComposePath: "compose.yml", DeployKey: "KEY"},
+		KnownHosts: []string{"forgejo ssh-ed25519 AAAA"},
+	}
+	if !reflect.DeepEqual(job, want) {
+		t.Errorf("job =\n%#v\nwant\n%#v", job, want)
+	}
+
+	answer = http.StatusNoContent
+	if _, ok, err := c.Claim(ctx, "houston-runner-1", 25); ok || err != nil {
+		t.Errorf("204: ok=%v err=%v", ok, err)
+	}
+	if _, _, err := New(c.URL, "wrong").Claim(ctx, "houston-runner-1", 25); !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("wrong token: %v", err)
+	}
+}

@@ -158,6 +158,18 @@ func describe(args []string) string {
 	return strings.Join(args, " ")
 }
 
+// fakeExec records non-docker commands (houston test, for step 00).
+type fakeExec struct {
+	calls [][]string
+	exit  int
+}
+
+func (e *fakeExec) Stream(ctx context.Context, dir string, env []string, out io.Writer, name string, args ...string) (int, error) {
+	e.calls = append(e.calls, append([]string{name}, args...))
+	io.WriteString(out, "output of the tests\n")
+	return e.exit, nil
+}
+
 type fakeGit struct {
 	head, branch, status string
 	refs                 map[string]string
@@ -268,6 +280,9 @@ type harness struct {
 	stderr  bytes.Buffer
 	ref     string
 	timing  Options // Timeout, HeartbeatEvery, FenceAfter; zero means the defaults
+	exec    *fakeExec
+	claimed *mission.Deploy
+	tests   bool
 }
 
 func newHarness(t *testing.T, compose string) *harness {
@@ -288,6 +303,7 @@ func newHarness(t *testing.T, compose string) *harness {
 	return &harness{
 		dir:     dir,
 		docker:  &fakeDocker{labels: labels},
+		exec:    &fakeExec{},
 		git:     &fakeGit{head: sha, branch: "refs/heads/main", refs: map[string]string{"refs/heads/main": sha}},
 		mission: &fakeMission{secrets: map[string]string{"POSTGRES_PASSWORD": "pw", "SECRET_KEY_BASE": "skb"}, deploy: mission.Deploy{ID: 9, Number: 4, Token: "t"}},
 	}
@@ -305,7 +321,10 @@ func (h *harness) run() int {
 		Timeout:        h.timing.Timeout,
 		HeartbeatEvery: h.timing.HeartbeatEvery,
 		FenceAfter:     h.timing.FenceAfter,
-	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission})
+		Claimed:        h.claimed,
+		RunTests:       h.tests,
+		Houston:        "/usr/local/bin/houston",
+	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission, Exec: h.exec})
 }
 
 func TestDeployHappyPath(t *testing.T) {
@@ -769,5 +788,89 @@ func TestDeployKeepsItsFilesOutOfGit(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(h.dir, ".houston", ".gitignore"))
 	if err != nil || string(data) != "*\n" {
 		t.Errorf(".houston/.gitignore = %q, %v; want \"*\\n\"", data, err)
+	}
+}
+
+func TestDeployContinuesAClaimedDeploy(t *testing.T) {
+	claimed := mission.Deploy{ID: 21, Number: 6, Token: "claimed", TookOver: 5}
+	h := newHarness(t, shopCompose)
+	h.claimed = &claimed
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if !reflect.DeepEqual(h.mission.calls, []string{"sync"}) {
+		t.Errorf("mission calls = %v; a claimed deploy isn't started again", h.mission.calls)
+	}
+	if whats := h.docker.whats(); len(whats) == 0 || whats[0] != "kamal lock release --version "+sha {
+		t.Errorf("docker calls = %v; want the lock released first (took over #5)", whats)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*harness)
+		want  string
+	}{
+		{"ref check", func(h *harness) { h.git.status = " M x" }, "uncommitted changes"},
+		{"hold", func(h *harness) {
+			h.mission.syncErr = &mission.HoldError{Missing: []string{"SECRET_KEY_BASE"}, Message: "HOLD"}
+		}, "SECRET_KEY_BASE"},
+		{"compose problem", func(h *harness) {
+			os.WriteFile(filepath.Join(h.dir, "compose.yml"), []byte(strings.Replace(shopCompose, "health: /up", "health: up", 1)), 0o644)
+		}, "x-houston.health"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, shopCompose)
+			h.claimed = &claimed
+			tc.setup(h)
+			if code := h.run(); code == 0 {
+				t.Fatal("exit 0")
+			}
+			final := h.mission.final()
+			if final.Status != "no_go" || !strings.Contains(final.Error, tc.want) {
+				t.Errorf("final report = %+v; the claimed deploy must be finished NO-GO saying %q", final, tc.want)
+			}
+			if len(h.docker.calls) != 0 {
+				t.Errorf("docker ran: %v", h.docker.whats())
+			}
+		})
+	}
+}
+
+func TestDeployRunsTestsFirst(t *testing.T) {
+	withTests := strings.Replace(shopCompose, "  hooks:\n", "  commands: { test: bin/rails test }\n  hooks:\n", 1)
+	claimed := mission.Deploy{ID: 21, Number: 6, Token: "claimed"}
+
+	h := newHarness(t, withTests)
+	h.claimed, h.tests = &claimed, true
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if len(h.mission.reports) == 0 || h.mission.reports[0].Step != "Test" {
+		t.Errorf("first report = %+v; want step Test", h.mission.reports[0])
+	}
+	if want := [][]string{{"/usr/local/bin/houston", "-f", filepath.Join(h.dir, "compose.yml"), "test"}}; !reflect.DeepEqual(h.exec.calls, want) {
+		t.Errorf("exec calls = %v, want %v", h.exec.calls, want)
+	}
+	if !strings.Contains(h.mission.log(), "output of the tests") {
+		t.Error("the tests' output isn't in the deploy's log")
+	}
+
+	h = newHarness(t, withTests)
+	h.claimed, h.tests = &claimed, true
+	h.exec.exit = 3
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if final := h.mission.final(); final.Status != "no_go" || !strings.Contains(final.Error, "tests failed (exit 3)") {
+		t.Errorf("final report = %+v", final)
+	}
+	if len(h.docker.calls) != 0 {
+		t.Errorf("built after failing tests: %v", h.docker.whats())
+	}
+
+	h = newHarness(t, shopCompose)
+	h.claimed, h.tests = &claimed, true
+	if code := h.run(); code != 0 || len(h.exec.calls) != 0 || h.mission.reports[0].Step == "Test" {
+		t.Errorf("no commands.test: exit %d, exec %v, first step %q", code, h.exec.calls, h.mission.reports[0].Step)
 	}
 }

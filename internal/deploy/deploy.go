@@ -45,6 +45,11 @@ type Git interface {
 	Output(dir string, args ...string) (string, error)
 }
 
+// Exec runs a program other than docker (houston test, for step 00).
+type Exec interface {
+	Stream(ctx context.Context, dir string, env []string, out io.Writer, name string, args ...string) (int, error)
+}
+
 type Mission interface {
 	Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error)
 	Secret(ctx context.Context, project, key string) (string, bool, error)
@@ -64,61 +69,79 @@ type Options struct {
 	Timeout        time.Duration // the whole deploy; zero: DefaultTimeout
 	HeartbeatEvery time.Duration // zero: HeartbeatEvery
 	FenceAfter     time.Duration // zero: FenceAfter
+
+	// Claimed is a deploy houston runner already claimed: it isn't started
+	// again, and every failure finishes it NO-GO.
+	Claimed *mission.Deploy
+	// RunTests runs x-houston.commands.test first (step 00) with Houston.
+	RunTests bool
+	Houston  string // this binary, for houston test
 }
 
 type Deps struct {
 	Docker  Docker
 	Git     Git
 	Mission Mission
+	Exec    Exec
 }
 
 // Run deploys and returns the exit code.
 func Run(ctx context.Context, o Options, d Deps) int {
+	// Before the run proper, a failure is only printed, unless the deploy
+	// was claimed: then it's finished NO-GO, so it doesn't sit in flight
+	// until it goes stale.
+	early := func(code int, printed, msg string) int {
+		fmt.Fprint(o.Stderr, printed)
+		if o.Claimed != nil {
+			r := &reporter{ctx: ctx, mission: d.Mission, deploy: *o.Claimed, out: o.Stdout, cancel: func(error) {}, lastOK: time.Now(), fenceAfter: FenceAfter}
+			r.logf("NO-GO: %s\n", msg)
+			r.finish("no_go", msg)
+		}
+		return code
+	}
 	p, err := project.Load(o.File)
 	if err != nil {
-		fmt.Fprint(o.Stderr, err)
-		return exitUsage
+		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
 	}
 	abs, err := filepath.Abs(o.File)
 	if err != nil {
-		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
-		return exitUsage
+		return early(exitUsage, fmt.Sprintf("houston deploy: %v\n", err), err.Error())
 	}
 	dir := filepath.Dir(abs)
 	sha, ref, err := checkRef(d.Git, dir, o.Ref, p.Houston.Deploy)
 	if err != nil {
-		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
-		return exitUsage
+		return early(exitUsage, fmt.Sprintf("houston deploy: %v\n", err), err.Error())
 	}
 
 	synced, err := d.Mission.Sync(ctx, mission.RequestFor(p))
 	if err != nil {
 		var hold *mission.HoldError
+		var msg string
 		switch {
 		case errors.As(err, &hold):
-			fmt.Fprintf(o.Stderr, "houston deploy: HOLD: %s %s no value; set it in Mission Control (the project's page), then deploy again\n",
+			msg = fmt.Sprintf("HOLD: %s %s no value; set it in Mission Control (the project's page), then deploy again",
 				strings.Join(hold.Missing, ", "), map[bool]string{true: "has", false: "have"}[len(hold.Missing) == 1])
 		case errors.Is(err, mission.ErrUnauthorized):
-			fmt.Fprintln(o.Stderr, "houston deploy: Mission Control refused the runner token (HOUSTON_TOKEN, or ~/.config/houston/runner-token)")
+			msg = "Mission Control refused the runner token (HOUSTON_TOKEN, or ~/.config/houston/runner-token)"
 		default:
-			fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
+			msg = err.Error()
 		}
-		return exitFailure
+		return early(exitFailure, "houston deploy: "+msg+"\n", msg)
 	}
 	target := kamal.Target{BaseDomain: strings.TrimPrefix(synced.Host, p.Name+"."), Arch: o.Arch}
 	config, err := kamal.Config(p, target)
 	if err != nil {
-		fmt.Fprint(o.Stderr, err)
-		return exitUsage
+		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
 	}
 	secretsFile, err := kamal.SecretsFile(p)
 	if err != nil {
-		fmt.Fprint(o.Stderr, err)
-		return exitUsage
+		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
 	}
 
-	dep, err := d.Mission.StartDeploy(ctx, p.Name, sha, ref)
-	if err != nil {
+	var dep mission.Deploy
+	if o.Claimed != nil {
+		dep = *o.Claimed
+	} else if dep, err = d.Mission.StartDeploy(ctx, p.Name, sha, ref); err != nil {
 		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
 		return exitFailure
 	}
@@ -132,7 +155,7 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	runCtx, cancel := context.WithCancelCause(deadlineCtx)
 	defer cancel(nil)
 
-	r := &run{ctx: runCtx, o: o, d: d, p: p, dir: dir, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
+	r := &run{ctx: runCtx, o: o, d: d, p: p, dir: dir, file: abs, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
 		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now()}}
@@ -203,6 +226,7 @@ type run struct {
 	d           Deps
 	p           *project.Project
 	dir         string
+	file        string // the compose file, absolute
 	sha         string
 	image       string
 	kamalDir    string
@@ -216,6 +240,14 @@ type run struct {
 }
 
 func (r *run) deploy(tookOver bool) int {
+	if r.o.RunTests && r.p.Houston.Commands.Test != "" {
+		r.report.step("Test")
+		code, err := r.d.Exec.Stream(r.ctx, r.dir, nil, r.report, r.o.Houston, "-f", r.file, "test")
+		if err != nil || code != 0 {
+			return r.fail(fmt.Sprintf("tests failed (exit %d%s); the old version keeps serving", code, errText(err)))
+		}
+	}
+
 	r.report.step("Secrets")
 	if msg := r.secrets(); msg != "" {
 		return r.fail(msg)

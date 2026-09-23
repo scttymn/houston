@@ -237,3 +237,57 @@ func message(body []byte) string {
 	}
 	return strings.TrimSpace(string(body))
 }
+
+// JobProject is what a runner needs to fetch a claimed deploy's commit.
+type JobProject struct {
+	Name        string `json:"name"`
+	RepoURL     string `json:"repo_url"`
+	Branch      string `json:"branch"`
+	ComposePath string `json:"compose_path"`
+	DeployKey   string `json:"deploy_key"`
+}
+
+// Job is a claimed deploy: the deploy (its token is the runner's), the
+// commit and ref, the project, and the host keys Mission Control recorded
+// for the repo's host.
+type Job struct {
+	Deploy     Deploy
+	SHA        string
+	Ref        string
+	Project    JobProject
+	KnownHosts []string
+}
+
+// Claim long-polls for the next queued deploy (up to wait seconds). false:
+// nothing to do.
+func (c *Client) Claim(ctx context.Context, runner string, wait int) (Job, bool, error) {
+	status, body, err := c.do(ctx, http.MethodPost, "/api/runner/jobs/claim", nil, map[string]any{"runner": runner, "wait": wait})
+	if err != nil {
+		return Job{}, false, err
+	}
+	if status == http.StatusNoContent {
+		return Job{}, false, nil
+	}
+	if err := expect(status, body, http.StatusOK); err != nil {
+		return Job{}, false, err
+	}
+	var raw struct {
+		Deploy struct {
+			ID       int    `json:"id"`
+			Number   int    `json:"number"`
+			Token    string `json:"token"`
+			SHA      string `json:"sha"`
+			Ref      string `json:"ref"`
+			TookOver int    `json:"took_over"`
+		} `json:"deploy"`
+		Project    JobProject `json:"project"`
+		KnownHosts []string   `json:"known_hosts"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return Job{}, false, err
+	}
+	return Job{
+		Deploy: Deploy{ID: raw.Deploy.ID, Number: raw.Deploy.Number, Token: raw.Deploy.Token, TookOver: raw.Deploy.TookOver},
+		SHA:    raw.Deploy.SHA, Ref: raw.Deploy.Ref, Project: raw.Project, KnownHosts: raw.KnownHosts,
+	}, true, nil
+}

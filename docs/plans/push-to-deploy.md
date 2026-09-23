@@ -237,6 +237,38 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 - **A choice made on the way:** a deploy run by hand has no runner and never runs step 00, so its page shows Test as **SKIPPED**, not DONE.
 - **Deploy note for Batch 5:** a claim long-polls for up to 25 s on a Puma thread. Rails' default is 3 threads (`RAILS_MAX_THREADS`), so two idle runners would hold two of them, and the UI and webhooks would share the last. The installer must raise `RAILS_MAX_THREADS`; the SQLite pool follows it (`database.yml`).
 
+## Batch 4: `houston runner`
+
+### Design (short)
+- **`mission.Client.Claim(ctx, runner, wait)`:** 200 → a `Job` (the claimed deploy with its SHA and ref, the project's repo / branch / compose path / deploy key, and known_hosts); 204 → none.
+- **`houston runner --name houston-runner-N --workspace <dir>`** (`internal/runner`) loops: claim (25 s long poll) → fetch → hand over to `deploy.Run`.
+  - A claim error (Mission Control restarting, a refused token) is logged, then retried with backoff (1 s doubling to 30 s). Only a cancelled context stops the loop.
+- **Fetch**, in `<workspace>/<project>`, with the deploy key at `<workspace>/.keys/<project>` (0600) and `<workspace>/.keys/<project>.known_hosts` written from the claim:
+  - `GIT_SSH_COMMAND` as Mission Control's, but **`StrictHostKeyChecking=yes`**: a runner never trusts a host Mission Control hasn't recorded.
+  - `git init` once, then `git fetch --depth 1 --no-tags -- <url> <sha>`, `git checkout --force --detach <sha>`, `git clean -ffdx`, and `git update-ref <ref> <sha>`, so `houston deploy`'s ref check sees exactly the claimed commit.
+  - A failed fetch finishes the claimed deploy as `no_go` with git's message.
+- **`deploy.Run` continues a claimed deploy** (`Options.Claimed`): no `StartDeploy`, and the reporter starts at once. So every failure from here on finishes the claimed deploy `no_go` with its message, instead of leaving it in flight until it goes stale. That covers a compose file that doesn't load at that commit, a ref check, a HOLD, and a config error. `TookOver` works as before (Kamal's lock is released first).
+- **Step 00, Test** (`Options.RunTests`, set by the runner): when the file has `commands.test`, it reports step Test and runs `<houston> -f <file> test` (this binary, as a subprocess, its output streamed into the log) under the same run context, so the heartbeat, fencing and deadline apply.
+  - A non-zero exit → `no_go` "tests failed (exit N)", and nothing is built.
+- **A hand `houston deploy`** checks for `~/.ssh/id_ed25519` first and says to run it as the houston user; Kamal's own SSH error would be cryptic. (The follow-up from step 3's review.)
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | `Claim`: the job decoded from Mission Control's exact JSON; 204 → none; 401 → `ErrUnauthorized` | `internal/mission` `TestClientClaims` | Contract |
+| 2 | First job: init, fetch of the SHA, detached checkout, clean, update-ref, in `<workspace>/<project>`; the git env has `StrictHostKeyChecking=yes` and the job's known_hosts file; the key file is 0600; the next job for the project doesn't init again | `internal/runner` `TestRunnerFetchesTheClaimedCommit` | Contract |
+| 3 | After the fetch, `deploy.Run` gets the claimed deploy, `RunTests`, the file at the compose path, and the ref | `TestRunnerHandsTheDeployOver` | Contract |
+| 4 | A failed fetch → the claimed deploy finished `no_go` with git's message; deploy not called | `TestRunnerReportsAFailedFetch` | Signals, Crash & repair |
+| 5 | Claim errors → retried with backoff, not exit; cancelling stops the loop | `TestRunnerKeepsPolling` | Signals |
+| 6 | `deploy.Run` with `Claimed`: no StartDeploy; a ref-check failure, a HOLD, and a compose problem each finish the claimed deploy `no_go` with the message; `TookOver` releases the lock | `internal/deploy` `TestDeployContinuesAClaimedDeploy` | Crash & repair |
+| 7 | Step 00: `commands.test` present → step Test first, `<houston> -f <file> test` run and streamed; exit 3 → `no_go` "tests failed (exit 3)", nothing built; no `commands.test` → no Test step | `TestDeployRunsTestsFirst` | Contract |
+| 8 | A hand `houston deploy` without `~/.ssh/id_ed25519` → exit 1 naming the houston user; Mission Control isn't called | `internal/cli` `TestDeployRunsAsTheHoustonUser` | Preconditions |
+
+### Done (Batch 4)
+- **Red:** every row failed to compile (the missing `Claim`, `Job`, `Runner`, `Options.Claimed/RunTests/Houston`, `Deps.Exec`). **Green:** the whole Go suite, and `go vet` is clean.
+- **Mutations, each caught:** a runner accepting new host keys; early failures leaving a claimed deploy in flight (4 failures); tests never run; no backoff; any user allowed to deploy by hand.
+- `houston runner --name --workspace` is wired in. It stops cleanly on SIGINT or SIGTERM, which is how `docker stop` asks.
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.
