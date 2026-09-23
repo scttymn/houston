@@ -85,4 +85,12 @@ class BackupRunTest < ActiveSupport::TestCase
     assert_raises(ActiveRecord::RecordNotUnique) { BackupRun.insert!(row.(7).merge(status: "go")) }
     BackupRun.insert!(row.(8))
   end
+
+  test "backups wait while a restore is in flight, except its own" do
+    @project.deploys.create!(number: 2, sha: "c" * 40, ref: "restore:cccccccc", kind: "restore", status: "in_flight", token_digest: "d", heartbeat_at: Time.current, generation: 2)
+    manual = BackupRun.request!(@project)
+    assert_equal :busy, BackupRun.claim!(manual)
+    safety = @project.backup_runs.create!(location: storage_locations(:unas), kind: "deploy", reason: "restore", deploy_number: 2, status: "queued", heartbeat_at: Time.current)
+    assert_kind_of String, BackupRun.claim!(safety)
+  end
 end

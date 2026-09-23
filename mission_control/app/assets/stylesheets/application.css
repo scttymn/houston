@@ -175,6 +175,12 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .backup-now__last { margin: 0; font-size: 13px; text-align: right; }
 .backup-now__last small { display: block; color: var(--muted); }
 .backup-now .muted { color: var(--muted); }
+.restore__dialog { max-width: 760px; }
+.restore__banner { background: var(--signal); color: #fff; padding: 8px 20px; font-size: 11px; letter-spacing: 0.16em; }
+.restore__steps { margin: 0; padding: 12px 20px 12px 40px; }
+.restore__confirm { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px 20px; }
+.restore__actions { display: flex; align-items: center; gap: 12px; }
+.restore__actions .muted { flex-grow: 1; color: var(--muted); font-size: 12px; }
 .maintenance__preview { width: 100%; height: 220px; border: 1px solid var(--rule); background: #fff; }
 .snapshots .tabs { display: flex; gap: 16px; }
 .snapshots .tabs a[aria-current="page"] { font-weight: 600; color: var(--ink); text-decoration: none; border-bottom: 2px solid var(--ink); }

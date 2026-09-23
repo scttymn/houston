@@ -275,6 +275,23 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	maintenance.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
 	maintenance.Flags().StringVar(&maintenanceMessage, "message", "", "with on: a message on the page")
 	root.AddCommand(maintenance)
+
+	var restoreConfirm, restoreLocation string
+	var restoreFollow bool
+	restore := &cobra.Command{
+		Use:   "restore SNAPSHOT --confirm NAME",
+		Short: "Roll a project back to a snapshot, code and data together (zero downtime; see houston snapshots)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runRestore(file, projectFlag, args[0], restoreLocation, restoreConfirm, restoreFollow, stdout, stderr)
+			return nil
+		},
+	}
+	restore.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	restore.Flags().StringVar(&restoreConfirm, "confirm", "", "the project's name: the data after the snapshot is replaced")
+	restore.Flags().StringVar(&restoreLocation, "location", "", "where the snapshot is (default: the project's backup location)")
+	restore.Flags().BoolVar(&restoreFollow, "follow", false, "follow it to its result; exit 0 on GO, 1 on NO-GO")
+	root.AddCommand(restore)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

@@ -292,3 +292,25 @@ func maintenanceSince(m server.Maintenance) string {
 	}
 	return utc(*m.Since)
 }
+
+// runRestore queues a restore of the project to a snapshot, code and data
+// together; with follow, follows it like deploys show --follow.
+func runRestore(file, projectFlag, snapshot, location, confirm string, follow bool, stdout, stderr io.Writer) int {
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	if confirm == "" {
+		fmt.Fprintf(stderr, "houston restore replaces %s's data with the snapshot's: add --confirm %s\n", name, name)
+		return exitUsage
+	}
+	d, err := client.Restore(context.Background(), name, snapshot, location, confirm)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	fmt.Fprintf(stdout, "Queued restore #%d of %s to snapshot %s (%s).\n", d.Number, name, snapshot, short(d.SHA))
+	if !follow {
+		return 0
+	}
+	return runDeployShow(file, name, strconv.Itoa(d.Number), true, false, stdout, stderr)
+}

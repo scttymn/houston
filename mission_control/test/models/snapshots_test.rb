@@ -66,4 +66,15 @@ class SnapshotsTest < ActiveSupport::TestCase
     Rails.cache.clear
     assert_raises(Snapshots::Unavailable) { use_fake_docker(garbage) { Snapshots.for(@project, @location) } }
   end
+
+  test "snapshots across every location the project used" do
+    offsite = StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "b" }, restic_password: "offsite-pw", verified_at: Time.current, acknowledged_at: Time.current)
+    @project.backup_runs.create!(location: offsite, kind: "auto", reason: "manual", status: "go", heartbeat_at: Time.current)
+    fake = FakeDocker.new do |_args, env|
+      id = env["RESTIC_PASSWORD"] == "offsite-pw" ? "bbbbbbbb" : "aaaaaaaa"
+      DockerCommand::Result.new(success: true, output: [ snapshot_json(id:, time: "2026-09-2#{id == "bbbbbbbb" ? 2 : 1}T03:00:00Z") ].to_json)
+    end
+    listed = use_fake_docker(fake) { Snapshots.across(@project) }
+    assert_equal [ [ "bbbbbbbb", "b2-offsite" ], [ "aaaaaaaa", "unas-nfs" ] ], listed.map { |s| [ s.short_id, s.location.name ] }
+  end
 end

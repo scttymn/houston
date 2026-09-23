@@ -60,4 +60,14 @@ class ChangeCheckTest < ActiveSupport::TestCase
     use_fake_git(refs("refs/heads/main" => A)) { ChangeCheck.new(project).run }
     assert_nil project.reload.last_check_error
   end
+
+  test "a push waits while a restore is queued or in flight" do
+    project = make_linked_project("garage")
+    project.update!(seen_refs: { "refs/heads/main" => "a" * 40 })
+    project.deploys.create!(number: 1, sha: "c" * 40, ref: "restore:cccccccc", kind: "restore", status: "in_flight", token_digest: "d", heartbeat_at: Time.current)
+    queued = use_fake_git(FakeGit.new { |args| args[1] == "ls-remote" ? git_ok("#{"b" * 40}\trefs/heads/main\n") : git_ok }) { ChangeCheck.new(project).run }
+    assert_empty queued
+    assert_equal({ "refs/heads/main" => "a" * 40 }, project.reload.seen_refs, "the next check after the restore queues the push")
+    assert_raises(ChangeCheck::Failed) { use_fake_git(FakeGit.new { git_ok("#{"b" * 40}\trefs/heads/main\n") }) { ChangeCheck.new(project).queue_head! } }
+  end
 end

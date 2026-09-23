@@ -10,6 +10,7 @@ class GitRemote
   Access = Data.define(:ok, :message)
   Read = Data.define(:ok, :sha, :inspection, :problems)
   Refs = Data.define(:ok, :refs, :error)
+  Commit = Data.define(:ok, :error)
 
   class Runner
     def call(args, env)
@@ -62,6 +63,20 @@ class GitRemote
 
       refs = result.output.lines.filter_map { |line| sha, ref = line.strip.split("\t", 2); [ ref, sha ] if ref && sha.to_s.match?(/\A\h{40}\z/) }.to_h
       Refs.new(ok: true, refs:, error: nil)
+    end
+  end
+
+  # Whether the repo still has commit sha: a blobless shallow fetch of exactly
+  # that commit. A SHA names its contents, so if it's there, it's that code.
+  def self.commit(project, sha)
+    with_key(project) do |env, key, dir|
+      checkout = File.join(dir, "repo")
+      runner.call([ "git", "init", "-q", checkout ], env)
+      fetched = runner.call([ "git", "-C", checkout, "fetch", "--depth", "1", "--no-tags", "--filter=blob:none", "--", project.repo_url, sha ], env)
+      next Commit.new(ok: false, error: explain(fetched.output, key)) unless fetched.success
+
+      head = runner.call([ "git", "-C", checkout, "rev-parse", "FETCH_HEAD" ], env).output.strip
+      head == sha ? Commit.new(ok: true, error: nil) : Commit.new(ok: false, error: "the repo answered with #{head.first(7)}, not #{sha.first(7)}")
     end
   end
 

@@ -12,6 +12,8 @@ class Deploy < ApplicationRecord
     end
   end
 
+  class RestoreRefused < StandardError; end
+
   STATUSES = %w[queued in_flight go no_go].freeze
   # houston deploy reports at least every 30 s; after this long without a
   # word, the next deploy may take over.
@@ -93,6 +95,37 @@ class Deploy < ApplicationRecord
         project.deploys.create!(number:, sha:, ref:, status: "queued", token_digest: "", heartbeat_at: Time.current)
       end
     end
+  end
+
+  # Queues a restore of project to a snapshot, code and data together, into
+  # the next data generation (docs/plans/restore.md). Refused, with nothing
+  # created, unless everything it needs is there, the snapshot's commit in
+  # the repo included.
+  def self.request_restore!(project, snapshot:, location:, confirm:)
+    raise RestoreRefused, "type #{project.name} to confirm" unless confirm == project.name
+    raise RestoreRefused, "link the repo first (houston link): a restore fetches the snapshot's commit from it" if project.repo_url.blank?
+    if (busy = project.deploys.where(status: %w[queued in_flight]).order(:number).first)
+      raise RestoreRefused, "#{busy.restore? ? "restore" : "deploy"} ##{busy.number} is #{busy.status.humanize(capitalize: false)}; wait for ##{busy.number}"
+    end
+    unless location && Snapshots.locations_for(project).include?(location)
+      raise RestoreRefused, "#{project.name} never backed up to #{location&.name || "that location"}"
+    end
+    found = Snapshots.for(project, location).find { |s| snapshot.present? && (s.id == snapshot || s.short_id == snapshot) }
+    raise RestoreRefused, "snapshot #{snapshot} isn't in #{location.name}'s snapshots of #{project.name}" unless found
+    commit = GitRemote.commit(project, found.sha)
+    raise RestoreRefused, "commit #{found.sha.first(7)} isn't in #{project.repo_url} any more (was history rewritten, or the repo relinked?): #{commit.error}" unless commit.ok
+
+    transaction do
+      number = (project.deploys.maximum(:number) || 0) + 1
+      project.deploys.create!(number:, sha: found.sha, ref: "restore:#{found.short_id}", status: "queued", kind: "restore", token_digest: "",
+                              heartbeat_at: Time.current, generation: project.data_generation + 1,
+                              source_snapshot_id: found.id, source_location: location)
+    end
+  rescue Snapshots::Unavailable => e
+    raise RestoreRefused, "can't read #{location.name}'s snapshots: #{e.message}"
+  rescue ActiveRecord::RecordNotUnique
+    # Two requests at once: the one-queued-per-project index took the other.
+    raise RestoreRefused, "another deploy or restore of #{project.name} was just queued; wait for it"
   end
 
   # Hands the oldest claimable queued deploy to runner: [deploy, token,

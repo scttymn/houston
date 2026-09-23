@@ -41,7 +41,7 @@ module RemoteView
   end
 
   def self.deploy(deploy)
-    { number: deploy.number, status: deploy.status, sha: deploy.sha, ref: deploy.ref, step: deploy.step, error: deploy.error,
+    { number: deploy.number, kind: deploy.kind, status: deploy.status, sha: deploy.sha, ref: deploy.ref, step: deploy.step, error: deploy.error,
       runner: deploy.runner, started_at: deploy.created_at, finished_at: deploy.finished_at, duration: deploy.duration }
   end
 

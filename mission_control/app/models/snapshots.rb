@@ -4,7 +4,9 @@
 class Snapshots
   class Unavailable < StandardError; end
 
-  Snapshot = Data.define(:id, :short_id, :time, :kind, :reason, :deploy, :sha, :bytes)
+  Snapshot = Data.define(:id, :short_id, :time, :kind, :reason, :deploy, :sha, :bytes, :location) do
+    def initialize(location: nil, **rest) = super
+  end
 
   CACHE_FOR = 10.minutes
   LIMIT = 1000
@@ -16,6 +18,17 @@ class Snapshots
     return cached if cached
 
     list(project, location).tap { |snapshots| Rails.cache.write(key, snapshots, expires_in: CACHE_FOR) }
+  end
+
+  # Every location the project's backups used, and its current target.
+  def self.locations_for(project)
+    used = StorageLocation.where(id: project.backup_runs.where(operation: "backup").select(:location_id)).where.not(acknowledged_at: nil).to_a
+    (used + [ project.backup_location ].compact).uniq.sort_by(&:name)
+  end
+
+  # The project's snapshots in all of them, newest first, each saying where it is.
+  def self.across(project)
+    locations_for(project).flat_map { |location| self.for(project, location).map { |s| s.with(location:) } }.sort_by(&:time).reverse
   end
 
   def self.forget_cache(project, location) = Rails.cache.delete(cache_key(project, location))

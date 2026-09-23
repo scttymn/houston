@@ -297,3 +297,44 @@ func TestMaintenance(t *testing.T) {
 		t.Errorf("bad arg: exit %d, %q", code, errOut)
 	}
 }
+
+func TestRestore(t *testing.T) {
+	followEvery = time.Millisecond
+	t.Cleanup(func() { followEvery = 2 * time.Second })
+	var body string
+	var polls atomic.Int32
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/equip/restores": func(w http.ResponseWriter, r *http.Request) {
+			body = readBody(r)
+			if strings.Contains(body, `"confirm":"nope"`) {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				w.Write([]byte(`{"error":"type equip to confirm"}`))
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"number":12,"status":"queued","kind":"restore","sha":"d4e0b17000000000000000000000000000000000","ref":"restore:33333333"}`))
+		},
+		"/api/v1/projects/equip/deploys/12": func(w http.ResponseWriter, r *http.Request) {
+			if polls.Add(1) < 2 {
+				w.Write([]byte(`{"number":12,"status":"in_flight","kind":"restore","sha":"d4e0b17000000000000000000000000000000000","step":"Restore data","log":"restoring\n","log_next":10}`))
+				return
+			}
+			w.Write([]byte(`{"number":12,"status":"go","kind":"restore","sha":"d4e0b17000000000000000000000000000000000","log":"","log_next":10}`))
+		},
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, errOut := run(&fakeDocker{}, "restore", "33333333", "--confirm", "equip", "--location", "unas-nfs", "--project", "equip", "--follow")
+	if code != 0 || body != `{"confirm":"equip","location":"unas-nfs","snapshot":"33333333"}` ||
+		!strings.Contains(out, "Queued restore #12 of equip to snapshot 33333333 (d4e0b17)") || !strings.Contains(out, "GO: equip #12 serving d4e0b17") {
+		t.Errorf("restore --follow: exit %d, body %s\n%s%s", code, body, out, errOut)
+	}
+	code, _, errOut = run(&fakeDocker{}, "restore", "33333333", "--confirm", "nope", "--project", "equip")
+	if code != 1 || !strings.Contains(errOut, "type equip to confirm") {
+		t.Errorf("refused: exit %d, %q", code, errOut)
+	}
+	code, _, errOut = run(&fakeDocker{}, "restore", "33333333", "--project", "equip")
+	if code != 2 || !strings.Contains(errOut, "--confirm equip") {
+		t.Errorf("no --confirm: exit %d, %q", code, errOut)
+	}
+}

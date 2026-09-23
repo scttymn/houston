@@ -1,4 +1,5 @@
 require "test_helper"
+require_relative "../support/fake_git"
 
 class GitRemoteTest < ActiveSupport::TestCase
   test "the recorded host keys for a repo" do
@@ -16,5 +17,24 @@ class GitRemoteTest < ActiveSupport::TestCase
     end
   ensure
     ENV.delete("HOUSTON_KNOWN_HOSTS")
+  end
+
+  test "is a commit still in the repo" do
+    extend FakeGitHelper
+    project = Project.new(name: "equip", repo_url: "git@forgejo:houston/equip.git", deploy_key_private: "key\n")
+    sha = "d4e0b17" + "0" * 33
+    found = FakeGit.new { |args| args.include?("rev-parse") ? GitRemote::Result.new(success: true, output: "#{sha}\n") : nil }
+    assert use_fake_git(found) { GitRemote.commit(project, sha) }.ok
+    fetch = found.calls.map(&:args).find { |a| a.include?("fetch") }
+    assert_equal [ "fetch", "--depth", "1", "--no-tags", "--filter=blob:none", "--", "git@forgejo:houston/equip.git", sha ], fetch.drop(fetch.index("fetch"))
+    assert found.calls.first.env["GIT_SSH_COMMAND"].include?("-i "), "with the deploy key"
+
+    gone = FakeGit.new { |args| args.include?("fetch") ? GitRemote::Result.new(success: false, output: "fatal: remote error: upload-pack: not our ref\n") : nil }
+    result = use_fake_git(gone) { GitRemote.commit(project, sha) }
+    assert_not result.ok
+    assert_match "not our ref", result.error
+
+    other = FakeGit.new { |args| args.include?("rev-parse") ? GitRemote::Result.new(success: true, output: "#{"e" * 40}\n") : nil }
+    assert_not use_fake_git(other) { GitRemote.commit(project, sha) }.ok
   end
 end

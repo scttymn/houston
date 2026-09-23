@@ -1,10 +1,11 @@
-<% content_for :title, "#{@project.name} · Deploy ##{@deploy.number}" %>
+<% word = @deploy.restore? ? "Restore" : "Deploy" %>
+<% content_for :title, "#{@project.name} · #{word} ##{@deploy.number}" %>
 <%= turbo_stream_from @deploy %>
 <main class="page board">
-  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / Deploy #<%= @deploy.number %></nav>
+  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / <%= word %> #<%= @deploy.number %></nav>
   <div class="board__top">
     <div class="board__title">
-      <h1 class="disp">Deploy #<%= @deploy.number %></h1>
+      <h1 class="disp"><%= word %> #<%= @deploy.number %></h1>
     </div>
     <div class="stat">
       <span class="mono eyebrow">STARTED <%= @deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>

@@ -8,6 +8,10 @@ class ChangeCheck
 
   # Returns the deploys it queued.
   def run
+    # A restore queued or in flight: nothing queues, and seen_refs stay as
+    # they were, so the check after it queues what was pushed meanwhile.
+    return [] if restoring?
+
     result = GitRemote.refs(@project)
     unless result.ok
       @project.update!(last_check_error: result.error, last_checked_at: Time.current)
@@ -28,6 +32,8 @@ class ChangeCheck
   # not (after a HOLD is fixed, nothing moved, but it still has to deploy).
   # The branch head, or the highest tag by version order.
   def queue_head!
+    raise Failed, "a restore of #{@project.name} is queued or in flight; deploy after it" if restoring?
+
     result = GitRemote.refs(@project)
     raise Failed, result.error unless result.ok
 
@@ -42,6 +48,8 @@ class ChangeCheck
   end
 
   private
+    def restoring? = @project.deploys.where(kind: "restore", status: %w[queued in_flight]).exists?
+
     # ref → commit, for the refs the rule deploys. An annotated tag's peeled
     # ref (^{}) names the commit it points at.
     def matching(refs)

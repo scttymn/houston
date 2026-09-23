@@ -482,6 +482,17 @@ func (cl *Client) send(ctx context.Context, method, path string, payload any) er
 }
 
 // DeployNow queues the head of what the project's deploy rule matches.
+// Restore queues a restore of project to a snapshot (location "": the
+// project's backup location); confirm must be the project's name.
+func (cl *Client) Restore(ctx context.Context, project, snapshot, location, confirm string) (Deploy, error) {
+	body := map[string]string{"snapshot": snapshot, "confirm": confirm}
+	if location != "" {
+		body["location"] = location
+	}
+	var d Deploy
+	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/restores", body, &d)
+}
+
 func (cl *Client) DeployNow(ctx context.Context, project string) (Deploy, error) {
 	var d Deploy
 	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/deploys", nil, &d)

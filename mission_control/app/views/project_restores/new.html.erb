@@ -1,0 +1,45 @@
+<% content_for :title, "Restore #{@project.name}" %>
+<main class="page board restore">
+  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / Restore</nav>
+  <section class="panel restore__dialog">
+    <div class="mono restore__banner">RESTORE · WHOLE PROJECT · CODE + DATA</div>
+    <h1 class="disp">Roll <%= @project.name %> back to <%= l(@snapshot.time, format: :short) %>?</h1>
+
+    <dl class="facts restore-compare">
+      <dt class="mono">CODE</dt><dd class="mono"><%= @running&.short_sha || "—" %> → <strong><%= @snapshot.sha.to_s.first(7) %></strong></dd>
+      <dt class="mono">DATA</dt><dd>Live → <strong><%= l(@snapshot.time, format: :short) %> · <%= @snapshot.kind %> · <%= @snapshot.bytes ? number_to_human_size(@snapshot.bytes) : "—" %></strong> <small class="mono">(<%= @snapshot.short_id %>, <%= @location.name %>)</small></dd>
+    </dl>
+
+    <div class="notice notice--hold restore-note">
+      <span class="mono">NOTE</span>
+      <span class="notice__text">
+        <%= @project.name %> keeps serving while the snapshot is restored beside it; traffic switches only once the restored version passes its health check.
+        Anything written after <%= l(@snapshot.time, format: :short) %> is replaced; a safety snapshot is taken just before the switch.
+        <% if @project.maintenance? %>
+          The maintenance page is up, so nothing is being written meanwhile.
+        <% else %>
+          The maintenance page is off: writes in the seconds before the switch would be lost. Put it up first (on the project page) if that matters.
+        <% end %>
+      </span>
+    </div>
+
+    <ol class="restore__steps">
+      <li>Fetch <span class="mono"><%= @snapshot.sha.to_s.first(7) %></span> from the repo (it must still be there), and its image from Houston's registry or a rebuild.</li>
+      <li>Restore the snapshot's volumes and databases into new storage, beside the live data.</li>
+      <li>Start <span class="mono"><%= @snapshot.sha.to_s.first(7) %></span> on it, pass the health check, switch traffic, and remove the old storage.</li>
+    </ol>
+
+    <%= form_with url: project_restores_path(@project.name), class: "restore__confirm" do |f| %>
+      <%= hidden_field_tag :snapshot, @snapshot.id %>
+      <%= hidden_field_tag :location, @location.name %>
+      <label for="confirm">Type <span class="mono"><%= @project.name %></span> to confirm</label>
+      <%= text_field_tag :confirm, nil, id: "confirm", class: "mono", autocomplete: "off" %>
+      <% if @error %><span class="field__error"><%= @error %></span><% end %>
+      <div class="restore__actions">
+        <span class="mono muted">CLI: houston restore <%= @snapshot.short_id %> --confirm <%= @project.name %></span>
+        <%= link_to "Cancel", project_path(@project.name), class: "button" %>
+        <%= f.submit "Restore #{@project.name}", class: "button button--primary" %>
+      </div>
+    <% end %>
+  </section>
+</main>

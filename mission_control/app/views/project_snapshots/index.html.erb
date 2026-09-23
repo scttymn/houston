@@ -28,6 +28,7 @@
             <span><%= { "manual" => "Back up now", "schedule" => "daily", "restore" => "before a restore" }.fetch(snapshot.reason) { snapshot.deploy ? "before deploy ##{snapshot.deploy}" : snapshot.reason } %></span>
             <span class="mono"><%= snapshot.sha.to_s.first(7) %></span>
             <span class="mono"><%= snapshot.bytes ? number_to_human_size(snapshot.bytes) : "—" %></span>
+            <%= link_to "Restore", new_project_restore_path(@project.name, snapshot: snapshot.short_id, location: @location.name), data: { turbo_frame: "_top" } %>
           </li>
         <% end %>
       </ul>

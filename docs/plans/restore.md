@@ -324,6 +324,55 @@ Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secr
   - the job always backing up
 - **For Batch 6:** the safety snapshot is reason `restore` (spec §9), so it needs its own one-per-restore guarantee. The existing unique index covers reason `deploy` only.
 
+## Batch 5: Asking for a restore
+
+### Design (short)
+- **`Deploy.request_restore!(project, snapshot:, location:, confirm:)`** creates a queued deploy of kind `restore`: its SHA is the snapshot's commit, `ref` `restore:<short id>`, `generation` g+1, `source_snapshot_id` and `source_location`. It's refused (`Deploy::RestoreRefused`, nothing created) when:
+  - `confirm` isn't the project's name
+  - there's no linked repo ("link the repo first")
+  - a deploy or restore is queued or in flight ("wait for #n")
+  - the location isn't one the project's backups used, or the default
+  - the snapshot isn't in that location's list of this project's snapshots (a short id or the full one)
+  - **the snapshot's commit isn't in the repo** (`GitRemote.commit`: a blobless shallow fetch of that SHA, with `rev-parse FETCH_HEAD` checked against it)
+- **While a restore is queued or in flight:**
+  - `ChangeCheck` queues nothing and leaves `seen_refs` as they were, so the check after it queues the push.
+  - Deploy-now (`/api/v1`) is refused.
+  - `BackupRun.claim!` says busy for a backup of that project, except the restore's own runs (its safety snapshot, reason `restore`; its data, operation `restore`).
+- **The snapshot list reads every location** the project's backups used (`Snapshots.across`), and says which location each snapshot is in. The Snapshots panel shows it too.
+- **The page:** a Restore link on each snapshot row goes to `/projects/:name/restores/new?snapshot=<id>&location=<name>`, the design's confirm page:
+  - code now → after, and data live → the snapshot (time, kind, size)
+  - the zero-downtime note, and whether the maintenance page is up (with a hint to put it up first, so no writes are lost)
+  - the two phases
+  - "Type <name> to confirm"
+  Submitting goes to the restore's deploy page.
+- **API:** `POST /api/v1/projects/:name/restores {snapshot, location?, confirm}` → 202 with the deploy (`kind: restore`); refused → 422 with the reason.
+- **CLI:** `houston restore <snapshot> --confirm <name> [--location NAME] [--follow]`. With `--follow` it follows like `deploys show --follow`: exit 0 on GO, 1 on NO-GO.
+- **History:** a restore shows as "Restore to <short id>" in the deploy history, the deploy page, and `houston deploys`.
+
+### AC ↔ test map (Batch 5)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | A restore is queued with its commit, generation g+1, snapshot and location | `models/deploy_restore_test.rb` `test "asking for a restore"` | Contract |
+| 2 | Refused, nothing created: wrong confirm; no repo; something queued or in flight; a location the project never used; an unknown snapshot; the commit gone from the repo | `test "a restore that can't be"` | Preconditions |
+| 3 | `GitRemote.commit`: the fetch by SHA with the deploy key; found, gone, and a mismatched FETCH_HEAD | `models/git_remote_test.rb` | Contract |
+| 4 | While a restore is queued or in flight: a push queues nothing and `seen_refs` stays; deploy-now refused; backups busy except the restore's own | `models/change_check_test.rb`, `integration/api_v1_actions_test.rb`, `models/backup_run_test.rb` | Concurrency, Preconditions |
+| 5 | Snapshots across the project's locations, each with its location | `models/snapshots_test.rb` | Contract |
+| 6 | The confirm page and submitting it; a wrong name → 422; signed out → sign-in | `controllers/project_restores_test.rb` | Authz, Contract |
+| 7 | API and CLI: a restore queued; refusals with their reasons; `--follow` to the result | `integration/api_v1_restores_test.rb`, `internal/cli` `TestRestore` | Contract |
+
+### Done (Batch 5)
+- **Red:** Mission Control had 3 failures and 6 errors in the new tests. **Green:** Mission Control 257 runs and the Go suite. rubocop and gofmt are clean.
+- **History:** a restore shows by its ref (`restore:<short id>`) in the deploy history and `houston deploys`, and as "Restore #n" on its page. No separate field was needed.
+- **Mutations, each caught:**
+  - no confirm check
+  - the commit not checked
+  - restoring over a queued deploy
+  - restoring into the same generation
+  - pushes queued during a restore
+  - backups during a restore
+  - FETCH_HEAD not compared
+- **scotty-review (cold pass):** one finding, fixed. Two restore requests at once could both pass the "anything queued?" check; the one-queued-per-project index then refused the second insert as a 500. It's a refusal with a reason now (the index itself is covered by `DeployTest`).
+
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
 2. **A restore uses the project's linked repo.** Answered: "Every app will have a linked repo, so I assume it would use the same repo." The runner fetches the snapshot's commit from it with the project's deploy key, as a deploy does. A project without a repo (only ever deployed by hand) can't be restored until it's linked, and the Restore button says so. That's an edge, not the normal path.

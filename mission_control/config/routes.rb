@@ -59,6 +59,7 @@ Rails.application.routes.draw do
         resources :volumes, only: %i[ index update ], param: :name
         resource :backup_target, only: :update
         resource :maintenance, only: :update
+        resources :restores, only: :create
         resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
@@ -86,6 +87,7 @@ Rails.application.routes.draw do
     resources :snapshots, only: :index, controller: "project_snapshots"
     resources :volumes, only: :update, param: :name, controller: "project_volumes"
     resource :backup_target, only: :update, controller: "project_backup_targets"
+    resources :restores, only: %i[ new create ], controller: "project_restores"
     resource :maintenance, only: :update, controller: "project_maintenance" do
       get :preview
     end
