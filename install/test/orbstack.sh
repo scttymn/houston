@@ -7,7 +7,7 @@
 # KEEP=1 keeps the machine afterwards. If mission_control/.houston/cloudflare-check.env
 # exists (CLOUDFLARE_API_TOKEN, BASE_DOMAIN), setup step 2 runs against the real
 # Cloudflare API from inside the machine; the token is never printed. Afterwards
-# the test tunnel and Houston's wildcard record are deleted, unless
+# the test tunnel and the DNS records Houston manages are deleted, unless
 # KEEP_CLOUDFLARE=1 (the real install reuses them).
 # shellcheck disable=SC2016 # single-quoted commands run inside the machine, not here
 set -euo pipefail
@@ -29,7 +29,7 @@ cf_created=""
 cleanup() {
   if [ "${KEEP:-}" = 1 ]; then echo "kept machine $name"; else orb delete -f "$name" >/dev/null 2>&1 || true; fi
   if [ -n "$cf_created" ] && [ "${KEEP_CLOUDFLARE:-}" != 1 ]; then
-    echo "== removing the test tunnel and Houston's wildcard (KEEP_CLOUDFLARE=1 keeps them)"
+    echo "== removing the test tunnel and the records Houston manages (KEEP_CLOUDFLARE=1 keeps them)"
     "$repo/install/test/cloudflare.sh" cleanup || true
   fi
 }
@@ -81,13 +81,28 @@ elif [ -f "$cf_file" ]; then
     --data-urlencode "cloudflare[api_token]@/tmp/cf-token")
   vm rm -f /tmp/cf-token
   if [ "$step2" = "302 http://$ip:3000/" ]; then
-    ok "step 2 created the tunnel, ingress and *.$base"
+    ok "step 2 created the tunnel, its routes and DNS"
     connected=""
     for _ in $(seq 1 30); do
       if vm sh -c 'docker compose -f /opt/houston/compose.yml logs cloudflared 2>&1 | grep -q "Registered tunnel connection"'; then connected=yes; break; fi
       sleep 2
     done
     if [ -n "$connected" ]; then ok "cloudflared picked up the token and connected"; else bad "cloudflared connected"; fi
+    # From here on the test goes through Cloudflare's edge, not the VM's LAN address.
+    # Cloudflare's edge can take minutes to move a name off an existing wildcard onto a new
+    # explicit record (seen on svnmns.com), so each name gets up to 5 minutes.
+    through() {
+      local want="$1" url="$2" got="" start=$SECONDS
+      for _ in $(seq 1 60); do
+        got=$(curl -s -o /dev/null -w '%{http_code}' "$url") && [ "$got" = "$want" ] && break
+        sleep 5
+      done
+      if [ "$got" = "$want" ]; then ok "$url answers $got through the tunnel (after $((SECONDS - start))s)"; else bad "$url answered $got through the tunnel after 5 minutes (wanted $want)"; fi
+    }
+    through 200 "https://admin.$base/up"
+    through 200 "https://hooks.$base/up"
+    # Mission Control would redirect this; the hooks hostname only passes /<slug>, so the tunnel answers 404.
+    through 404 "https://hooks.$base/setup/cloudflare"
   else
     bad "step 2 (got $step2)"
     vm sh -c "grep -oE 'NO-GO</span><span>[^<]*' /tmp/houston-step2.html | sed 's/.*<span>/    /'" || true

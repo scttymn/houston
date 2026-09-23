@@ -169,7 +169,7 @@ Never: modify or delete a DNS record without the managed-by:houston comment
 - Red: the suite failed to load (`Setup`, `Installation` and the client didn't exist). Green: 30 runs, 0 failures. Request bodies are compared as parsed JSON (WebMock hashes), so key order isn't pinned.
 - Mutations: patching any existing `*.<base>` record was caught only by row 7; skipping the "all checks GO" gate was caught only by row 4.
 - Review: tokens encrypted at rest (asserted on the raw columns), not echoed back in forms, and filtered from logs by Rails' default `filter_parameters` (`token`). No required changes.
-- **Row 10 (real Cloudflare) is pending your token and base domain.**
+- **Row 10 (real Cloudflare):** done through the installer; see Batch 4 row 8. It ran host by host on svnmns.com, so it created `admin.`/`hooks.` records, not `*.<base>`.
 
 ### Lens run (Batch 2)
 | Lens | Where |
@@ -307,7 +307,13 @@ Your answers: OrbStack test machines OK; images and binaries not published yet (
 - **Row 4:** Alpine → "Houston supports Ubuntu LTS and Debian stable; this is Alpine Linux v3.24"; non-root → "run it as root"; no `HOUSTON_SOURCE` → its message. Each exits 1, having changed nothing.
 - **Found by the first real run:** `rails new --skip-kamal` leaves the **production database paths commented out** (`# database: path/to/persistent/storage/…`), so `db:prepare` failed in production and Mission Control crash-looped. Fixed in Mission Control (`storage/production*.sqlite3`, on its volume). **`houston init` should detect this** for any `--skip-kamal` Rails app. That's added to build step 7 (init for more stacks) so it has a home.
 - **Rows 5–7 (`install/test/orbstack.sh`):** Ubuntu 24.04, **Debian 13 (current stable)** and Debian 12 each passed all 16 checks. That covers the fresh install, the LAN `/up`, the printed code completing step 1 over HTTP, and a rerun keeping `.env` byte-for-byte and saying setup is complete. The machines are deleted afterwards.
-- **Row 8 (real Cloudflare through the VM) is pending the token file.**
+- **Row 8 (real Cloudflare through the VM), on svnmns.com in host-by-host mode:** 21/21 on Ubuntu 24.04.
+  - Step 2, driven through the VM's Mission Control, created `houston-svnmns`, its routes and `admin.`/`hooks.` (`managed-by:houston`). cloudflared picked up the token file and registered connections.
+  - **Through Cloudflare's edge:** `admin.svnmns.com/up` → 200 and `hooks.svnmns.com/up` → 200. Both were a 404 from the other server before, so the 200 proves the request reached Houston's tunnel. `hooks.svnmns.com/setup/cloudflare` → 404 (Mission Control would redirect), so admin pages don't leak through the hooks hostname.
+  - Cleanup deleted the two records and the tunnel. The preflight afterwards matched the one before: the other server's `*.svnmns.com` was never touched.
+  - **Token:** an account policy with *Argo Tunnel (Legacy) · Edit* (the dashboard's current name for Cloudflare Tunnel), and a svnmns.com policy with *DNS · Edit* and *Zone · Read*. Nothing else.
+- **Found by the real run: edge lag when a new explicit record sits under an existing wildcard.** For a while after creation (seen: 0 s to past 30 s, varying by name), Cloudflare's edge still sends that name to the wildcard's server. After deletion, it briefly still sends it to the deleted tunnel (530). The first edge check waited 30 s and failed on `admin.`. Each name now gets 5 minutes, and the elapsed time is reported. **Product follow-up:** in host-by-host mode, the flight board's "use admin.<base>" banner should say it can take a few minutes to switch over; otherwise the other server's 404 looks like Houston is broken.
+- **Harness:** the preflight now fails, naming the missing permission, when it can't list tunnels or read records, or doesn't see exactly one account. Before, a refused call printed "none" and step 2 ran anyway.
 
 ### Added after the preflight: sharing the base domain (host by host)
 - **The real preflight on svnmns.com** found an existing `*.svnmns.com` → another tunnel (your current server), with no `admin.`/`hooks.` records.

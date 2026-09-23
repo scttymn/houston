@@ -35,20 +35,27 @@ zone=$(cf "$api/zones?name=$base" | jqr 'r=d.get("result") or []; print(r[0]["id
 
 case "${1:-}" in
   preflight)
+    report=$(
     echo "accounts the token sees: $(printf '%s' "$accounts" | jqr 'print(len(d.get("result") or []), "" if d.get("success") else d.get("errors"))')"
     [ -n "$zone" ] && echo "zone $base: found" || echo "zone $base: NOT found (check the token's Zone · DNS permission)"
     if [ -n "$zone" ]; then
       for name in "*.$base" "admin.$base" "hooks.$base"; do
         cf "$api/zones/$zone/dns_records?name=$name" | jqr "
 r=d.get('result') or []
-print('$name:', 'no record' if not r else '; '.join(f\"{x['type']} -> {x['content']} (proxied={x.get('proxied')}, comment={x.get('comment')!r})\" for x in r))"
+print('$name:', ('CAN\'T READ RECORDS: %s (give the token DNS · Edit on $base)' % d.get('errors')) if not d.get('success') else 'no record' if not r else '; '.join(f\"{x['type']} -> {x['content']} (proxied={x.get('proxied')}, comment={x.get('comment')!r})\" for x in r))"
       done
     fi
     if [ -n "$account" ]; then
       cf "$api/accounts/$account/cfd_tunnel?name=$tunnel_name&is_deleted=false" | jqr "
 r=d.get('result') or []
-print('tunnel $tunnel_name:', 'none' if not r else ', '.join(f\"{x['id']} ({x.get('status')})\" for x in r))"
+print('tunnel $tunnel_name:', ('CAN\'T LIST TUNNELS: %s (give the token Cloudflare Tunnel · Edit)' % d.get('errors')) if not d.get('success') else 'none' if not r else ', '.join(f\"{x['id']} ({x.get('status')})\" for x in r))"
+    else
+      echo "account: NOT found (the token must see exactly one account; set the tunnel policy's account resources)"
     fi
+    )
+    echo "$report"
+    # Anything the token can't see stops here, so the full check doesn't run step 2 against it.
+    case "$report" in *"NOT found"* | *"CAN'T"*) exit 1 ;; esac
     ;;
   cleanup)
     [ -n "$account" ] && [ -n "$zone" ] || { echo "can't see exactly one account and the zone; nothing done"; exit 1; }
