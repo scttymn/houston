@@ -152,4 +152,44 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
 
     assert_redirected_to root_path
   end
+
+  test "hands the tunnel token to cloudflared" do
+    stub_token_checks
+    stub_existing_tunnel([ { id: TUNNEL, name: "houston-svnmns" } ])
+    cf(:get, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/token", result: "tunnel-token-xyz")
+    cf(:put, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/configurations", result: {})
+    stub_existing_wildcard([])
+    cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec1" })
+
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "tunnel-token")
+      with_env("HOUSTON_TUNNEL_TOKEN_PATH" => path) { submit }
+
+      assert_redirected_to root_path
+      assert_equal "tunnel-token-xyz", File.read(path)
+      assert_equal "600", format("%o", File.stat(path).mode & 0o777)
+    end
+  end
+
+  test "no token file without a path" do
+    stub_token_checks
+    stub_existing_tunnel([ { id: TUNNEL, name: "houston-svnmns" } ])
+    cf(:get, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/token", result: "tunnel-token-xyz")
+    cf(:put, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/configurations", result: {})
+    stub_existing_wildcard([])
+    cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec1" })
+
+    with_env("HOUSTON_TUNNEL_TOKEN_PATH" => nil) { submit }
+
+    assert_redirected_to root_path
+  end
+
+  private
+    def with_env(vars)
+      saved = vars.keys.to_h { |k| [ k, ENV[k] ] }
+      vars.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+      yield
+    ensure
+      saved.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+    end
 end

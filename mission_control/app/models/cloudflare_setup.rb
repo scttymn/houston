@@ -49,6 +49,7 @@ class CloudflareSetup
     installation = Installation.current
     installation.update!(base_domain:, cloudflare_account_id: account, cloudflare_zone_id: zone, tunnel_id:,
                          cloudflare_api_token: api_token, tunnel_token:, cloudflare_connected_at: Time.current)
+    hand_token_to_cloudflared(tunnel_token)
     true
   rescue Stop
     false
@@ -110,6 +111,16 @@ class CloudflareSetup
           raise Stop
         end
       end
+    end
+
+    # On the server, cloudflared runs `tunnel run --token-file` on a volume it
+    # shares with Mission Control; writing the file is all it takes to connect.
+    def hand_token_to_cloudflared(token)
+      path = ENV["HOUSTON_TUNNEL_TOKEN_PATH"].presence or return
+      tmp = "#{path}.tmp"
+      File.open(tmp, "w", 0o600) { |f| f.write(token) }
+      File.chmod(0o600, tmp)
+      File.rename(tmp, path)
     end
 
     def ingress

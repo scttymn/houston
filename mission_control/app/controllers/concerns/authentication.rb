@@ -41,7 +41,9 @@ module Authentication
     def start_new_session_for(user)
       user.sessions.create!(user_agent: request.user_agent, ip_address: request.remote_ip).tap do |session|
         Current.session = session
-        cookies.signed.permanent[:session_id] = { value: session.id, httponly: true, same_site: :lax }
+        # Secure when the request came over HTTPS (admin.<base> via Cloudflare);
+        # first-run on the LAN is plain HTTP and needs the cookie too.
+        cookies.signed.permanent[:session_id] = { value: session.id, httponly: true, same_site: :lax, secure: request.ssl? }
       end
     end
 

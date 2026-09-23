@@ -21,11 +21,13 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  config.assume_ssl = true
+  # Mission Control is reached two ways: plain HTTP on the LAN (first-run setup)
+  # and HTTPS at admin.<base>, where Cloudflare terminates TLS and cloudflared
+  # passes X-Forwarded-Proto over the private Docker network. So don't assume or
+  # force SSL; Rails reads the forwarded protocol.
+  config.assume_ssl = false
 
-  # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true
+  config.force_ssl = false
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }

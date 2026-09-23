@@ -267,6 +267,48 @@ Never: delete or re-init a repository; show the password after acknowledgement
 - Red: 5 failures. Green: 44 runs. Two test fixes: the eyebrow is upper case (pattern made case-insensitive), and the registry probe now has a default stub in `test_helper`, because WebMock blocks real connections suite-wide.
 - Real render in dev (curl, signed in): strip "TUNNEL NO-GO REGISTRY NO-GO", pre-flight tunnel "? Can't check: not connected to Cloudflare" (dev has no real tunnel), storage "mac-local · Default · password saved", the LAN banner pointing at admin.<base>. RUNNERS isn't shown.
 
+## Batch 4: the installer
+
+Your answers: OrbStack test machines OK; images and binaries not published yet (so the installer builds Mission Control from a source checkout, `HOUSTON_SOURCE`); fonts OK; the real Cloudflare check runs from a gitignored token file.
+
+### Design (short)
+- **`install/install.sh`:** a single POSIX `sh` file that works with `curl … | sh`, since its compose file is embedded. Run as root. Each step can be rerun:
+  1. **OS check:** Ubuntu or Debian from `/etc/os-release`; anything else → "Houston supports Ubuntu LTS and Debian stable", exit 1, nothing changed.
+  2. **Docker Engine + compose plugin** from Docker's apt repository (skipped when `docker` exists), plus `openssh-server`.
+  3. **`houston` user** in the `docker` group, with its own ed25519 key in its `authorized_keys`, for Kamal's local SSH (build step 3).
+  4. **`/opt/houston/.env`** (mode 600): `SECRET_KEY_BASE` and the three `AR_ENCRYPTION_*` keys, generated **once**. A rerun keeps them, because losing them would lock away every encrypted secret.
+  5. **`/opt/houston/compose.yml`** (rewritten each run, since it's Houston's file), project `houston`:
+     - `mission-control`: the image built locally from `$HOUSTON_SOURCE/mission_control` (target `production`), on `3000:80`, with its storage volume, the shared `houston-config` volume, the Docker socket (with the host's docker group via `group_add`), and `SOLID_QUEUE_IN_PUMA`.
+     - `cloudflared` (`cloudflare/cloudflared:2026.9.1`): `tunnel run --token-file /houston/tunnel-token`, read-only, as uid 1000, on the default and `kamal` networks. It restarts until step 2 writes the token, then connects by itself, and nothing has to start it.
+     - `registry` (`registry:3`): `127.0.0.1:5000` only.
+     - Runners arrive with build step 4.
+  6. **The `kamal` network**, and ownership of `houston-config` handed to uid 1000.
+  7. **`docker compose up -d`,** wait for `/up`, then `bin/rails houston:setup_code` in the container. It prints **"Houston is running / Finish setup at http://<LAN IP>:3000 / Setup code XXXX-XXXX"**, or "Setup is already complete" once an admin exists.
+- **Mission Control changes, test-first where testable:**
+  - Step 2 writes the tunnel token to `HOUSTON_TUNNEL_TOKEN_PATH` (mode 600) when that's set.
+  - The session cookie is `Secure` on HTTPS requests.
+  - `production.rb` no longer forces SSL (LAN first run is HTTP; Cloudflare terminates TLS for `admin.<base>`).
+
+### AC ↔ test map (Batch 4)
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | With `HOUSTON_TUNNEL_TOKEN_PATH` set, a successful step 2 writes the token there, mode 600; unset → no file | `setup/cloudflare_controller_test.rb` `test "hands the tunnel token to cloudflared"` | Contract |
+| 2 | Signing in over HTTPS sets a `Secure` session cookie; over HTTP it doesn't | `integration/sign_in_test.rb` `test "the session cookie is secure over https"` | Authz |
+| 3 | `shellcheck` finds nothing in `install.sh` | `koalaman/shellcheck` run (evidence) | Contract |
+| 4 | An unsupported OS (Alpine) → the message, exit 1; not root → exit 1 | `install/test/run.sh` (containers; evidence) | Preconditions |
+| 5 | **Ubuntu 24.04 OrbStack machine, fresh:** Docker is installed; the `houston` user and key exist; `.env` is 600 with 4 keys; mission-control, registry and cloudflared (waiting for the token) are running; the registry listens on 127.0.0.1 only; `http://<LAN IP>:3000/up` returns 200; the printed code has the right format and completes step 1 over HTTP (no HTTPS redirect) | `install/test/orbstack.sh ubuntu:noble` | Parity |
+| 6 | **Same machine, rerun:** `.env` byte-identical, containers up, "Setup is already complete" | same script | Re-entry, Crash & repair |
+| 7 | **Debian 12 machine, fresh:** as row 5 | `install/test/orbstack.sh debian:bookworm` | Parity |
+| 8 | **With your token file:** step 2 through the VM's Mission Control creates the real tunnel, cloudflared picks up the token, and the tunnel reports connections | same script (optional stage) | Parity |
+
+### Done (Batch 4)
+- **Mission Control, test-first:** rows 1–2 went red, then green (47 runs). Step 2 writes the tunnel token (600, atomic) to `HOUSTON_TUNNEL_TOKEN_PATH`; the session cookie is `Secure` over HTTPS; `production.rb` doesn't force or assume SSL.
+- **Row 3:** `koalaman/shellcheck -s sh`: clean.
+- **Row 4:** Alpine → "Houston supports Ubuntu LTS and Debian stable; this is Alpine Linux v3.24"; non-root → "run it as root"; no `HOUSTON_SOURCE` → its message. Each exits 1, having changed nothing.
+- **Found by the first real run:** `rails new --skip-kamal` leaves the **production database paths commented out** (`# database: path/to/persistent/storage/…`), so `db:prepare` failed in production and Mission Control crash-looped. Fixed in Mission Control (`storage/production*.sqlite3`, on its volume). **`houston init` should detect this** for any `--skip-kamal` Rails app. That's added to build step 7 (init for more stacks) so it has a home.
+- **Rows 5–7 (`install/test/orbstack.sh`):** Ubuntu 24.04, **Debian 13 (current stable)** and Debian 12 each passed all 16 checks. That covers the fresh install, the LAN `/up`, the printed code completing step 1 over HTTP, and a rerun keeping `.env` byte-for-byte and saying setup is complete. The machines are deleted afterwards.
+- **Row 8 (real Cloudflare through the VM) is pending the token file.**
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?
