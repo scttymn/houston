@@ -92,7 +92,7 @@ class CloudflareSetup
     end
 
     def find_or_create_tunnel(account)
-      step("creating the tunnel") do
+      step("creating the tunnel", denied: "The token can read tunnels but not create them: give it Cloudflare Tunnel · Edit on the account (not only Read), then try again.") do
         existing = @client.get("/accounts/#{account}/cfd_tunnel", name: tunnel_name, is_deleted: "false").first
         existing ? existing["id"] : @client.post("/accounts/#{account}/cfd_tunnel", { name: tunnel_name, config_src: "cloudflare" })["id"]
       end
@@ -134,7 +134,7 @@ class CloudflareSetup
 
     def upsert(zone, tunnel_id, name, existing)
       record = { type: "CNAME", name:, content: "#{tunnel_id}.cfargotunnel.com", proxied: true, comment: MANAGED }
-      step("pointing #{name} at the tunnel") do
+      step("pointing #{name} at the tunnel", denied: "The token can read DNS but not change it: give it Zone · DNS · Edit on #{base_domain} (not only Read), then try again.") do
         existing ? @client.patch("/zones/#{zone}/dns_records/#{existing["id"]}", record) : @client.post("/zones/#{zone}/dns_records", record)
       end
     end
@@ -159,10 +159,12 @@ class CloudflareSetup
       ]
     end
 
-    def step(doing)
+    # denied: what to tell the admin when Cloudflare refuses for lack of
+    # permission (the read-only token check can't prove edit rights).
+    def step(doing, denied: nil)
       yield
     rescue Cloudflare::Error => e
-      fail!("Cloudflare said no while #{doing}: #{e.message}.")
+      fail!(denied && e.status.in?([ 401, 403 ]) ? "#{denied} (Cloudflare: #{e.message})" : "Cloudflare said no while #{doing}: #{e.message}.")
       raise Stop
     end
 

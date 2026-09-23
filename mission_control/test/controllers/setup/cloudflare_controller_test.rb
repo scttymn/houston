@@ -161,6 +161,29 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
     assert_equal "per_host", Installation.current.dns_mode
   end
 
+  test "a token that can read tunnels but not create them says which permission is missing" do
+    stub_token_checks
+    stub_existing_tunnel([])
+    cf(:post, "/accounts/#{ACCOUNT}/cfd_tunnel", status: 403, errors: [ { code: 10000, message: "Authentication error" } ])
+
+    submit
+
+    assert_response :unprocessable_entity
+    assert_select ".check", /Cloudflare Tunnel · Edit/
+    assert_not Installation.connected?
+  end
+
+  test "a token that can read DNS but not write it says which permission is missing" do
+    stub_through_ingress
+    stub_existing_wildcard([])
+    cf(:post, "/zones/#{ZONE}/dns_records", status: 403, errors: [ { code: 10000, message: "Authentication error" } ])
+
+    submit
+
+    assert_response :unprocessable_entity
+    assert_select ".check", /Zone · DNS · Edit on svnmns\.com/
+  end
+
   test "a Cloudflare error mid-way can be retried" do
     stub_token_checks
     stub_existing_tunnel([])
