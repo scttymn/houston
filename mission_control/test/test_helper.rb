@@ -13,10 +13,16 @@ module ActiveSupport
     fixtures :all
 
     # Rate limits and status checks live in the cache; start every test fresh.
-    # The local registry answers by default; tests about it stub their own.
+    # The local registry and admin.<base> answer by default; tests about them
+    # stub their own.
     setup do
       Rails.cache.clear
+      stub_local_services
+    end
+
+    def stub_local_services
       stub_request(:get, "http://registry:5000/v2/").to_return(status: 200, body: "{}")
+      stub_request(:get, "https://admin.svnmns.com/ping").to_return(body: Installation.identity)
     end
   end
 end

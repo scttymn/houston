@@ -99,7 +99,27 @@ elif [ -f "$cf_file" ]; then
       done
       if [ "$got" = "$want" ]; then ok "$url answers $got through the tunnel (after $((SECONDS - start))s)"; else bad "$url answered $got through the tunnel after 5 minutes (wanted $want)"; fi
     }
-    through 200 "https://admin.$base/up"
+
+    echo "== setup step 3: a local backup location in the machine"
+    step3=$(vm curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -c "$jar" -b "$jar" -X POST "http://$ip:3000/setup/storage" \
+      --data-urlencode "authenticity_token=$(token /setup/storage)" --data-urlencode "storage[kind]=local" \
+      --data-urlencode "storage[name]=vm-local" --data-urlencode "storage[local_path]=/srv/houston-backups")
+    if [ "$step3" = "302 http://$ip:3000/setup/storage" ]; then ok "step 3 initialized a restic repository"; else bad "step 3 (got $step3)"; fi
+    check "the repository is on the machine's disk" vm test -f /srv/houston-backups/config
+    finish=$(vm curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -c "$jar" -b "$jar" -X POST "http://$ip:3000/setup/storage/finish" \
+      --data-urlencode "authenticity_token=$(token /setup/storage)" --data-urlencode "saved=1")
+    if [ "$finish" = "302 http://$ip:3000/" ]; then ok "setup finished; the flight board is next"; else bad "finishing setup (got $finish)"; fi
+
+    # Mission Control's own verdict on admin.<base>: it GETs https://admin.<base>/ping
+    # through Cloudflare and expects this install's identity back.
+    route="" first="" start=$SECONDS
+    for _ in $(seq 1 60); do
+      route=$(vm curl -s -b "$jar" "http://$ip:3000/" | grep -o 'data-check="admin-route" data-state="[a-z]*"' | sed 's/.*data-state="//;s/"$//' || true)
+      first="${first:-$route}"
+      [ "$route" = go ] && break
+      sleep 5
+    done
+    if [ "$route" = go ]; then ok "the flight board says admin.$base reaches this Mission Control (after $((SECONDS - start))s; first seen: $first)"; else bad "the flight board's admin.$base route is '$route' after 5 minutes"; fi
     through 200 "https://hooks.$base/up"
     # Mission Control would redirect this; the hooks hostname only passes /<slug>, so the tunnel answers 404.
     through 404 "https://hooks.$base/setup/cloudflare"

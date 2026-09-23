@@ -16,6 +16,13 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
        errors: status == 200 ? [] : [ { code: 1000, message: "Authentication error" } ])
   end
 
+  # sign_in_as's cookie belongs to the default test host; on admin.<base>,
+  # sign in through the form so the cookie is set for that host.
+  def sign_in_on_admin_host
+    host! "admin.svnmns.com"
+    post session_path, params: { email_address: users(:one).email_address, password: "password" }
+  end
+
   test "the empty flight board" do
     stub_tunnel
 
@@ -39,9 +46,9 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     get root_path
     assert_select ".notice--go", /admin\.svnmns\.com/
 
-    host! "admin.svnmns.com"
-    sign_in_as users(:one)
+    sign_in_on_admin_host
     get root_path
+    assert_response :success
     assert_select ".notice--go", { text: /bookmark/, count: 0 }
   end
 
@@ -53,7 +60,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     ].each do |options, state, text|
       Rails.cache.clear
       WebMock.reset!
-      stub_request(:get, "http://registry:5000/v2/").to_return(status: 200, body: "{}")
+      stub_local_services
       stub_tunnel(**options)
 
       get root_path
@@ -75,6 +82,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
     Rails.cache.clear
     WebMock.reset!
+    stub_local_services
     stub_tunnel(connections: 0)
     stub_request(:get, "http://registry:5000/v2/").to_timeout
     get root_path
@@ -99,5 +107,43 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     Installation.current.update!(dns_mode: "per_host")
     get root_path
     assert_select ".preflight li", /admin\.svnmns\.com and hooks\.svnmns\.com.*another server has \*\.svnmns\.com/
+  end
+
+  test "the banner and pre-flight row follow the route to admin.<base>" do
+    stub_tunnel
+    ping = "https://admin.svnmns.com/ping"
+
+    get root_path
+    assert_select ".notice--go a[href='https://admin.svnmns.com']"
+    assert_select "[data-controller~=refresh]", 0
+    assert_select ".preflight li[data-check=admin-route][data-state=go]", /Route to admin\.svnmns\.com/
+
+    Rails.cache.clear
+    stub_request(:get, ping).to_return(status: 404, body: "404 page not found")
+    get root_path
+    assert_select ".notice--hold", /switching admin\.svnmns\.com over/
+    assert_select "a[href='https://admin.svnmns.com']", 0
+    assert_select ".notice--hold[data-controller~=refresh]"
+    assert_select ".preflight li[data-check=admin-route][data-state=hold]", /answered 404/
+
+    Rails.cache.clear
+    travel 11.minutes do
+      get root_path
+      assert_select ".notice--nogo", /isn't reaching Houston.*answered 404/m
+      assert_select "a[href='https://admin.svnmns.com']", 0
+      assert_select "[data-controller~=refresh]", 0
+      assert_select ".preflight li[data-check=admin-route][data-state=nogo]"
+    end
+  end
+
+  test "on admin.<base> the route row is GO without probing" do
+    stub_tunnel
+    sign_in_on_admin_host
+
+    get root_path
+    assert_response :success
+
+    assert_select ".preflight li[data-check=admin-route][data-state=go]", /You're using it now/
+    assert_not_requested :get, "https://admin.svnmns.com/ping"
   end
 end

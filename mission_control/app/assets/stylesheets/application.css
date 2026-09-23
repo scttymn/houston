@@ -32,6 +32,7 @@
   --link: #1D4E89;
   --go-bg: #DCEBDD;   --go-fg: #1F5E35;
   --nogo-bg: #F4D5CE; --nogo-fg: #9A2414;
+  --hold-bg: #F3E3C2; --hold-fg: #75480A;
 
   --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
   --text: "IBM Plex Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -92,6 +93,7 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .notice .mono { font-size: 12px; font-weight: 600; letter-spacing: 0.1em; }
 .notice--go { background: var(--go-bg); color: var(--go-fg); }
 .notice--nogo { background: var(--nogo-bg); color: var(--nogo-fg); }
+.notice--hold { background: var(--hold-bg); color: var(--hold-fg); }
 
 /* Panels */
 .panel { display: flex; flex-direction: column; border: 1px solid var(--ink); background: var(--surface); }
@@ -196,7 +198,8 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .preflight small { font-size: 12px; color: var(--muted); }
 .state { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; padding-top: 2px; }
 .state--go { color: var(--go-fg); }
-.state--hold { color: #75480A; }
+.state--hold { color: var(--hold-fg); }
+.state--nogo { color: var(--nogo-fg); }
 .state--unknown { color: var(--muted); }
 
 /* Header status strip */

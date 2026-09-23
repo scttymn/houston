@@ -1,5 +1,7 @@
 <% content_for :title, "Projects · Mission Control" %>
 <% base = @installation.base_domain %>
+<%# The HOLD banner refreshes the page in place until admin.<base> switches over. %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
 
 <main class="page board">
   <div class="board__top">
@@ -15,12 +17,25 @@
     </div>
   </div>
 
-  <% if @on_lan %>
-    <div class="notice notice--go">
-      <span class="mono">GO</span>
-      <span class="notice__text">Setup complete. Mission Control now lives at <span class="mono">admin.<%= base %></span>. You're on the LAN address, so bookmark the new one.</span>
-      <%= link_to "Open admin.#{base} ↗", "https://admin.#{base}", target: "_blank", rel: "noopener noreferrer" %>
-    </div>
+  <% if @on_lan && @admin_route %>
+    <% case @admin_route.state %>
+    <% when :go %>
+      <div class="notice notice--go">
+        <span class="mono">GO</span>
+        <span class="notice__text">Setup complete. Mission Control now lives at <span class="mono">admin.<%= base %></span>. You're on the LAN address, so bookmark the new one.</span>
+        <%= link_to "Open admin.#{base} ↗", "https://admin.#{base}", target: "_blank", rel: "noopener noreferrer" %>
+      </div>
+    <% when :hold %>
+      <div class="notice notice--hold" data-controller="refresh" data-refresh-every-value="10000">
+        <span class="mono">HOLD</span>
+        <span class="notice__text">Setup complete. Cloudflare is switching <span class="mono">admin.<%= base %></span> over to this server, which can take a few minutes. This page checks again every 10 seconds.</span>
+      </div>
+    <% else %>
+      <div class="notice notice--nogo">
+        <span class="mono">NO-GO</span>
+        <span class="notice__text"><span class="mono">admin.<%= base %></span> isn't reaching Houston: <%= @admin_route.reason %>. Keep using this LAN address meanwhile, and check the admin.<%= base %> record and the tunnel in Cloudflare.</span>
+      </div>
+    <% end %>
   <% end %>
 
   <div class="board__body">
@@ -67,6 +82,17 @@ git push</pre>
           <span class="mono state state--<%= state.downcase.delete("?").presence || "unknown" %>"><%= state %></span>
           <span><span>Tunnel houston-<%= base.split(".").first %></span><small><%= detail %></small></span>
         </li>
+        <% if @admin_route %>
+          <% label, detail = case @admin_route.state
+             when :go then [ "GO", @on_lan ? "Reaches this Mission Control through Cloudflare" : "You're using it now" ]
+             when :hold then [ "HOLD", "Switching over, which can take a few minutes. Last check: #{@admin_route.reason}" ]
+             else [ "NO-GO", @admin_route.reason.upcase_first ]
+             end %>
+          <li data-check="admin-route" data-state="<%= @admin_route.state %>">
+            <span class="mono state state--<%= @admin_route.state %>"><%= label %></span>
+            <span><span>Route to admin.<%= base %></span><small><%= detail %></small></span>
+          </li>
+        <% end %>
         <% if @installation.dns_mode == "per_host" %>
           <li><span class="mono state state--go">GO</span><span><span>admin.<%= base %> and hooks.<%= base %></span><small>Sharing the domain: another server has *.<%= base %>, so each app gets its own record when it's first deployed</small></span></li>
         <% else %>

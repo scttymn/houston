@@ -326,6 +326,41 @@ Your answers: OrbStack test machines OK; images and binaries not published yet (
   Record lookups are by name with any type. 50 runs green.
 - **Test cleanup (`install/test/cloudflare.sh cleanup`)** also removes Houston's own `admin.`/`hooks.` records for the test tunnel. It still deletes only records with the comment that point at that tunnel.
 
+### Added after the real run: does admin.<base> reach this Mission Control?
+You: "can we just have a status indicator with a sane timeout?" (instead of a "can take a few minutes" warning).
+
+- **Probe:** Mission Control GETs `https://admin.<base>/ping`, out through Cloudflare's edge and back in through the tunnel. `/ping` answers, signed out and before setup, with `Installation.identity`: 32 hex characters derived from `secret_key_base` via the key generator. It's one-way and names the install without revealing anything. A match proves the request reached *this* Mission Control; a 200 from `/up` wouldn't, because the other server's apps answer that too.
+- **States:**
+  - GO: the identity matches, or the page is being viewed on admin.<base> itself (no probe needed).
+  - HOLD: no match yet, within **10 minutes** of `cloudflare_connected_at`. Cloudflare documents up to ~5 min for proxied changes; we saw 0 s to past 30 s.
+  - NO-GO: still no match after that, naming what came back ("answered 404, not from this Mission Control", "530 from Cloudflare", "no answer in 2 s", "can't look up admin.<base> from this server").
+- **Cache:** the probe result, not the state (the state depends on the clock): 30 s after a match, 5 s otherwise. 2 s timeout. No probe before step 2.
+- **Page:**
+  - The LAN banner links to admin.<base> only on GO.
+  - On HOLD it says it's switching over, and the page refreshes itself every 10 s (Turbo morph). On NO-GO it gives the reason.
+  - A pre-flight row "Route to admin.<base>" carries the same state.
+- **Scope:** admin only. A hooks probe needs a path no project can take; that comes with webhooks in build step 3.
+
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | `/ping` → 200 text with the identity; signed out; before setup (no users) not redirected; sets no cookie; isn't `secret_key_base` | `controllers/pings_controller_test.rb` | Authz, Contract |
+| 2 | Match → GO; 200 with another body, 404, 530, timeout within 10 min → HOLD with the reason; the same after 10 min → NO-GO | `models/system_status_admin_route_test.rb` (table, `travel`) | Signals, Preconditions |
+| 3 | Not connected → nothing probed; on admin.<base> → GO without a probe | same | Preconditions |
+| 4 | Match cached 30 s, no match 5 s | same | Scale |
+| 5 | Banner: link only on GO; HOLD has the refresher; NO-GO has the reason and no refresher; the pre-flight row matches | `controllers/projects_controller_test.rb` | Contract |
+| 6 | Real VM on svnmns.com: the flight board's route row reaches GO within 5 minutes (replaces the test's own curl on admin.) | `install/test/orbstack.sh` | Parity |
+
+#### Done (admin.<base> route)
+- **Red:** 9 failures across the four new areas, each for the missing behavior. **Green:** 62 runs, 0 failures. Rubocop clean.
+- **Mutations, each caught:** caching a miss for 30 s (the 5 s re-check test); never going NO-GO (2 failures); treating any 200 as GO (the "answered 200, not from this Mission Control" row).
+- **Found on the way: a false green.** The older "banner is hidden on admin.<base>" test used `sign_in_as`, whose cookie belongs to the default test host. On admin.<base> it got a redirect to sign-in, and a redirect has no banner, so it passed for the wrong reason. Both admin-host tests now sign in through the form on that host and assert a 200 first.
+- **Real browser (dev, sign-in page, which loads the same JavaScript):** the importmap resolves `controllers/refresh_controller` and Turbo. A refresher mounted at 1 s did one Turbo refresh with no full reload (same JS context). The server's page came back without the element, and the refreshing stopped.
+- **Real VM on svnmns.com (row 6):** 24/24.
+  - The VM test now also drives step 3, with a local restic repository at `/srv/houston-backups` in the machine, so it reaches the flight board.
+  - The board's route row was **GO on first sight**. By the time step 3 finished, Cloudflare had switched `admin.` over, and Mission Control's own `/ping` probe went out through the edge and came back with the matching identity (production `secret_key_base` from `.env`).
+  - HOLD wasn't seen live this run. It's covered by the tests and the refresher check above.
+  - `hooks.` took 15 s. Cleanup left the other server's wildcard untouched.
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?
