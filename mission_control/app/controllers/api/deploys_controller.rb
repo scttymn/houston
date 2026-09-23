@@ -24,7 +24,8 @@ class Api::DeploysController < Api::BaseController
     invalid = invalid_progress(progress)
     return render json: { error: invalid }, status: :unprocessable_entity if invalid
 
-    status, json = Deploy.transaction { apply(progress) }
+    status, json, deploy, appended = Deploy.transaction { apply(progress) }
+    DeployBroadcast.progress(deploy, appended:, changed: progress.except("log").any?) if status == :ok
     render json:, status:
   end
 
@@ -37,8 +38,8 @@ class Api::DeploysController < Api::BaseController
         return [ :conflict, { error: "deploy ##{deploy.number} is no longer in flight (#{deploy.error.presence || deploy.status}); it was finished or taken over" } ]
       end
 
-      deploy.report!(**progress.symbolize_keys)
-      [ :ok, { number: deploy.number, status: deploy.status } ]
+      appended = deploy.report!(**progress.symbolize_keys)
+      [ :ok, { number: deploy.number, status: deploy.status }, deploy, appended ]
     rescue ActiveRecord::RecordInvalid => e
       [ :unprocessable_entity, { error: e.record.errors.full_messages.to_sentence } ]
     end

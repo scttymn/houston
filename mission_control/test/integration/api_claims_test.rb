@@ -5,6 +5,7 @@ require_relative "../support/project_helpers"
 class ApiClaimsTest < ActionDispatch::IntegrationTest
   include ApiHelpers
   include ProjectHelpers
+  include Turbo::Broadcastable::TestHelper
 
   setup do
     @known_hosts = Tempfile.new("known_hosts")
@@ -45,6 +46,13 @@ class ApiClaimsTest < ActionDispatch::IntegrationTest
 
     claim(runner: "houston-runner-2")
     assert_equal "rideclub", json.dig("project", "name")
+  end
+
+  test "a claim wakes up the deploy's page" do
+    queued = Deploy.queue!(make_linked_project("garage"), sha: "a" * 40, ref: "refs/heads/main")
+    streams = capture_turbo_stream_broadcasts(queued) { claim }
+    status = streams.find { |s| s["target"] == "deploy_status" }
+    assert_match(/IN FLIGHT/, status.at("template").inner_html)
   end
 
   test "nothing to claim" do

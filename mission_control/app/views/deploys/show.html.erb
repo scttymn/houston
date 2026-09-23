@@ -1,46 +1,28 @@
 <% content_for :title, "#{@project.name} · Deploy ##{@deploy.number}" %>
-<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @deploy %>
 <main class="page board">
   <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / Deploy #<%= @deploy.number %></nav>
   <div class="board__top">
     <div class="board__title">
       <h1 class="disp">Deploy #<%= @deploy.number %></h1>
-      <div class="hosts">
-        <%= state_chip(@deploy.status) %>
-        <span class="mono"><%= @deploy.short_sha %> · <%= @deploy.ref %></span>
-      </div>
     </div>
     <div class="stat">
-      <span class="mono eyebrow"><%= @deploy.status == "in_flight" ? "MISSION ELAPSED" : "DURATION" %> · STARTED <%= @deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
-      <span class="disp stat__value"><%= @deploy.status == "in_flight" ? mission_elapsed(@deploy.duration) : duration_words(@deploy.duration) %></span>
+      <span class="mono eyebrow">STARTED <%= @deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+      <span class="disp stat__value"><%= @deploy.finished_at ? duration_words(@deploy.duration) : "—" %></span>
     </div>
   </div>
 
-  <% if @deploy.status == "in_flight" %>
-    <div class="notice notice--hold" data-controller="refresh" data-refresh-every-value="3000">
-      <span class="mono">IN FLIGHT</span>
-      <span class="notice__text">
-        <% if @running %><span class="mono"><%= @running.short_sha %></span> is still serving <%= @project.host %>.<% else %>Nothing is serving <%= @project.host %> yet.<% end %>
-        Traffic switches only after <span class="mono"><%= @project.health %></span> returns 200 on the new version.
-      </span>
-    </div>
-  <% elsif @deploy.status == "no_go" %>
-    <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= @deploy.error %></span></div>
-  <% end %>
+  <%= render "deploys/status", deploy: @deploy, project: @project, running: @running %>
 
   <div class="board__body">
-    <ol class="panel deploy-steps">
-      <% @deploy.step_states.each_with_index do |(name, state), i| %>
-        <li data-step="<%= name %>" data-state="<%= state %>">
-          <span class="mono"><%= format("%02d", i) %></span>
-          <span><%= name %></span>
-          <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED", pending: "—", skipped: "SKIPPED" }.fetch(state) %></span>
-        </li>
-      <% end %>
-    </ol>
-    <section class="panel log-panel">
-      <h2 class="disp panel__title"><%= @project.name %> · <%= @deploy.short_sha %></h2>
-      <pre class="mono log"><%= @deploy.log %></pre>
+    <%= render "deploys/steps", deploy: @deploy %>
+    <section class="panel log-panel" data-controller="follow clipboard">
+      <div class="panel__title log-panel__head">
+        <h2 class="disp"><%= @project.name %> · <%= @deploy.short_sha %></h2>
+        <label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"> Follow</label>
+        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+      </div>
+      <pre id="deploy_log" class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled"><%= @deploy.log %></pre>
     </section>
   </div>
 </main>

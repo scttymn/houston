@@ -24,7 +24,11 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_select ".deploy-steps [data-step=Build][data-state=current]"
     assert_select ".deploy-steps [data-step=Deploy][data-state=pending]"
     assert_select "pre.log", /step output/
-    assert_select "[data-controller~=refresh]"
+    assert_select "turbo-cable-stream-source[signed-stream-name]"
+    assert_select "#deploy_log"
+    assert_select "#deploy_steps"
+    assert_select "#deploy_status"
+    assert_select "[data-controller~=refresh]", 0
 
     get project_deploy_path("equip", 1)
     assert_select ".state", /GO/

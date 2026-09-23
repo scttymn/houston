@@ -3,6 +3,7 @@ require_relative "../support/api_helpers"
 
 class ApiDeploysTest < ActionDispatch::IntegrationTest
   include ApiHelpers
+  include Turbo::Broadcastable::TestHelper
 
   SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -133,12 +134,36 @@ class ApiDeploysTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "progress is broadcast" do
+    id, token = started
+    deploy = Deploy.find(id)
+
+    streams = capture_turbo_stream_broadcasts(deploy) { report(id, token, { step: "Build", log: "<script>alert(1)</script>\n" }) }
+    append = streams.find { |s| s["action"] == "append" }
+    assert_equal "deploy_log", append["target"]
+    assert_includes append.at("template").inner_html, "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert_empty append.css("template script")
+    assert_equal %w[deploy_status deploy_steps], streams.select { |s| s["action"] == "replace" }.map { |s| s["target"] }.sort
+
+    assert_empty capture_turbo_stream_broadcasts(deploy) { report(id, "wrong-token", { log: "x" }) }, "a refused report broadcasts nothing"
+
+    streams = capture_turbo_stream_broadcasts(deploy) { report(id, token, { status: "go" }) }
+    status = streams.find { |s| s["target"] == "deploy_status" }
+    assert_match(/GO/, status.at("template").inner_html)
+
+    assert_empty capture_turbo_stream_broadcasts(deploy) { report(id, token, { log: "after the end" }) }, "a finished deploy broadcasts nothing more"
+  end
+
   test "the log is capped" do
     id, token = started
     report(id, token, { log: "x" * (256.kilobytes + 1) })
     assert_response :content_too_large
 
-    17.times { report(id, token, { log: "y" * 250.kilobytes }) }
+    16.times { report(id, token, { log: "y" * 250.kilobytes }) }
+    crossing = capture_turbo_stream_broadcasts(Deploy.find(id)) { report(id, token, { log: "y" * 250.kilobytes }) }
+    assert_includes crossing.find { |s| s["action"] == "append" }.at("template").inner_html, "[log truncated"
+    past = capture_turbo_stream_broadcasts(Deploy.find(id)) { report(id, token, { log: "past the cap" }) }
+    assert_nil past.find { |s| s["action"] == "append" }, "a dropped chunk isn't broadcast"
     report(id, token, { log: "after the cap\n", status: "no_go", error: "release failed" })
     assert_response :success
 

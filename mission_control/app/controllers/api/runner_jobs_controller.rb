@@ -15,6 +15,7 @@ class Api::RunnerJobsController < Api::BaseController
     deadline = wait.seconds.from_now
     loop do
       if (claimed = Deploy.claim_next!(runner:))
+        DeployBroadcast.progress(claimed.first)
         return render json: job(*claimed)
       end
       break if Time.current >= deadline

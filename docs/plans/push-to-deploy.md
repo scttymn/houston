@@ -333,6 +333,14 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 | 5 | A claim broadcasts the queued → in-flight change | `integration/api_claims_test.rb` (extended) | Contract |
 | 6 | The Follow controller: auto-scroll on append while at the bottom, off once scrolled up (real browser, a throwaway page) | manual check in the browser pane | Contract |
 
+### Done (Batch 6)
+- **Red:** rows 1–5 failed (4 tests). **Green:** 124 runs; rubocop is clean.
+- **Found on the way:** turbo-rails' `assert_no_turbo_stream_broadcasts` counts every broadcast on the stream so far, not just those in its block. The "nothing broadcast" checks use `capture_turbo_stream_broadcasts` with a block instead, which does scope to the block. `turbo/broadcastable/test_helper` also has to be required explicitly.
+- **Mutations, each caught:** the log broadcast as HTML (row 2); refused or capped reports broadcasting anyway (rows 3–4, 2 failures).
+- **Row 6, in a real browser** (dev server, sign-in page, a Follow panel mounted by script): it sticks to the end on connect; follows an append; scrolling up turns it off; it stays put on the next append; ticking it jumps back to the end.
+  - The first run of the last check failed because my script fired `change`, and Stimulus's default for an input is `input`. The view now binds `change->follow#toggle` explicitly, and a real `.click()` passes.
+- The deploy page no longer refreshes itself. The status (with the runner's name), the steps and the log arrive over Turbo Streams, and "Copy log" copies it.
+
 ### Decisions (from you)
 1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
 2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.

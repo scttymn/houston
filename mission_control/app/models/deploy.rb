@@ -126,7 +126,7 @@ class Deploy < ApplicationRecord
 
   # Applies one progress report. The caller has checked ownership inside the
   # same transaction. The log is appended in SQL, so a 4 MiB log isn't read
-  # back on every chunk.
+  # back on every chunk. Returns what was appended to the log, or nil.
   def report!(step: nil, log: nil, status: nil, error: nil)
     self.step = step if step
     self.error = error if error
@@ -142,10 +142,11 @@ class Deploy < ApplicationRecord
   private
     def append_log(chunk)
       size = self.class.where(id:).pick(Arel.sql("length(CAST(log AS BLOB))")).to_i
-      return if size >= LOG_CAP
+      return nil if size >= LOG_CAP
 
       room = LOG_CAP - size
       piece = chunk.bytesize > room ? chunk.byteslice(0, room).scrub("") + TRUNCATED : chunk
       self.class.where(id:).update_all([ "log = log || ?", piece ])
+      piece
     end
 end

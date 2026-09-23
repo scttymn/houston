@@ -1,0 +1,19 @@
+<%# The deploy's state, and what's serving meanwhile. Replaced live by DeployBroadcast. %>
+<div id="deploy_status" class="deploy-status">
+  <div class="hosts">
+    <%= state_chip(deploy.status) %>
+    <span class="mono"><%= deploy.short_sha %> · <%= deploy.ref %></span>
+    <% if deploy.runner %><span class="mono">· <%= deploy.runner %></span><% end %>
+  </div>
+  <% if deploy.status.in?(%w[queued in_flight]) %>
+    <div class="notice notice--hold">
+      <span class="mono"><%= deploy.status == "queued" ? "QUEUED" : "IN FLIGHT" %></span>
+      <span class="notice__text">
+        <% if running %><span class="mono"><%= running.short_sha %></span> is still serving <%= project.host %>.<% else %>Nothing is serving <%= project.host %> yet.<% end %>
+        <% if deploy.status == "queued" %>Waiting for a runner.<% else %>Traffic switches only after <span class="mono"><%= project.health %></span> returns 200 on the new version.<% end %>
+      </span>
+    </div>
+  <% elsif deploy.status == "no_go" %>
+    <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= deploy.error %></span></div>
+  <% end %>
+</div>

@@ -261,3 +261,7 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .column--side { flex: 0 0 min(420px, 100%); }
 .column--side .secrets { width: auto; }
 .webhook__actions { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.deploy-status { display: flex; flex-direction: column; gap: 12px; }
+.log-panel__head { display: flex; align-items: center; gap: 16px; }
+.log-panel__head h2 { margin: 0; font-size: 22px; flex: 1; }
+.log-panel__head label { font-size: 12px; display: flex; gap: 6px; align-items: center; }
