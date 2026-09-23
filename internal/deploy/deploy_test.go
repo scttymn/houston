@@ -758,3 +758,16 @@ func TestDeployRebootsAChangedAccessory(t *testing.T) {
 		t.Errorf("log:\n%s", h.mission.log())
 	}
 }
+
+// .houston/ ignores itself, as it does for houston dev; otherwise the first
+// deploy's files would make the checkout dirty and refuse the next deploy.
+func TestDeployKeepsItsFilesOutOfGit(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(h.dir, ".houston", ".gitignore"))
+	if err != nil || string(data) != "*\n" {
+		t.Errorf(".houston/.gitignore = %q, %v; want \"*\\n\"", data, err)
+	}
+}

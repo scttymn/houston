@@ -351,6 +351,14 @@ func (r *run) secrets() string {
 }
 
 func (r *run) writeKamalFiles() error {
+	// .houston/ ignores itself (as houston dev leaves it), so the next deploy
+	// doesn't find the checkout dirty.
+	if err := os.MkdirAll(filepath.Dir(r.kamalDir), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(r.kamalDir), ".gitignore"), []byte("*\n"), 0o644); err != nil {
+		return err
+	}
 	for _, d := range []string{r.kamalDir, filepath.Join(r.kamalDir, "config"), filepath.Join(r.kamalDir, ".kamal")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return err

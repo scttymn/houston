@@ -387,6 +387,82 @@ Stuck-alive: Batch 4's deadline in houston deploy
   - The first round caught three of these only by hanging until the test timeout. The blocking tests now carry their own 2 s deadline, so they fail in seconds.
 - **The expected configs** (`phoenix.deploy.yml`, `spike.deploy.yml`) now include each accessory's `houston.config` label.
 
+## Batch 6: the installer, and an end-to-end deploy on a VM
+
+### Design (short)
+- **Installer** (`install/install.sh`, rerunnable):
+  - installs `git` if it's missing
+  - builds the CLI from `HOUSTON_SOURCE` (`docker build --target release`, which reuses the toolchain Dockerfile) and installs `/usr/local/bin/houston` with a `hou` link
+  - generates `HOUSTON_RUNNER_TOKEN` into `/opt/houston/.env` once (appended on a rerun of an older install), and writes it to `~houston/.config/houston/runner-token` (0600, owned by houston) on every run
+  - pulls the pinned Kamal image
+  - Mission Control already reads `.env`.
+- **`houston deploy` writes `.houston/.gitignore` (`*`)**, as `houston dev` does. Without it, the first deploy's `.houston/kamal` would make the checkout "dirty" and refuse the second deploy. (Found while planning this batch.)
+- **`install/test/deploy-e2e.sh`** runs on an OrbStack VM with a real Mission Control. It marks Cloudflare connected in wildcard mode with base `houston.test`, since real Cloudflare is Batch 8. Then, as the houston user, in a git checkout of the spike fixture plus hooks:
+  - **HOLD:** the first `houston deploy` exits 1, naming the missing secrets; the project now exists
+  - **GO:** after setting the secrets, a deploy succeeds; the values arrive byte-exact through kamal-proxy; the release hook wrote to the data volume; post_deploy ran
+  - **Zero downtime:** a new commit redeploys while a poller sees only 200s
+  - **A failing release** (`exit 3`) → exit 1, and Mission Control has `no_go` "release hook failed (exit 3)". The previous version keeps serving (`KAMAL_VERSION`).
+  - **Two deploys at once** → one refused with "in flight", the other GO
+  - **Mission Control's records:** numbered, statuses as above, logs containing the step output
+
+### AC ↔ test map (Batch 6)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Installer: `git` and `houston --version` work; the token is ≥ 43 chars in `.env` and identical in houston's file (0600, houston:houston); a rerun keeps it | `install/test/orbstack.sh` (new checks) | Contract, Re-entry |
+| 2 | Deploy writes `.houston/.gitignore` with `*` | `internal/deploy` `TestDeployKeepsItsFilesOutOfGit` | Re-entry |
+| 3 | HOLD, then GO with byte-exact values, the release hook's volume write, and post_deploy | `install/test/deploy-e2e.sh` | Parity |
+| 4 | Zero-downtime redeploy | same | Parity |
+| 5 | A failing release → NO-GO, the old version serving | same | Crash & repair |
+| 6 | Two concurrent deploys → one refused | same | At-least-once |
+| 7 | Mission Control's deploy records match | same | Signals |
+
+### Done (Batch 6)
+- **Row 2:** `TestDeployKeepsItsFilesOutOfGit` went red, then green.
+- **Rows 3–7, `install/test/deploy-e2e.sh` on Ubuntu 24.04 with a real Mission Control:**
+  - HOLD named HOSTILE and POSTGRES_PASSWORD, and the project existed afterwards.
+  - After the secrets were set (HOSTILE is the hostile value, `$(…)`, backticks, `$HOME`, `<%= %>`, café), deploy #1 was GO: every value arrived byte-exact through kamal-proxy; `spike-db` resolved; the release hook wrote to the data volume; post_deploy ran in the new container; the checkout stayed clean.
+  - The redeploy (#2) saw 124 requests, all 200, and `KAMAL_VERSION` moved to the new commit.
+  - The failing release (#3) was NO-GO "release hook failed (exit 3)", and `KAMAL_VERSION` stayed on #2's commit.
+  - Mission Control's records were go, go, no_go, go.
+- **The concurrency check failed first, for a script reason.** In `cd ~/spike && (a) & (b) & wait`, the `&` splits the list, so the second deploy ran in the Mac's working directory. It found this repo's own `compose.yml` and refused it (exit 2). Grouped with `{ …; }`, the same step on the kept VM gave exits 0 and 1, "deploy #5 is in flight".
+- **Row 1** (installer checks in `install/test/orbstack.sh`) runs with Batch 8's full VM check. The e2e VM itself shows the installer works: the CLI, the token file, and Mission Control accepting the token.
+
+## Batch 7: Mission Control pages
+
+From the design's Main (flight board), ProjectDetail and DeployLog boards. Snapshots, the backup plan, Back up now, and the console hint belong to build step 5 (backups) and later. The design's runner name and step list follow spec §13's follow-ups.
+
+### Design (short)
+- **Flight board with projects:**
+  - rows: STATUS / PROJECT (+ accessories) / RUNNING SHA / DOMAINS / LAST DEPLOY
+  - status from the latest deploy: IN FLIGHT, NO-GO, GO, or **STANDBY** for a synced project that has never deployed (spec §13's proposal)
+  - running SHA = the latest GO deploy's
+  - the stats count projects, in flight, and NO-GO
+  - The empty state is unchanged.
+- **Project page** `/projects/:name`:
+  - name + status chip, `<name>.<base>` and domains, facts (running SHA, deploy rule in words, services)
+  - deploy history, newest first, 10 per page
+  - **secrets:** one row per variable the file references, required first
+    - set → `•••••••• · set <date>` with Replace and Remove
+    - unset → a value field with Save, plus **Generate**, which saves 32 random bytes as base64url and never shows them
+    - a HOLD notice while a required one is unset
+  - No value is ever rendered. `Secret` validation (backslash, control characters) is shown inline.
+- **Deploy page** `/projects/:name/deploys/:number`:
+  - DEPLOY #N, status, `sha7 · ref`, the duration (or T+ while in flight), "X is still serving" while in flight
+  - the steps (Secrets, Build, Accessories, Release, Deploy, Post-deploy), each done, current or failed, or pending
+  - the log, HTML-escaped
+  - While in flight, the page refreshes itself every 3 s (the existing refresh controller). Live streaming comes in build step 4.
+
+### AC ↔ test map (Batch 7), `mission_control/test/…`
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Board rows: GO (running SHA = latest go), IN FLIGHT, NO-GO, STANDBY; stats count them; the empty state is unchanged with no projects | `controllers/projects_controller_test.rb` `test "the flight board lists projects by their latest deploy"` | Contract |
+| 2 | Project page: facts, domains, history newest first and paged at 10; an unknown project → 404 | `controllers/project_pages_test.rb` `test "a project's page"` | Contract |
+| 3 | Secrets: a set value is never in the HTML; set/unset rows; HOLD while a required one is unset | `test "secrets are write-only"` | Authz, Contract |
+| 4 | Save: stored encrypted; a backslash value → 422 with the message and nothing stored; a key the file doesn't reference → 404; signed out → sign-in, nothing stored | `test "saving a secret"` | Contract, Authz |
+| 5 | Generate: stores ≥ 43 random characters, not shown in the response; Remove deletes | `test "generate and remove"` | Contract |
+| 6 | Deploy page: steps, status, log; in flight → refresher; finished → none; an unknown number → 404 | `controllers/deploy_pages_test.rb` `test "a deploy's page"` | Contract |
+| 7 | A log containing `<script>` is escaped | `test "the log is text, not HTML"` | Contract (hostile input) |
+
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:
 - **What "localhost only" means for the runner's secrets route.** Mission Control runs in a container, so its callers show up as Docker addresses, and cloudflared sits on the same network as the runners.

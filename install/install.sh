@@ -13,6 +13,7 @@ HOUSTON_DIR="${HOUSTON_DIR:-/opt/houston}"
 HOUSTON_SOURCE="${HOUSTON_SOURCE:-}"
 IMAGE="houston/mission-control:local"
 CLOUDFLARED_IMAGE="cloudflare/cloudflared:2026.9.1"
+KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0"
 REGISTRY_IMAGE="registry:3"
 
 say() { printf '%s\n' "$*"; }
@@ -50,6 +51,10 @@ install_docker() {
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
   fi
   systemctl enable --now docker >/dev/null 2>&1 || true
+  if ! command -v git >/dev/null 2>&1; then
+    step "Installing git (houston deploy reads the checkout)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git >/dev/null
+  fi
   if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
     step "Installing OpenSSH server (Kamal deploys to this host over SSH)"
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server >/dev/null
@@ -93,7 +98,38 @@ write_env() {
     } >"$HOUSTON_DIR/.env"
     umask 022
   fi
+  # Installs from before build step 3 have no runner token yet.
+  if ! grep -q '^HOUSTON_RUNNER_TOKEN=' "$HOUSTON_DIR/.env"; then
+    say "HOUSTON_RUNNER_TOKEN=$(random)" >>"$HOUSTON_DIR/.env"
+  fi
   chmod 600 "$HOUSTON_DIR/.env"
+}
+
+# houston deploy, run as the houston user, reads the runner token from here.
+write_runner_token() {
+  home=$(getent passwd houston | cut -d: -f6)
+  install -d -m 700 -o houston -g houston "$home/.config" "$home/.config/houston"
+  umask 077
+  sed -n 's/^HOUSTON_RUNNER_TOKEN=//p' "$HOUSTON_DIR/.env" >"$home/.config/houston/runner-token"
+  umask 022
+  chown houston:houston "$home/.config/houston/runner-token"
+  chmod 600 "$home/.config/houston/runner-token"
+}
+
+# The houston CLI, built from the checkout until binaries are published.
+install_cli() {
+  step "Building the houston CLI from $HOUSTON_SOURCE"
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) fail "unsupported architecture: $(uname -m)" ;;
+  esac
+  out=$(mktemp -d)
+  docker build --quiet --target release --output "type=local,dest=$out" "$HOUSTON_SOURCE" >/dev/null
+  install -m 755 "$out/houston-linux-$arch" /usr/local/bin/houston
+  ln -sf houston /usr/local/bin/hou
+  rm -rf "$out"
+  docker pull --quiet "$KAMAL_IMAGE" >/dev/null
 }
 
 write_compose() {
@@ -188,6 +224,8 @@ check_system
 install_docker
 create_user
 write_env
+write_runner_token
 write_compose
+install_cli
 start
 report

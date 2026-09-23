@@ -49,7 +49,11 @@ check "docker and compose installed" vm docker compose version
 check "houston user is in the docker group" vm sh -c 'id -nG houston | grep -qw docker'
 check "houston's key is authorized for local SSH" vm sh -c 'grep -qF "$(cat ~houston/.ssh/id_ed25519.pub)" ~houston/.ssh/authorized_keys'
 check ".env is mode 600" vm sh -c '[ "$(stat -c %a /opt/houston/.env)" = 600 ]'
-check ".env has the 4 generated secrets" vm sh -c '[ "$(grep -cE "^(SECRET_KEY_BASE|AR_ENCRYPTION_[A-Z_]+)=.{40,}" /opt/houston/.env)" = 4 ]'
+check ".env has the 5 generated secrets" vm sh -c '[ "$(grep -cE "^(SECRET_KEY_BASE|AR_ENCRYPTION_[A-Z_]+|HOUSTON_RUNNER_TOKEN)=.{43,}" /opt/houston/.env)" = 5 ]'
+check "houston has the runner token (0600, its own)" vm sh -c 'f=~houston/.config/houston/runner-token; [ "$(stat -c "%a %U" $f)" = "600 houston" ] && [ "$(cat $f)" = "$(sed -n "s/^HOUSTON_RUNNER_TOKEN=//p" /opt/houston/.env)" ]'
+check "git is installed" vm git --version
+check "the houston CLI is installed" vm sh -c 'houston --version && hou --version'
+check "Kamal's image is pulled" vm docker image inspect ghcr.io/basecamp/kamal:v2.12.0
 for svc in mission-control registry cloudflared; do
   check "$svc container exists and isn't stopped" vm sh -c "docker compose -f /opt/houston/compose.yml ps -a --format '{{.Service}} {{.State}}' | grep -E '^$svc (running|restarting)'"
 done
