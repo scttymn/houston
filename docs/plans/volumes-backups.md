@@ -471,3 +471,48 @@ The snapshot goes **after Build and before Accessories**, not just before Releas
   - The restic password shows only on an unconfirmed location's page (admin, `no-store`), and never in the API.
   - **For step 6 (restore):** after a project's target or the default changes, its earlier snapshots stay where they were written, and the page says so. Restore will need to list across the locations the project's runs used (each run records its location).
 - **Open question** (above): whether the CLI should add locations too.
+
+## Batch 8: The real run
+
+`install/test/backups-e2e.sh` (KEEP=1 keeps the machine; EQUIP_SOURCE adds equip). A fresh OrbStack machine with Houston installed and Cloudflare marked connected (wildcard; nothing goes through the tunnel). It checks:
+- **Storage:** its own `nfs-kernel-server` exporting `/srv/nfs`. Two locations made with the real `StorageSetup` (restic init): `local-backups` (a host path, the default) and `vm-nfs`.
+- **The first deploy HOLDs and makes no volume.** The spike's `data` volume is then placed on `vm-nfs` with `houston volumes place`, secrets are set from the CLI, and the deploy goes on. `spike_data` is an NFS volume in `vm-nfs/volumes/spike/data`, and what the app writes lands on the export.
+- **Data:**
+  - Postgres with a database named `we'ird=db` and a row.
+  - A SQLite database in the volume, held open with its rows only in its `-wal`.
+- **Back up now:** `houston backup --follow` GO, and `houston snapshots` lists it.
+- **Restored by hand with restic, then opened:**
+  - the manifest names the hostile database
+  - `pg_restore --list` reads the dump
+  - `globals.sql` is there
+  - the SQLite copy has all 3 rows
+  - the live SQLite file was left out of the file copy
+  - the volume's files are there
+- **Retention:** three more deploys, each logging its pre-deploy snapshot; `keep.deploy: 2` leaves 2.
+- **The schedule:** Europe/Berlin (`houston settings --time-zone`), with the schedule set two minutes ahead. The production tick queues it, it goes GO, and `houston status` shows it.
+- **Prune:** `PruneJob` on `local-backups`, with no error.
+- **equip:** GO, backed up, and Rails' SQLite databases found.
+
+### Found while writing it (a Batch 6 fix)
+**The deploy's sync placed volumes before its HOLD check.** So a first hand `houston deploy` that stops at HOLD (no secrets yet) had already made the volumes on local disk, before anyone could choose where they live. Placement now runs only on a sync that goes on to deploy: after the HOLD check. Red first (`test "sync places the volumes"`, the HOLD part), then green.
+
+### Done (Batch 8)
+- **The run:** `EQUIP_SOURCE=… install/test/backups-e2e.sh` → **BACKUPS PASS**, every check green, equip included. Every item listed for this batch above passed for real:
+  - a real NFS server
+  - the HOLD making no volume, then the data volume placed on NFS
+  - Back up now, restored by hand with restic and opened
+  - three pre-deploy snapshots with 2 kept
+  - the scheduled backup in Europe/Berlin
+  - prune
+  - equip's four Rails SQLite databases found and backed up
+  The machine was deleted afterwards.
+- **Real bugs it found, each fixed with a red test first:**
+  - **Mission Control didn't boot in production.** Production eager-loads `lib/`, so `lib/backup/sqlite.rb` (a script for the helper container) ran at boot and crashed. `lib/backup` is left out of autoloading now. `test/eager_load_test.rb` loads everything as production does; it was red, then green.
+  - **The HOLD sync placed volumes** (above).
+- **A real-world effect, noted:** SQLite on NFS stalls while the NFS server is in its grace period after a restart (NFSv4: up to 90 s). File locks wait, so a SQLite database there isn't written until the grace period ends. A backup in that window finds it as it was. A restarted NAS behaves the same way. It's one more reason for the page's SQLite-on-NFS warning.
+- **The script's own mistakes, fixed across the runs:**
+  - `houston storage` ran from a directory that didn't exist yet.
+  - I miscounted deploy numbers: the HOLD never becomes a deploy.
+  - The equip copy and key were staged in macOS's temp dir, which the machine can't see. They're under `.houston/` now, as `deploy-through-tunnel.sh` does.
+  - The first wait for the `-wal` was too short for the NFS grace period.
+- **Ready:** Mission Control 213 runs; the Go suite. rubocop, gofmt and shellcheck are clean on touched files.

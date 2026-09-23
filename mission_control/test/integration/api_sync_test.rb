@@ -99,6 +99,15 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_includes missing.calls.map(&:args), [ "volume", "create", "equip_storage" ]
     assert Project.find_by!(name: "equip").project_volumes.find_by!(name: "storage").placed_at
 
+    # A HOLD (a required secret with no value) places nothing: the deploy
+    # stops there, and the volumes can still be chosen.
+    held = FakeDocker.new
+    use_fake_docker(held) { sync(equip_payload(name: "held", volumes: [ { name: "data", path: "/data" } ])) }
+    assert_response :unprocessable_entity
+    assert_match "HOLD", json["error"]
+    assert_empty held.calls
+    assert_nil Project.find_by!(name: "held").project_volumes.find_by(name: "data")&.placed_at
+
     # Chosen elsewhere than where it is: the sync is refused, DNS untouched.
     nfs = storage_locations(:unas)
     other = Project.create!(name: "other", app_service: "app", services: %w[app], health: "/up", port: 80)

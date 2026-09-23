@@ -8,12 +8,14 @@ class Api::ProjectsController < Api::BaseController
     return render json: { error: "compose.yml doesn't match what Houston expects", errors: sync.errors }, status: :unprocessable_entity unless sync.valid?
 
     project = sync.save!
-    VolumePlacement.new(project).place!
     dns = sync.point_dns!
     domains = sync.point_domains!
     if (missing = project.missing_secrets).any?
       return render json: { error: "HOLD: set #{missing.to_sentence} in Mission Control first", missing: }, status: :unprocessable_entity
     end
+    # Only a sync that goes on to deploy makes volumes: until then (a HOLD,
+    # say) where they live can still be chosen.
+    VolumePlacement.new(project).place!
     render json: { project: project.name, host: project.host, dns:, domains: }
   rescue ProjectSync::Refused, VolumePlacement::Refused => e
     render json: { error: e.message }, status: :unprocessable_entity
