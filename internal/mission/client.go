@@ -1,0 +1,239 @@
+// Package mission talks to Mission Control's local API (mission_control's
+// Api:: controllers) with the runner token.
+package mission
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var (
+	// ErrUnauthorized: Mission Control refused the runner token.
+	ErrUnauthorized = errors.New("Mission Control refused the runner token")
+	// ErrTakenOver: the deploy is no longer this process's to report on.
+	ErrTakenOver = errors.New("the deploy was finished or taken over")
+)
+
+// HoldError: sync saved the project, but required variables have no value.
+type HoldError struct {
+	Missing []string
+	Message string
+}
+
+func (e *HoldError) Error() string { return e.Message }
+
+// BusyError: another deploy of the project is in flight.
+type BusyError struct {
+	Number  int
+	Message string
+}
+
+func (e *BusyError) Error() string { return e.Message }
+
+// Client is Mission Control's local API.
+type Client struct {
+	URL   string
+	token string
+	http  *http.Client
+}
+
+func New(baseURL, token string) *Client {
+	return &Client{URL: strings.TrimRight(baseURL, "/"), token: token, http: &http.Client{Timeout: 30 * time.Second}}
+}
+
+// FromEnvironment reads HOUSTON_URL (default http://127.0.0.1:3000) and the
+// runner token: HOUSTON_TOKEN, else ~/.config/houston/runner-token, which the
+// installer writes for the houston user.
+func FromEnvironment(getenv func(string) string, home string) (*Client, error) {
+	base := getenv("HOUSTON_URL")
+	if base == "" {
+		base = "http://127.0.0.1:3000"
+	}
+	token := strings.TrimSpace(getenv("HOUSTON_TOKEN"))
+	if token == "" {
+		data, err := os.ReadFile(filepath.Join(home, ".config", "houston", "runner-token"))
+		if err != nil {
+			return nil, errors.New("no runner token: set HOUSTON_TOKEN, or put it in ~/.config/houston/runner-token (the installer writes it for the houston user)")
+		}
+		token = strings.TrimSpace(string(data))
+	}
+	return New(base, token), nil
+}
+
+type Variable struct {
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+}
+
+type DeployRule struct {
+	On     string `json:"on"`
+	Branch string `json:"branch"`
+	Tags   string `json:"tags"`
+}
+
+// SyncRequest is what houston deploy read from compose.yml.
+type SyncRequest struct {
+	Name       string     `json:"name"`
+	AppService string     `json:"app_service"`
+	Services   []string   `json:"services"`
+	Domains    []string   `json:"domains"`
+	Variables  []Variable `json:"variables"`
+	Health     string     `json:"health"`
+	Port       int        `json:"port"`
+	DeployRule DeployRule `json:"deploy_rule"`
+}
+
+type SyncResult struct {
+	Project string `json:"project"`
+	Host    string `json:"host"` // <name>.<base>
+	DNS     string `json:"dns"`
+}
+
+// Sync saves the project in Mission Control and points its DNS. A HOLD is a
+// *HoldError.
+func (c *Client) Sync(ctx context.Context, req SyncRequest) (SyncResult, error) {
+	var res SyncResult
+	status, body, err := c.do(ctx, http.MethodPost, "/api/projects/sync", nil, req)
+	if err != nil {
+		return res, err
+	}
+	if status == http.StatusUnprocessableEntity {
+		var hold struct {
+			Error   string   `json:"error"`
+			Missing []string `json:"missing"`
+		}
+		if json.Unmarshal(body, &hold) == nil && len(hold.Missing) > 0 {
+			return res, &HoldError{Missing: hold.Missing, Message: hold.Error}
+		}
+	}
+	if err := expect(status, body, http.StatusOK); err != nil {
+		return res, err
+	}
+	return res, json.Unmarshal(body, &res)
+}
+
+// Secret returns a variable's value; false when it has none.
+func (c *Client) Secret(ctx context.Context, project, key string) (string, bool, error) {
+	status, body, err := c.do(ctx, http.MethodGet, "/api/projects/"+url.PathEscape(project)+"/secrets/"+url.PathEscape(key), nil, nil)
+	if err != nil {
+		return "", false, err
+	}
+	if status == http.StatusNotFound {
+		return "", false, nil
+	}
+	if err := expect(status, body, http.StatusOK); err != nil {
+		return "", false, err
+	}
+	return string(body), true, nil
+}
+
+// Deploy is a started deploy: its token is what reports on it.
+type Deploy struct {
+	ID       int    `json:"id"`
+	Number   int    `json:"number"`
+	Token    string `json:"token"`
+	TookOver int    `json:"took_over"` // the silent deploy this one replaced, or 0
+}
+
+// StartDeploy starts the project's next deploy. Another in flight is a
+// *BusyError.
+func (c *Client) StartDeploy(ctx context.Context, project, sha, ref string) (Deploy, error) {
+	var d Deploy
+	status, body, err := c.do(ctx, http.MethodPost, "/api/projects/"+url.PathEscape(project)+"/deploys", nil, map[string]string{"sha": sha, "ref": ref})
+	if err != nil {
+		return d, err
+	}
+	if status == http.StatusConflict {
+		var busy struct {
+			Error  string `json:"error"`
+			Number int    `json:"number"`
+		}
+		json.Unmarshal(body, &busy)
+		return d, &BusyError{Number: busy.Number, Message: busy.Error}
+	}
+	if err := expect(status, body, http.StatusCreated); err != nil {
+		return d, err
+	}
+	return d, json.Unmarshal(body, &d)
+}
+
+// Progress is one report: any of a step, a log chunk, a result.
+type Progress struct {
+	Step   string `json:"step,omitempty"`
+	Log    string `json:"log,omitempty"`
+	Status string `json:"status,omitempty"` // go or no_go
+	Error  string `json:"error,omitempty"`
+}
+
+// Report sends progress on d. ErrTakenOver means stop.
+func (c *Client) Report(ctx context.Context, d Deploy, p Progress) error {
+	status, body, err := c.do(ctx, http.MethodPatch, "/api/deploys/"+strconv.Itoa(d.ID), map[string]string{"X-Houston-Deploy-Token": d.Token}, p)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusConflict {
+		return fmt.Errorf("%w: %s", ErrTakenOver, message(body))
+	}
+	return expect(status, body, http.StatusOK)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, headers map[string]string, payload any) (int, []byte, error) {
+	var reqBody io.Reader
+	if payload != nil {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return 0, nil, err
+		}
+		reqBody = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.URL+path, reqBody)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("can't reach Mission Control at %s: %w", c.URL, err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(res.Body, 8<<20))
+	if err != nil {
+		return 0, nil, err
+	}
+	if res.StatusCode == http.StatusUnauthorized {
+		return 0, nil, ErrUnauthorized
+	}
+	return res.StatusCode, body, nil
+}
+
+func expect(status int, body []byte, want int) error {
+	if status == want {
+		return nil
+	}
+	return fmt.Errorf("Mission Control answered %d: %s", status, message(body))
+}
+
+func message(body []byte) string {
+	var e struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &e) == nil && e.Error != "" {
+		return e.Error
+	}
+	return strings.TrimSpace(string(body))
+}

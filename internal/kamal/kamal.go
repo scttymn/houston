@@ -179,8 +179,9 @@ type generator struct {
 }
 
 type secretUse struct {
-	path   string
-	shared bool // the name is a compose variable, shared by every exact use
+	path     string
+	shared   bool   // the name is a compose variable, shared by every exact use
+	template string // the compose value, resolved at deploy time
 }
 
 func newGenerator(p *project.Project, ps *problems) *generator {
@@ -301,7 +302,9 @@ func (g *generator) env(service string, environment types.MappingWithEquals) *en
 			g.ps.add(path, "%s is reserved for Houston's registry login", name)
 			continue
 		}
-		g.secretNames[name] = secretUse{path: path, shared: shared}
+		if _, seen := g.secretNames[name]; !seen {
+			g.secretNames[name] = secretUse{path: path, shared: shared, template: *value}
+		}
 		if name == key {
 			e.Secret = append(e.Secret, key)
 		} else {
@@ -550,4 +553,73 @@ func uncarriable(v string) string {
 		}
 	}
 	return ""
+}
+
+// ResolveSecrets returns the value of every secret in the secrets file, by
+// secret name. lookup gives a variable's value from Mission Control (false:
+// no value). Values are resolved the way compose would: service hosts are
+// the project's containers, and ${X:?msg} with no value is an error.
+func ResolveSecrets(p *project.Project, lookup func(string) (string, bool)) (map[string]string, error) {
+	var ps problems
+	g := newGenerator(p, &ps)
+	g.config(Target{})
+	if len(ps) > 0 {
+		return nil, ps.errors(p)
+	}
+	mapping := func(name string) (string, bool) {
+		if host, ok := g.hosts[name]; ok {
+			return host, true
+		}
+		// compose-go uses the value even when told it's unset.
+		if v, ok := lookup(name); ok {
+			return v, true
+		}
+		return "", false
+	}
+	out := map[string]string{registryPassword: registryUser}
+	for name, use := range g.secretNames {
+		v, err := template.Substitute(use.template, mapping)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", use.path, err)
+		}
+		out[name] = v
+	}
+	return out, nil
+}
+
+// AppEnv is the app container's environment: the clear values plus each
+// secret key's value (following its alias). The release hook runs with it.
+func AppEnv(p *project.Project, secrets map[string]string) (map[string]string, error) {
+	var ps problems
+	g := newGenerator(p, &ps)
+	cfg := g.config(Target{})
+	if len(ps) > 0 {
+		return nil, ps.errors(p)
+	}
+	env := map[string]string{}
+	if cfg.Env == nil {
+		return env, nil
+	}
+	for k, v := range cfg.Env.Clear {
+		env[k] = v
+	}
+	for _, entry := range cfg.Env.Secret {
+		key, name, aliased := strings.Cut(entry, ":")
+		if !aliased {
+			name = key
+		}
+		v, ok := secrets[name]
+		if !ok {
+			return nil, fmt.Errorf("no value resolved for secret %s", name)
+		}
+		env[key] = v
+	}
+	return env, nil
+}
+
+// AppVolumes are the app's named volumes as docker -v values, the same ones
+// Kamal mounts (the release hook's container needs them too).
+func AppVolumes(p *project.Project) []string {
+	var ps problems
+	return newGenerator(p, &ps).volumes(p.Compose.Services[p.AppService])
 }

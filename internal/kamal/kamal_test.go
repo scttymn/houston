@@ -491,3 +491,74 @@ x-houston:
 		t.Errorf("secret = %v, want [URL:WEB_V2__URL]", got)
 	}
 }
+
+func TestResolveSecrets(t *testing.T) {
+	values := map[string]string{"POSTGRES_PASSWORD": "pw $x", "SECRET_KEY_BASE": "skb"}
+	lookup := func(name string) (string, bool) { v, ok := values[name]; return v, ok }
+
+	got, err := ResolveSecrets(load(t, "testdata/phoenix.compose.yml"), lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"APP__DATABASE_URL":       "postgres://postgres:pw $x@phoenixapp-db/phoenixapp",
+		"POSTGRES_PASSWORD":       "pw $x",
+		"SECRET_KEY_BASE":         "skb",
+		"KAMAL_REGISTRY_PASSWORD": "houston",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ResolveSecrets = %#v\nwant %#v", got, want)
+	}
+
+	p := parse(t, `name: shop
+services:
+  app:
+    build: .
+    ports: ["80:80"]
+    environment:
+      LEVEL: ${LEVEL:-info}
+      OPTIONAL: ${OPTIONAL}
+      REQUIRED: ${REQUIRED:?set REQUIRED in Mission Control}
+x-houston:
+  health: /up
+`)
+	none := func(string) (string, bool) { return "", false }
+	if _, err := ResolveSecrets(p, none); err == nil || !strings.Contains(err.Error(), "REQUIRED") {
+		t.Errorf("unset required variable: err = %v, want one naming REQUIRED", err)
+	}
+	got, err = ResolveSecrets(p, func(name string) (string, bool) { return "r", name == "REQUIRED" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["APP__LEVEL"] != "info" || got["OPTIONAL"] != "" || got["REQUIRED"] != "r" {
+		t.Errorf("ResolveSecrets = %#v", got)
+	}
+}
+
+func TestAppEnv(t *testing.T) {
+	p := load(t, "testdata/phoenix.compose.yml")
+	secrets, err := ResolveSecrets(p, func(name string) (string, bool) { return "v-" + name, true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := AppEnv(p, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"DATABASE_URL":    "postgres://postgres:v-POSTGRES_PASSWORD@phoenixapp-db/phoenixapp",
+		"PHX_HOST":        "phoenixapp.com",
+		"REDIS_URL":       "redis://phoenixapp-cache:6379",
+		"SECRET_KEY_BASE": "v-SECRET_KEY_BASE",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("AppEnv = %#v\nwant %#v", got, want)
+	}
+	if _, err := AppEnv(p, map[string]string{}); err == nil {
+		t.Error("AppEnv without the secrets' values: want an error")
+	}
+	// The release hook mounts what the app mounts.
+	if got := AppVolumes(p); !reflect.DeepEqual(got, []string{"phoenixapp_media:/media"}) {
+		t.Errorf("AppVolumes = %v", got)
+	}
+}

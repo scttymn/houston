@@ -1,0 +1,447 @@
+// Package deploy is houston deploy on a Houston server: from a clean checkout
+// of the project to the new version serving at <name>.<base>, with Mission
+// Control told every step. See docs/plans/deploy-path.md, Batch 4.
+package deploy
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/sevenmoons/houston/internal/kamal"
+	"github.com/sevenmoons/houston/internal/mission"
+	"github.com/sevenmoons/houston/internal/project"
+)
+
+// KamalImage is the Kamal houston deploy runs, pinned (spike: Kamal 2.12.0).
+const KamalImage = "ghcr.io/basecamp/kamal:v2.12.0"
+
+// Exit codes, as the rest of the CLI uses them.
+const (
+	exitFailure = 1 // the deploy didn't happen or didn't finish
+	exitUsage   = 2 // the checkout or compose file can't be deployed as it is
+)
+
+type Docker interface {
+	Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error)
+}
+
+type Git interface {
+	Output(dir string, args ...string) (string, error)
+}
+
+type Mission interface {
+	Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error)
+	Secret(ctx context.Context, project, key string) (string, bool, error)
+	StartDeploy(ctx context.Context, project, sha, ref string) (mission.Deploy, error)
+	Report(ctx context.Context, d mission.Deploy, p mission.Progress) error
+}
+
+type Options struct {
+	File    string    // the project's compose file, in a clean checkout
+	Ref     string    // what's being deployed; default: the checked-out branch
+	Arch    string    // the server's architecture, for Kamal's builder.arch
+	SSHDir  string    // the houston user's ~/.ssh, mounted into Kamal's container
+	Environ []string  // the environment for docker; secrets are added to it
+	Stdout  io.Writer // step output, as it happens
+	Stderr  io.Writer
+}
+
+type Deps struct {
+	Docker  Docker
+	Git     Git
+	Mission Mission
+}
+
+// Run deploys and returns the exit code.
+func Run(ctx context.Context, o Options, d Deps) int {
+	p, err := project.Load(o.File)
+	if err != nil {
+		fmt.Fprint(o.Stderr, err)
+		return exitUsage
+	}
+	abs, err := filepath.Abs(o.File)
+	if err != nil {
+		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
+		return exitUsage
+	}
+	dir := filepath.Dir(abs)
+	sha, ref, err := checkRef(d.Git, dir, o.Ref, p.Houston.Deploy)
+	if err != nil {
+		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
+		return exitUsage
+	}
+
+	synced, err := d.Mission.Sync(ctx, syncRequest(p))
+	if err != nil {
+		var hold *mission.HoldError
+		switch {
+		case errors.As(err, &hold):
+			fmt.Fprintf(o.Stderr, "houston deploy: HOLD: %s %s no value; set it in Mission Control (the project's page), then deploy again\n",
+				strings.Join(hold.Missing, ", "), map[bool]string{true: "has", false: "have"}[len(hold.Missing) == 1])
+		case errors.Is(err, mission.ErrUnauthorized):
+			fmt.Fprintln(o.Stderr, "houston deploy: Mission Control refused the runner token (HOUSTON_TOKEN, or ~/.config/houston/runner-token)")
+		default:
+			fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
+		}
+		return exitFailure
+	}
+	target := kamal.Target{BaseDomain: strings.TrimPrefix(synced.Host, p.Name+"."), Arch: o.Arch}
+	config, err := kamal.Config(p, target)
+	if err != nil {
+		fmt.Fprint(o.Stderr, err)
+		return exitUsage
+	}
+	secretsFile, err := kamal.SecretsFile(p)
+	if err != nil {
+		fmt.Fprint(o.Stderr, err)
+		return exitUsage
+	}
+
+	dep, err := d.Mission.StartDeploy(ctx, p.Name, sha, ref)
+	if err != nil {
+		fmt.Fprintf(o.Stderr, "houston deploy: %v\n", err)
+		return exitFailure
+	}
+	r := &run{ctx: ctx, o: o, d: d, p: p, dir: dir, sha: sha, config: config, secretsFile: secretsFile,
+		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
+		kamalDir: filepath.Join(dir, ".houston", "kamal"),
+		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout}}
+	r.report.logf("Deploy #%d of %s: %s (%s)\n", dep.Number, p.Name, sha[:7], ref)
+	if dep.TookOver > 0 {
+		r.report.logf("Took over deploy #%d, which had gone silent.\n", dep.TookOver)
+	}
+	return r.deploy(dep.TookOver > 0)
+}
+
+// checkRef returns the commit and ref to deploy, or why they can't be: the
+// worktree must be clean, the ref must be the checked-out commit, and the
+// project's deploy rule must allow it.
+func checkRef(g Git, dir, ref string, rule project.Deploy) (sha, fullRef string, err error) {
+	status, err := g.Output(dir, "status", "--porcelain")
+	if err != nil {
+		return "", "", fmt.Errorf("can't read the checkout's git status: %v", err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return "", "", errors.New("the checkout has uncommitted changes; houston deploy builds exactly what's committed")
+	}
+	head, err := g.Output(dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", fmt.Errorf("can't read the checked-out commit: %v", err)
+	}
+	head = strings.TrimSpace(head)
+	if ref == "" {
+		branch, _ := g.Output(dir, "symbolic-ref", "-q", "HEAD")
+		if ref = strings.TrimSpace(branch); ref == "" {
+			return "", "", errors.New("HEAD is detached; say what's being deployed with --ref refs/heads/<branch> or refs/tags/<tag>")
+		}
+	}
+	at, err := g.Output(dir, "rev-parse", "--verify", "-q", ref+"^{commit}")
+	if err != nil || strings.TrimSpace(at) != head {
+		return "", "", fmt.Errorf("%s isn't the checked-out commit (%s)", ref, head)
+	}
+
+	on, branch, tags := rule.On, rule.Branch, rule.Tags
+	if on == "" {
+		on = "commit"
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	if tags == "" {
+		tags = "v*"
+	}
+	switch on {
+	case "tag":
+		tag, isTag := strings.CutPrefix(ref, "refs/tags/")
+		if ok, _ := path.Match(tags, tag); !isTag || !ok {
+			return "", "", fmt.Errorf("x-houston.deploy deploys tags matching %s; %s isn't one", tags, ref)
+		}
+	default:
+		if ref != "refs/heads/"+branch {
+			return "", "", fmt.Errorf("x-houston.deploy deploys branch %s; %s isn't it", branch, ref)
+		}
+	}
+	return head, ref, nil
+}
+
+func syncRequest(p *project.Project) mission.SyncRequest {
+	services := make([]string, 0, len(p.Compose.Services))
+	for name := range p.Compose.Services {
+		services = append(services, name)
+	}
+	sort.Strings(services)
+	vars := []mission.Variable{}
+	for _, v := range p.Variables {
+		if v.Kind == project.Secret {
+			vars = append(vars, mission.Variable{Name: v.Name, Required: v.Required})
+		}
+	}
+	domains := append([]string{}, p.Houston.Domains...)
+	return mission.SyncRequest{
+		Name: p.Name, AppService: p.AppService, Services: services, Domains: domains, Variables: vars,
+		Health: p.Houston.Health, Port: p.AppPort,
+		DeployRule: mission.DeployRule{On: p.Houston.Deploy.On, Branch: p.Houston.Deploy.Branch, Tags: p.Houston.Deploy.Tags},
+	}
+}
+
+// run is one started deploy: every failure from here on is reported.
+type run struct {
+	ctx         context.Context
+	o           Options
+	d           Deps
+	p           *project.Project
+	dir         string
+	sha         string
+	image       string
+	kamalDir    string
+	config      []byte
+	secretsFile []byte
+	kamalEnv    []string // Environ plus HOUSTON_S_<NAME>=<carrier>
+	kamalArgs   []string // -e HOUSTON_S_<NAME> for each
+	appEnv      map[string]string
+	report      *reporter
+}
+
+func (r *run) deploy(tookOver bool) int {
+	r.report.step("Secrets")
+	if msg := r.secrets(); msg != "" {
+		return r.fail(msg)
+	}
+	if err := r.writeKamalFiles(); err != nil {
+		return r.fail(fmt.Sprintf("can't write .houston/kamal: %v", err))
+	}
+	if tookOver {
+		r.report.logf("Releasing Kamal's deploy lock, left by the silent deploy.\n")
+		if code, err := r.kamal("lock", "release", "--version", r.sha); err != nil || code != 0 {
+			r.report.logf("kamal lock release: exit %d %v\n", code, errText(err))
+		}
+	}
+
+	r.report.step("Build")
+	build := r.p.Compose.Services[r.p.AppService].Build
+	context, dockerfile := ".", "Dockerfile"
+	if build != nil && build.Context != "" {
+		context = build.Context
+	}
+	if build != nil && build.Dockerfile != "" {
+		dockerfile = build.Dockerfile
+	}
+	if !filepath.IsAbs(context) {
+		context = filepath.Join(r.dir, context)
+	}
+	if !filepath.IsAbs(dockerfile) {
+		dockerfile = filepath.Join(context, dockerfile)
+	}
+	// Kamal only deploys images labelled service=<name> (its own builder
+	// adds the label; Houston builds the image itself).
+	if msg := r.docker("the image didn't build", "build", "--target", "production", "--label", "service="+r.p.Name, "-t", r.image, "-f", dockerfile, context); msg != "" {
+		return r.fail(msg)
+	}
+	if msg := r.docker("couldn't push the image to Houston's registry", "push", r.image); msg != "" {
+		return r.fail(msg)
+	}
+
+	if len(r.p.Compose.Services) > 1 {
+		r.report.step("Accessories")
+		if code, err := r.kamal("accessory", "boot", "all", "--version", r.sha); err != nil || code != 0 {
+			return r.fail(fmt.Sprintf("the accessories didn't boot (exit %d%s)", code, errText(err)))
+		}
+	}
+
+	if hook := r.p.Houston.Hooks.Release; hook != "" {
+		r.report.step("Release")
+		if msg := r.release(hook); msg != "" {
+			return r.fail(msg)
+		}
+	}
+
+	r.report.step("Deploy")
+	if code, err := r.kamal("deploy", "--skip-push", "--version", r.sha); err != nil || code != 0 {
+		return r.fail(fmt.Sprintf("kamal deploy failed (exit %d%s); the old version keeps serving", code, errText(err)))
+	}
+
+	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" {
+		r.report.step("Post-deploy")
+		code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
+		if err != nil || code != 0 {
+			r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
+		}
+	}
+
+	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
+	r.report.finish("go", "")
+	return 0
+}
+
+// secrets fetches every value, resolves the composites, and prepares what
+// the Kamal container gets. Returns why it can't, without any value in it.
+func (r *run) secrets() string {
+	var fetchErr error
+	lookup := func(name string) (string, bool) {
+		v, ok, err := r.d.Mission.Secret(r.ctx, r.p.Name, name)
+		if err != nil && fetchErr == nil {
+			fetchErr = fmt.Errorf("can't read %s from Mission Control: %w", name, err)
+		}
+		return v, ok
+	}
+	values, err := kamal.ResolveSecrets(r.p, lookup)
+	if fetchErr != nil {
+		return fetchErr.Error()
+	}
+	if err != nil {
+		return fmt.Sprintf("a secret can't be resolved: %v", err)
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	r.kamalEnv = append([]string{}, r.o.Environ...)
+	for _, name := range names {
+		carrier, err := kamal.CarrierValue(values[name])
+		if err != nil {
+			return fmt.Sprintf("the value of %s can't be deployed: %v", name, err)
+		}
+		r.kamalEnv = append(r.kamalEnv, "HOUSTON_S_"+name+"="+carrier)
+		r.kamalArgs = append(r.kamalArgs, "-e", "HOUSTON_S_"+name)
+	}
+	if r.appEnv, err = kamal.AppEnv(r.p, values); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (r *run) writeKamalFiles() error {
+	for _, d := range []string{r.kamalDir, filepath.Join(r.kamalDir, "config"), filepath.Join(r.kamalDir, ".kamal")} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(d, 0o700); err != nil {
+			return err
+		}
+	}
+	if err := writePrivate(filepath.Join(r.kamalDir, "config", "deploy.yml"), r.config); err != nil {
+		return err
+	}
+	return writePrivate(filepath.Join(r.kamalDir, ".kamal", "secrets"), r.secretsFile)
+}
+
+func writePrivate(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+// release runs the release hook in a one-off container of the new image,
+// with the app's environment and volumes, before any traffic moves.
+func (r *run) release(hook string) string {
+	envFile := filepath.Join(r.kamalDir, "release.env")
+	var b strings.Builder
+	keys := make([]string, 0, len(r.appEnv))
+	for k := range r.appEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString(k + "=" + r.appEnv[k] + "\n")
+	}
+	if err := writePrivate(envFile, []byte(b.String())); err != nil {
+		return fmt.Sprintf("can't write the release hook's environment: %v", err)
+	}
+	defer os.Remove(envFile)
+
+	args := []string{"run", "--rm", "--name", r.p.Name + "-release-" + r.sha[:7], "--network", "kamal", "--env-file", envFile}
+	for _, v := range kamal.AppVolumes(r.p) {
+		args = append(args, "-v", v)
+	}
+	args = append(args, r.image, "sh", "-c", hook)
+	code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, args...)
+	if err != nil || code != 0 {
+		return fmt.Sprintf("release hook failed (exit %d%s); the old version keeps serving", code, errText(err))
+	}
+	return ""
+}
+
+// kamal runs Kamal in its container on the host network, with the generated
+// files, the Docker socket, the houston user's SSH key, and the secrets in
+// its environment (never its arguments).
+func (r *run) kamal(args ...string) (int, error) {
+	full := []string{"run", "--rm", "--name", "houston-kamal-" + r.p.Name, "--network", "host",
+		"-v", r.kamalDir + ":/workdir", "-v", "/var/run/docker.sock:/var/run/docker.sock", "-v", r.o.SSHDir + ":/ssh:ro"}
+	full = append(full, r.kamalArgs...)
+	full = append(full, KamalImage)
+	full = append(full, args...)
+	return r.d.Docker.Stream(r.ctx, r.dir, r.kamalEnv, r.report, full...)
+}
+
+func (r *run) docker(failure string, args ...string) string {
+	code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, args...)
+	if err != nil || code != 0 {
+		return fmt.Sprintf("%s (exit %d%s)", failure, code, errText(err))
+	}
+	return ""
+}
+
+func (r *run) fail(msg string) int {
+	r.report.logf("NO-GO: %s\n", msg)
+	r.report.finish("no_go", msg)
+	fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
+	return exitFailure
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return ": " + err.Error()
+}
+
+// reporter tees step output to the terminal and the deploy's log in Mission
+// Control, sent with each step and at the end.
+type reporter struct {
+	ctx     context.Context
+	mission Mission
+	deploy  mission.Deploy
+	out     io.Writer
+	buf     strings.Builder
+}
+
+// A log chunk may be at most 256 KiB (Deploy::CHUNK_CAP); stay well under.
+const chunkSize = 200 << 10
+
+func (r *reporter) Write(p []byte) (int, error) {
+	r.out.Write(p)
+	r.buf.Write(p)
+	return len(p), nil
+}
+
+func (r *reporter) logf(format string, args ...any) { fmt.Fprintf(r, format, args...) }
+
+func (r *reporter) step(name string) { r.send(mission.Progress{Step: name}) }
+
+func (r *reporter) finish(status, msg string) {
+	if len(msg) > 1000 {
+		msg = msg[:1000]
+	}
+	r.send(mission.Progress{Status: status, Error: msg})
+}
+
+// send attaches the log written since the last report, in chunks.
+func (r *reporter) send(p mission.Progress) {
+	log := r.buf.String()
+	r.buf.Reset()
+	for len(log) > chunkSize {
+		r.mission.Report(r.ctx, r.deploy, mission.Progress{Log: log[:chunkSize]})
+		log = log[chunkSize:]
+	}
+	p.Log = log
+	r.mission.Report(r.ctx, r.deploy, p)
+}

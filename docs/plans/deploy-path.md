@@ -29,14 +29,12 @@ On a Houston server, `houston deploy` in a checkout of a project takes it from `
 1. **Kamal config from compose, proven on a server** (done).
 2. **Mission Control's local API: auth, sync, secrets.** (Split from deploy records, which would push one batch well past ~12 rows.)
 3. **Deploy records:** numbering, one in flight per project, a deploy token for ownership, heartbeat and stale takeover, capped log.
-4. **`houston deploy`:**
-   - ref vs deploy rule, sync, secrets (`CarrierValue`), build with `--label service=<name>` and push
-   - accessories (boot; reboot on changed config), release hook, `kamal deploy --skip-push --version <sha>`, post_deploy, report
-   - stale Kamal lock released only on takeover
-   - the installer installs the CLI and writes the runner token
-5. **Mission Control pages:** project detail (facts, write-only secrets with Generate, deploy history), the deploy page (steps, log), and projects on the flight board.
-6. **Real run on svnmns.com:**
-   - equip and a Postgres fixture on an OrbStack VM, at `<name>.svnmns.com` through the tunnel
+4. **`houston deploy`: the flow.** Ref vs deploy rule, sync, start, secrets, build and push, accessories, release hook, Kamal deploy, post_deploy, report; every failure exit.
+5. **`houston deploy` under pressure:** taken over mid-run (stop), an overall deadline (the stuck-alive home from Batch 3), heartbeat and chunked log streaming, and accessory config drift (a label with the accessory's config hash; reboot when it differs, spike S10).
+6. **The installer and an end-to-end deploy on a VM:** git, the `houston` CLI, the runner token, and the Kamal image on the server; then `houston deploy` of the spike fixture through a real Mission Control.
+7. **Mission Control pages:** project detail (facts, write-only secrets with Generate, deploy history), the deploy page (steps, log), and projects on the flight board.
+8. **Real run on svnmns.com:**
+   - equip and a Postgres fixture at `<name>.svnmns.com` through the tunnel
    - a zero-downtime redeploy
    - a failed release and a failed health check leave the old version serving (NO-GO)
    - cleanup
@@ -288,6 +286,69 @@ Stuck-alive: Batch 4's deadline in houston deploy
 - **Mutations, each caught:** any token owns the deploy (row 6); finished or taken-over deploys still writable (rows 8, 9); a live deploy taken over (row 3); no log cap (row 10).
 - **Checked, not assumed:** Rails 8.1's SQLite adapter uses `BEGIN IMMEDIATE` by default (`sqlite3_adapter.rb:162`), so `Deploy.start!`'s check-then-insert is serialized. The partial unique index (row 5) is the backstop.
 - The log is appended in SQL (`log = log || ?`), with the size read via `length(CAST(log AS BLOB))`, so a 4 MiB log isn't loaded on every chunk.
+
+## Batch 4: `houston deploy`, the flow
+
+### Design (short)
+- **`internal/mission`:** a small client for the local API: `Sync`, `Secret`, `StartDeploy`, `Report`.
+  - Base URL: `HOUSTON_URL`, default `http://127.0.0.1:3000`.
+  - Token: `HOUSTON_TOKEN`, else `~/.config/houston/runner-token`, which the installer writes in Batch 6.
+- **`internal/deploy`:** `Run(ctx, Options, Deps) int`; the CLI command `houston deploy [--ref <ref>]` wires it up. Its dependencies are interfaces (docker, git, the mission client), so the whole flow is tested with fakes and an `httptest` Mission Control.
+- **Docker streaming:** `docker.Runner` gains `Stream(ctx, dir, env, out, args...)`, so each step's output reaches both the terminal and the deploy's log.
+- **Steps, in order** (each is a `step` in Mission Control):
+  1. **Check** (no Mission Control call, no docker):
+     - the compose file loads
+     - the worktree is clean (`git status --porcelain`, `.houston/` ignores itself)
+     - the ref (`--ref`, else the current branch) resolves to `HEAD`
+     - the deploy rule allows the ref: `commit` → `refs/heads/<branch>`; `tag` → `refs/tags/<t>` with `t` matching the glob
+     - anything else exits 2
+  2. **Sync:** HOLD → print the missing names, exit 1, and no deploy is started.
+  3. **Start:** a 409 exits 1 with "deploy #N is in flight". `took_over` → `kamal lock release --version <sha>` first (spike S9).
+  4. **Secrets:**
+     - `kamal.ResolveSecrets(p, lookup)` fetches each referenced secret variable (a 404 is unset) and resolves composites with compose's own substitution plus the service hosts
+     - each value goes through `kamal.CarrierValue` into `HOUSTON_S_<NAME>` in the environment of the Kamal container's `docker` process, never in its arguments
+     - an unresolvable or uncarriable value → `no_go` before anything is built
+  5. **Build:** `docker build --target production --label service=<name> -t 127.0.0.1:5000/<name>:<sha> -f <dockerfile> <context>` (the app service's `build`), then `docker push`.
+  6. **Kamal files:** `.houston/kamal/config/deploy.yml` and `.houston/kamal/.kamal/secrets` from `kamal.Config` / `SecretsFile` (directory 0700, files 0600).
+  7. **Accessories:** `kamal accessory boot all --version <sha>` (skips existing containers).
+  8. **Release** (if `hooks.release`): `docker run --rm --name <name>-release-<sha7> --network kamal --env-file <0600 file> -v <volumes> <image> sh -c <cmd>`.
+     - The env file is `kamal.AppEnv(p, values)`: exactly the app's environment.
+     - It's deleted afterwards.
+     - A failure → `no_go` "release hook failed (exit N)", and Kamal never runs.
+  9. **Deploy:** `kamal deploy --skip-push --version <sha>`. A failure → `no_go`; Kamal leaves the old version serving.
+  10. **post_deploy** (if set): `docker exec <name>-web-<sha> sh -c <cmd>`. A failure is logged, and the deploy is still GO.
+  11. **Report** `go`.
+- **The Kamal container:** `docker run --rm --name houston-kamal-<name> --network host -v <dir>/.houston/kamal:/workdir -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.ssh:/ssh:ro -e HOUSTON_S_… ghcr.io/basecamp/kamal:v2.12.0 <args>`.
+- **Secret values never** appear in a command's arguments or in the log sent to Mission Control.
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Happy path: sync → start → build (label, target, tag) → push → accessory boot → release → kamal deploy (`--skip-push --version <sha>`, the Kamal container's mounts) → post_deploy → report `go`; generated files 0600 in a 0700 directory | `internal/deploy/deploy_test.go` `TestDeployHappyPath` | Contract |
+| 2 | Dirty worktree; a ref the rule doesn't allow (branch, tag glob); a ref not at `HEAD` → exit 2, no Mission Control request, no docker | `TestDeployChecksBeforeAnything` (table) | Preconditions |
+| 3 | Sync HOLD → exit 1 naming the missing variables; no deploy started, nothing built | `TestDeployHoldsForMissingSecrets` | Preconditions, Signals |
+| 4 | Start 409 → exit 1 "deploy #N is in flight"; nothing built | `TestDeployWhileAnotherIsInFlight` | At-least-once |
+| 5 | `took_over` → `kamal lock release --version <sha>` before any other Kamal command | `TestDeployAfterTakeoverReleasesKamalsLock` | Crash & repair |
+| 6 | Secrets reach Kamal only as `HOUSTON_S_<NAME>` env of the docker process (carrier-escaped); composite resolved; no value in any argument or reported log | `TestDeploySecretsTravelAsEnvironmentOnly` | Contract, Signals |
+| 7 | Release hook exits 3 → `no_go` "release hook failed (exit 3)"; no `kamal deploy` | `TestDeployStopsWhenTheReleaseHookFails` | Crash & repair |
+| 8 | `kamal deploy` fails → `no_go`; the report says the old version keeps serving | `TestDeployReportsAFailedKamalDeploy` | Signals |
+| 9 | post_deploy fails → logged, report `go` | `TestDeployPostDeployFailureIsOnlyLogged` | Signals |
+| 10 | No token anywhere → exit 1 naming `HOUSTON_TOKEN` and the file; a 401 → exit 1 "the runner token was refused" | `TestDeployNeedsTheRunnerToken` | Contract, Authz |
+| 11 | `ResolveSecrets`: an exact variable shared, composites resolved with hosts, optional unset → "", `${X:?msg}` unset → an error naming X | `internal/kamal` `TestResolveSecrets` | Contract |
+| 12 | `AppEnv` = the clear env plus each secret key's resolved value (aliases followed) | `internal/kamal` `TestAppEnv` | Contract, Parity |
+
+### Done (Batch 4)
+- **Red → green:**
+  - rows 11–12 (`TestResolveSecrets`, `TestAppEnv`, plus `AppVolumes` in the same test)
+  - the Mission Control client's contract (`internal/mission`: `TestClientTalksToMissionControl`, `TestClientErrors`, `TestFromEnvironment`), written against the Rails API's exact JSON
+  - rows 1–10 (`internal/deploy`, plus `internal/cli` `TestDeployNeedsTheRunnerToken`)
+  - The whole Go suite is green, and `go vet` is clean.
+- **Found by the tests:**
+  - compose-go uses a mapping's value even when the mapping says "unset", so `ResolveSecrets` returns "" for anything Mission Control has no value for.
+  - My first leak check for a refused secret (`back\slash`) searched for "slash", which the (correct) message "a backslash" also contains. It now searches for the value itself.
+- **Mutations, each caught:** dirty worktree allowed; release failure ignored; secrets passed in `docker run` arguments; a post_deploy failure failing the deploy; no lock release after a takeover; no carrier escaping.
+  - The first attempt at the dirty-worktree mutation didn't compile (an unused variable) and falsely read as "0 failing". Mutations must compile to count.
+- **`docker.Runner.Stream`** tees a command's output to the terminal and the deploy log. **`houston deploy [--ref]`** is wired into the CLI.
 
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:

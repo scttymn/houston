@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -51,6 +53,10 @@ func (f *fakeDocker) Run(dir string, env []string, args ...string) (int, error) 
 		return f.runResult(args)
 	}
 	return f.runExit, nil
+}
+
+func (f *fakeDocker) Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error) {
+	return f.Run(dir, env, args...)
 }
 
 func (f *fakeDocker) calls() int { return len(f.outputs) + len(f.runs) }

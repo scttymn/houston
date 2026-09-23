@@ -2,8 +2,10 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -20,6 +22,10 @@ type Runner interface {
 	// Run runs docker with args in dir, attached to Houston's stdio, and
 	// returns its exit code. A nil env inherits Houston's environment.
 	Run(dir string, env []string, args ...string) (int, error)
+	// Stream runs docker with args in dir, its stdout and stderr both written
+	// to out, and returns its exit code. Cancelling ctx kills it. A nil env
+	// inherits Houston's environment.
+	Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error)
 }
 
 // New returns a Runner for the real docker CLI.
@@ -54,8 +60,12 @@ func (cliRunner) Run(dir string, env []string, args ...string) (int, error) {
 	cmd.Dir = dir
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
+	return exitCode(cmd.Run())
+}
 
+// exitCode turns a finished command's error into its exit code; 128+n for a
+// signal, as a shell reports it.
+func exitCode(err error) (int, error) {
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() {
@@ -67,4 +77,16 @@ func (cliRunner) Run(dir string, env []string, args ...string) (int, error) {
 		return 1, err
 	}
 	return 0, nil
+}
+
+func (cliRunner) Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.Stdout, cmd.Stderr = out, out
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return 1, ctx.Err()
+	}
+	return exitCode(err)
 }

@@ -76,6 +76,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	root.AddCommand(command("init", "Set up this Rails app for Houston (compose.yml, Dockerfile stages, .env)", func() int {
 		return runInit(file, stdin, stdout, stderr)
 	}))
+	var ref string
+	deployCmd := command("deploy", "Deploy this checkout on a Houston server (run there, as the houston user)", func() int {
+		return runDeploy(file, ref, stdout, stderr, d)
+	})
+	deployCmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
+	root.AddCommand(deployCmd)
 	logs := command("logs", "Show the app's logs", func() int {
 		return runLogs(file, follow, stderr, d)
 	})
