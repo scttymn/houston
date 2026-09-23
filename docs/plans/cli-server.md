@@ -130,6 +130,35 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 - **A test gap closed by a mutation:** "a chunk cut mid-character" first survived. The fixture's 256 KiB boundary landed on a character boundary by luck (all two-byte `é` from an even offset). With one ASCII byte in front, the boundary falls inside an `é`, and both boundary rules are now caught.
 - The API returns `log_next`, the byte to ask from next, so a client never re-reads or skips a byte, even when a chunk is trimmed to whole characters.
 
+## Batch 3: Secrets
+
+### Design (short)
+- **API** (`/api/v1/projects/:name/secrets`):
+  - `GET` → `[{name, required, set, updated_at}]`, names only
+  - `PUT /:key {value}` → 200 `{name, set}`; blank or uncarriable → 422 with the model's message; a key the file doesn't reference → 404
+  - `DELETE /:key` → 200
+  - `POST /:key/generate` → 200 `{name, set}`
+  - The value never appears in any response, and `value` is in the log filter (build step 4's review).
+- **CLI:**
+  - `houston secrets list [--project]`
+  - `houston secrets set NAME [--project]`: the value comes from stdin, never argv. On a terminal it's a hidden prompt; on a pipe it's all of stdin, minus one trailing newline.
+  - `houston secrets unset NAME`
+  - `houston secrets generate NAME`
+  - Nothing prints a value.
+
+### AC ↔ test map (Batch 3)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | List: names, required, set, never a value | `integration/api_v1_secrets_test.rb` `test "listing"` | Authz |
+| 2 | Set: stored (encrypted); the response has no value; a backslash → 422 with the base64 hint; blank → 422; unreferenced key → 404 | `test "setting"` | Contract |
+| 3 | Unset removes it; generate stores ≥ 43 characters, not in the response | `test "unsetting and generating"` | Contract |
+| 4 | The client and CLI: `set` reads the value from a pipe (one trailing newline dropped) and sends it as JSON; nothing prints it; argv has no value; `list` prints set/unset; the server's 422 message is shown and exits 1 | `internal/cli` `TestSecrets` | Contract, Signals |
+
+### Done (Batch 3)
+- **Red:** 3 Rails tests and the Go test failed. **Green:** Mission Control 144 runs and the Go suite; rubocop and gofmt are clean.
+- **Mutations, each caught:** the value in the API's response (2 failures); any key settable; the CLI printing the value.
+- A value given as an argument (`secrets set NAME value`) is a usage error, so values never land in shell history or `ps`.
+
 ### Decisions (from you)
 1. **`console --server` is LAN-only for now** ("LAN-only is fine for now"). Reaching it through `cloudflared access ssh` from anywhere else is a later addition.
 

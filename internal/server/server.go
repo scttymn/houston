@@ -265,3 +265,39 @@ func (cl *Client) Raw(ctx context.Context, path string) ([]byte, error) {
 	}
 	return body, nil
 }
+
+func (cl *Client) Secrets(ctx context.Context, project string) ([]SecretSummary, error) {
+	var body struct {
+		Secrets []SecretSummary `json:"secrets"`
+	}
+	return body.Secrets, cl.getJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/secrets", &body)
+}
+
+// SetSecret sends a value; Mission Control never sends one back.
+func (cl *Client) SetSecret(ctx context.Context, project, key, value string) error {
+	return cl.send(ctx, http.MethodPut, secretPath(project, key), map[string]string{"value": value})
+}
+
+func (cl *Client) UnsetSecret(ctx context.Context, project, key string) error {
+	return cl.send(ctx, http.MethodDelete, secretPath(project, key), nil)
+}
+
+// GenerateSecret stores a random value nobody sees.
+func (cl *Client) GenerateSecret(ctx context.Context, project, key string) error {
+	return cl.send(ctx, http.MethodPost, secretPath(project, key)+"/generate", nil)
+}
+
+func secretPath(project, key string) string {
+	return "/api/v1/projects/" + url.PathEscape(project) + "/secrets/" + url.PathEscape(key)
+}
+
+func (cl *Client) send(ctx context.Context, method, path string, payload any) error {
+	status, body, err := cl.do(ctx, method, path, payload)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("%s", message(body))
+	}
+	return nil
+}

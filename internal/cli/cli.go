@@ -133,6 +133,30 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	show.Flags().BoolVar(&showJSON, "json", false, "print the API's JSON")
 	deploys.AddCommand(show)
 	root.AddCommand(status, deploys)
+
+	secrets := &cobra.Command{Use: "secrets", Short: "A project's secrets on the server (write-only)"}
+	secrets.PersistentFlags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	oneKey := func(use, short string, run func(key string) int) *cobra.Command {
+		return &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+			code = run(args[0])
+			return nil
+		}}
+	}
+	secrets.AddCommand(
+		command("list", "Every variable compose.yml references, and whether it has a value", func() int {
+			return runSecretsList(file, projectFlag, stdout, stderr)
+		}),
+		oneKey("set NAME", "Set NAME from stdin (a hidden prompt on a terminal); never from the command line", func(key string) int {
+			return runSecretsSet(file, projectFlag, key, stdin, stdout, stderr)
+		}),
+		oneKey("unset NAME", "Remove NAME's value", func(key string) int {
+			return runSecretsUnset(file, projectFlag, key, stdout, stderr)
+		}),
+		oneKey("generate NAME", "Set NAME to a random value nobody sees (e.g. POSTGRES_PASSWORD)", func(key string) int {
+			return runSecretsGenerate(file, projectFlag, key, stdout, stderr)
+		}),
+	)
+	root.AddCommand(secrets)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

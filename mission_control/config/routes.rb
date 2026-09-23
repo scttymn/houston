@@ -34,6 +34,9 @@ Rails.application.routes.draw do
       get "me", to: "me#show"
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show ], param: :number
+        resources :secrets, only: %i[ index update destroy ], param: :key, constraints: { key: %r{[^/]+} } do
+          post :generate, on: :member
+        end
       end
     end
   end
