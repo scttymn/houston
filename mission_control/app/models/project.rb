@@ -3,6 +3,7 @@
 class Project < ApplicationRecord
   has_many :hosts, class_name: "ProjectHost", dependent: :delete_all
   has_many :secrets, dependent: :delete_all
+  has_many :deploys, dependent: :delete_all
 
   # <name>.<base>, the app's default host.
   def host(installation = Installation.current)

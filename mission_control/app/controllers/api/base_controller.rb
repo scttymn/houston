@@ -27,9 +27,9 @@ class Api::BaseController < ActionController::API
 
     # The request body as JSON, read with a size limit. Renders and returns
     # nil when it's too large or not JSON.
-    def json_body
-      body = request.body.read(MAX_BODY + 1).to_s
-      return render(json: { error: "the request is larger than #{MAX_BODY / 1.kilobyte} KiB" }, status: :content_too_large) && nil if body.bytesize > MAX_BODY
+    def json_body(limit: MAX_BODY)
+      body = request.body.read(limit + 1).to_s
+      return render(json: { error: "the request is larger than #{limit / 1.kilobyte} KiB" }, status: :content_too_large) && nil if body.bytesize > limit
       JSON.parse(body)
     rescue JSON::ParserError
       render(json: { error: "the request isn't JSON" }, status: :bad_request) && nil

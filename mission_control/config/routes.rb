@@ -17,6 +17,8 @@ Rails.application.routes.draw do
   namespace :api do
     post "projects/sync", to: "projects#sync"
     get "projects/:name/secrets/:key", to: "secrets#show", constraints: { key: %r{[^/]+} }
+    post "projects/:name/deploys", to: "deploys#create"
+    patch "deploys/:id", to: "deploys#update"
   end
 
   root "projects#index"

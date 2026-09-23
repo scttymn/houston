@@ -10,7 +10,26 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_080000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_090000) do
+  create_table "deploys", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "error"
+    t.datetime "finished_at"
+    t.datetime "heartbeat_at", null: false
+    t.text "log", default: "", null: false
+    t.integer "number", null: false
+    t.integer "project_id", null: false
+    t.string "ref", null: false
+    t.string "sha", null: false
+    t.string "status", default: "in_flight", null: false
+    t.string "step"
+    t.string "token_digest", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id", "number"], name: "index_deploys_on_project_id_and_number", unique: true
+    t.index ["project_id"], name: "index_deploys_on_project_id"
+    t.index ["project_id"], name: "index_deploys_one_in_flight", unique: true, where: "status = 'in_flight'"
+  end
+
   create_table "installations", force: :cascade do |t|
     t.string "base_domain"
     t.string "cloudflare_account_id"
@@ -95,6 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_080000) do
     t.index ["email_address"], name: "index_users_on_email_address", unique: true
   end
 
+  add_foreign_key "deploys", "projects", on_delete: :cascade
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
   add_foreign_key "secrets", "projects", on_delete: :cascade
   add_foreign_key "sessions", "users"

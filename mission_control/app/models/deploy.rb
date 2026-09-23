@@ -1,0 +1,84 @@
+# One run of houston deploy for a project, numbered per project. The process
+# that started it holds its token; only that process may report progress or
+# finish it, and only while it's still in flight. See the ownership template
+# in docs/plans/deploy-path.md, Batch 3.
+class Deploy < ApplicationRecord
+  class Busy < StandardError
+    attr_reader :deploy
+
+    def initialize(deploy)
+      @deploy = deploy
+      super("deploy ##{deploy.number} is in flight (last heard from #{deploy.heartbeat_at.utc.iso8601})")
+    end
+  end
+
+  STATUSES = %w[in_flight go no_go].freeze
+  # houston deploy reports at least every 30 s; after this long without a
+  # word, the next deploy may take over.
+  STALE_AFTER = 2.minutes
+  LOG_CAP = 4.megabytes
+  CHUNK_CAP = 256.kilobytes
+  TRUNCATED = "\n[log truncated: Houston keeps the first 4 MiB of a deploy's log]\n".freeze
+
+  belongs_to :project
+
+  validates :sha, format: { with: /\A[0-9a-f]{40}\z/, message: "must be a full commit SHA (40 lowercase hex characters)" }
+  validates :ref, presence: true, length: { maximum: 255 }
+  validates :status, inclusion: { in: STATUSES }
+  validates :step, length: { maximum: 100 }
+  validates :error, length: { maximum: 1000 }
+
+  scope :in_flight, -> { where(status: "in_flight") }
+
+  def self.digest(token) = OpenSSL::Digest::SHA256.hexdigest(token)
+
+  # Starts the project's next deploy. A silent in-flight deploy (no word for
+  # STALE_AFTER) is finished as abandoned in the same transaction; a live
+  # one raises Busy. Returns [deploy, token, number taken over or nil].
+  def self.start!(project, sha:, ref:)
+    token = SecureRandom.urlsafe_base64(32)
+    transaction do
+      took_over = nil
+      if (current = project.deploys.in_flight.first)
+        raise Busy, current if current.heartbeat_at > STALE_AFTER.ago
+        current.update!(status: "no_go", finished_at: Time.current,
+                        error: "abandoned: no word from houston deploy since #{current.heartbeat_at.utc.iso8601}")
+        took_over = current.number
+      end
+      number = (project.deploys.maximum(:number) || 0) + 1
+      deploy = project.deploys.create!(number:, sha:, ref:, token_digest: digest(token), heartbeat_at: Time.current)
+      [ deploy, token, took_over ]
+    end
+  end
+
+  def owned_by?(token)
+    token.present? && ActiveSupport::SecurityUtils.secure_compare(self.class.digest(token), token_digest)
+  end
+
+  def in_flight? = status == "in_flight"
+
+  # Applies one progress report. The caller has checked ownership inside the
+  # same transaction. The log is appended in SQL, so a 4 MiB log isn't read
+  # back on every chunk.
+  def report!(step: nil, log: nil, status: nil, error: nil)
+    self.step = step if step
+    self.error = error if error
+    if status
+      self.status = status
+      self.finished_at = Time.current
+    end
+    self.heartbeat_at = Time.current
+    save!
+    append_log(log) if log.present?
+  end
+
+  private
+    def append_log(chunk)
+      size = self.class.where(id:).pick(Arel.sql("length(CAST(log AS BLOB))")).to_i
+      return if size >= LOG_CAP
+
+      room = LOG_CAP - size
+      piece = chunk.bytesize > room ? chunk.byteslice(0, room).scrub("") + TRUNCATED : chunk
+      self.class.where(id:).update_all([ "log = log || ?", piece ])
+    end
+end

@@ -232,6 +232,63 @@ Work under the lock (same store only): project + host rows; Cloudflare is called
 - **Cut after a mutation survived:** the Ruby pre-check for container-name clashes. With it removed, row 8 still passed: the unique index raises, the sync rolls back, and the rescue names the owner. So the index is the only check, which is also what makes the race safe (row 9).
 - **Reuse:** the DNS record helpers moved from `CloudflareSetup` into `Cloudflare::Records`, shared by first-run setup and sync. All the Cloudflare setup tests pass unchanged.
 
+## Batch 3: deploy records
+
+### Design (short)
+- **`Deploy`:**
+  - `project_id`, `number` (per project), `sha` (40 hex), `ref` (≤ 255)
+  - `status` (`in_flight` | `go` | `no_go`), `step` (≤ 100), `log` (text, capped), `error` (≤ 1000)
+  - `token_digest` (SHA-256 of a random token)
+  - `heartbeat_at`, `finished_at`, timestamps
+  - Indexes: unique `[project_id, number]`, and a **partial unique index on `project_id WHERE status = 'in_flight'`**.
+- **`POST /api/projects/:name/deploys`** `{sha, ref}` → 201 `{id, number, token, took_over}`. One transaction (Rails 8.1's SQLite transactions are `BEGIN IMMEDIATE`, so this read-check-write is serialized):
+  - A fresh in-flight deploy (heartbeat within **2 minutes**) → 409 naming it.
+  - A stale one → marked `no_go` with "abandoned: no word from houston deploy since …", and returned as `took_over: <number>`. Batch 4 releases Kamal's lock only then (spike S9).
+  - Number = max + 1. The indexes back the transaction up: `RecordNotUnique` → 409.
+- **`PATCH /api/deploys/:id`** with `X-Houston-Deploy-Token` and `{step?, log?, status?, error?}`:
+  - **Ownership:** the token must match (else 403, nothing written), and the deploy must still be `in_flight` (else 409 "no longer in flight", nothing written). Both are checked in the same transaction as the write. This is the synchronous ownership proof at finalize: a process whose deploy was taken over can't append to it or finish it.
+  - Every accepted PATCH moves `heartbeat_at`.
+  - `status` `go` / `no_go` sets `finished_at`. After that, the record never changes.
+  - **Log:** a chunk > 256 KiB → 413. The total is capped at 4 MiB; the chunk that crosses it is cut and followed by one "[log truncated …]" line, and later chunks are dropped, while step and status still apply.
+- **Stuck-alive:** houston deploy heartbeats while it works, so a hung Kamal would stay IN FLIGHT forever. Named home: Batch 4, where houston deploy has an overall deadline (it stops Kamal and reports `no_go`). The deploy page (Batch 5) shows the elapsed time.
+
+### At-least-once / ownership template
+```text
+Enqueue site: POST /api/projects/:name/deploys (houston deploy; runners in build step 4)
+Exclusive claim: the in_flight row itself, one per project (IMMEDIATE transaction + partial unique index)
+Enter preconditions: no in_flight deploy for the project, or only a stale one (heartbeat older than 2 min)
+Duplicate delivery: two houston deploys at once → one 201, one 409; the effect (a Kamal deploy) runs once
+Process kill mid-work: heartbeat stops → the next deploy takes over after 2 min and releases Kamal's lock
+Re-check before finalize: PATCH checks token + in_flight in the same transaction as the write
+TOCTOU: A is taken over while still running → A's next PATCH gets 409, and A stops (Batch 4)
+Repair when finalize is refused: nothing to repair; the new owner's deploy is the record
+Replacement only after release: takeover finalizes the old row (no_go) in the same transaction that creates the new one
+Ownership token: random 32 bytes, SHA-256 digest stored, compared in constant time
+Stuck-alive: Batch 4's deadline in houston deploy
+```
+
+### AC ↔ test map (Batch 3), `mission_control/test/…`
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Create → 201, number 1, a token (≥ 43 chars), a digest not equal to the token; the next deploy after it finishes is number 2 | `integration/api_deploys_test.rb` `test "a deploy gets the next number and a token"` | Contract |
+| 2 | Unknown project → 404; sha not 40 lowercase hex, or a blank or 256-char ref → 422; no row | `test "a deploy needs a synced project and a real sha"` | Contract, Preconditions |
+| 3 | A second deploy while the first is fresh → 409 naming #1, no row | `test "one deploy in flight per project"` | Preconditions, At-least-once |
+| 4 | First silent for 3 min → the second is created; the first is `no_go` with "abandoned", `finished_at` set; `took_over: 1` | `test "a silent deploy is taken over"` | Crash & repair |
+| 5 | Indexes: a second `in_flight` row for a project, or a duplicate number, raises `RecordNotUnique`; `in_flight` rows for different projects are fine | `models/deploy_test.rb` `test "the database allows one deploy in flight and unique numbers"` | Concurrency |
+| 6 | PATCH with no/wrong token or another deploy's token → 403, no change; with `Cf-Ray` → 404 | `test "only the deploy's owner reports on it"` | Authz |
+| 7 | PATCH step and two log chunks → appended in order; `heartbeat_at` moves | `test "progress appends to the log"` | Contract |
+| 8 | PATCH `status: go` → finished; a later PATCH → 409 and nothing changes (log, step, status) | `test "a finished deploy doesn't change"` | Preconditions |
+| 9 | After a takeover, the old deploy's PATCH with its own token → 409 "taken over", nothing written | `test "a taken-over deploy can't finish"` | At-least-once & ownership |
+| 10 | Chunk > 256 KiB → 413; the total over 4 MiB is cut, with one marker; status still applies after the cap | `test "the log is capped"` | Scale |
+| 11 | Invalid status (`done`), a step > 100 chars, or an error > 1000 → 422, no change | `test "progress is validated"` | Contract |
+
+### Done (Batch 3)
+- **Red:** all 11 rows failed for the missing model and endpoints. **Green:** 86 runs, 0 failures. Rubocop is clean on the 10 touched files, and the migration runs down and up.
+- **Found on the way:** the API's 64 KiB body limit would have refused a 250 KiB log chunk. `json_body` now takes a per-endpoint limit (deploy PATCH: 256 KiB + 4 KiB).
+- **Mutations, each caught:** any token owns the deploy (row 6); finished or taken-over deploys still writable (rows 8, 9); a live deploy taken over (row 3); no log cap (row 10).
+- **Checked, not assumed:** Rails 8.1's SQLite adapter uses `BEGIN IMMEDIATE` by default (`sqlite3_adapter.rb:162`), so `Deploy.start!`'s check-then-insert is serialized. The partial unique index (row 5) is the backstop.
+- The log is appended in SQL (`log = log || ?`), with the size read via `length(CAST(log AS BLOB))`, so a 4 MiB log isn't loaded on every chunk.
+
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:
 - **What "localhost only" means for the runner's secrets route.** Mission Control runs in a container, so its callers show up as Docker addresses, and cloudflared sits on the same network as the runners.
