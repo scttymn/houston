@@ -1,0 +1,15 @@
+name: NAME_SET_BY_TEST
+services:
+  app:
+    build: .
+    ports: ["8080"]
+    environment:
+      DB_URL: http://${DB_HOST:-db}:8080/
+    volumes:
+      - .:/app
+    depends_on: [db]
+  db:
+    image: busybox:1.36
+    command: ["sh", "-c", "mkdir -p /www && echo db-ok > /www/index.html && exec httpd -f -p 8080 -h /www"]
+x-houston:
+  health: /up
