@@ -92,6 +92,20 @@ type SyncRequest struct {
 	Health     string     `json:"health"`
 	Port       int        `json:"port"`
 	DeployRule DeployRule `json:"deploy_rule"`
+	Volumes    []Volume   `json:"volumes,omitempty"`
+	Databases  []Database `json:"databases,omitempty"`
+}
+
+// Volume is one of the app's named volumes: what a backup copies as files.
+type Volume struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// Database is a Postgres service: a backup dumps its databases.
+type Database struct {
+	Service string `json:"service"`
+	Image   string `json:"image"`
 }
 
 type SyncResult struct {

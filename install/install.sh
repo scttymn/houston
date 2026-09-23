@@ -188,6 +188,7 @@ services:
       SOLID_QUEUE_IN_PUMA: "1"
       HOUSTON_TUNNEL_TOKEN_PATH: /houston/tunnel-token
       HOUSTON_RUNNERS: "$RUNNERS"
+      HOUSTON_TOOLS_IMAGE: $IMAGE
       # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
       RAILS_MAX_THREADS: "8"
     ports:

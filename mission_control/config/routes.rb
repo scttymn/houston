@@ -64,6 +64,7 @@ Rails.application.routes.draw do
       post :rotate_webhook
     end
     resources :deploys, only: :show, param: :number
+    resources :backups, only: :create, controller: "project_backups"
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end

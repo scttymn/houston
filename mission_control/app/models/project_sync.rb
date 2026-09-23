@@ -10,6 +10,9 @@ class ProjectSync
   SERVICE = /\A[a-zA-Z0-9][a-zA-Z0-9_.-]*\z/
   VARIABLE = /\A[A-Za-z_][A-Za-z0-9_]*\z/
   LABEL = /\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\z/
+  # A container path for docker -v: absolute, and no ":" (the separator).
+  MOUNT_PATH = %r{\A/[^:\0\n]{0,4095}\z}
+  MAX_VOLUMES = 50
 
   attr_reader :errors, :project
 
@@ -35,6 +38,8 @@ class ProjectSync
       @project.update!(app_service: @payload["app_service"], services: @payload["services"], domains: @payload["domains"],
                        variables: @payload["variables"].map { |v| { "name" => v["name"], "required" => v["required"] == true } },
                        health: @payload["health"], port: @payload["port"], deploy_rule: @payload["deploy_rule"] || {},
+                       volumes: @payload["volumes"].to_a.map { |v| v.slice("name", "path") },
+                       databases: @payload["databases"].to_a.map { |d| d.slice("service", "image") },
                        synced_at: Time.current, **link.to_h)
       claim_hosts
     end
@@ -112,6 +117,18 @@ class ProjectSync
 
       rule = @payload["deploy_rule"]
       errors["deploy_rule"] << "must be an object" unless rule.nil? || rule.is_a?(Hash)
+
+      # What a backup holds (build step 5). Absent means none: an older CLI.
+      volumes = @payload.fetch("volumes", [])
+      unless volumes.is_a?(Array) && volumes.size <= MAX_VOLUMES &&
+             volumes.all? { |v| v.is_a?(Hash) && v["name"].is_a?(String) && v["name"].match?(SERVICE) && v["path"].is_a?(String) && v["path"].match?(MOUNT_PATH) }
+        errors["volumes"] << "must be a list of at most #{MAX_VOLUMES} {name, path} with absolute paths"
+      end
+
+      databases = @payload.fetch("databases", [])
+      unless databases.is_a?(Array) && databases.all? { |d| d.is_a?(Hash) && services.is_a?(Array) && services.include?(d["service"]) && d["image"].is_a?(String) && d["image"].present? }
+        errors["databases"] << "must be a list of {service, image} naming the project's services"
+      end
     end
 
     def domain?(d)

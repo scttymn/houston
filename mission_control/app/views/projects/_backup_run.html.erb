@@ -1,0 +1,18 @@
+<%# The project's latest backup run, next to Back up now. %>
+<p class="backup-now__last" data-backup="<%= run&.status %>">
+  <% case run&.stale? ? "stale" : run&.status %>
+  <% when nil %>
+    <span class="muted">No backups yet.</span>
+  <% when "queued", "running" %>
+    <%= state_chip(:in_flight) %> Backing up… <span class="muted">(started <%= l(run.started_at || run.created_at, format: :short) %>)</span>
+  <% when "go" %>
+    <%= state_chip(:go) %> <%= l(run.finished_at, format: :short) %> · <span class="mono"><%= run.snapshot_id.first(8) %></span> · <%= number_to_human_size(run.bytes) %>
+    <% if run.error.present? %><small><%= run.error %></small><% end %>
+  <% when "skipped" %>
+    <span class="muted">Last backup: <%= run.error %>, as of its last deploy.</span>
+  <% when "stale" %>
+    <%= state_chip(:no_go) %> <%= run.stale_error %>
+  <% else %>
+    <%= state_chip(:no_go) %> <%= l(run.finished_at || run.updated_at, format: :short) %> · <%= run.error %>
+  <% end %>
+</p>

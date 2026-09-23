@@ -4,6 +4,7 @@ class Project < ApplicationRecord
   has_many :hosts, class_name: "ProjectHost", dependent: :delete_all
   has_many :secrets, dependent: :delete_all
   has_many :deploys, dependent: :delete_all
+  has_many :backup_runs, dependent: :delete_all
 
   encrypts :deploy_key_private, :webhook_secret
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_150000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -19,6 +19,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_140000) do
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_api_tokens_on_name", unique: true
     t.index ["token_digest"], name: "index_api_tokens_on_token_digest", unique: true
+  end
+
+  create_table "backup_runs", force: :cascade do |t|
+    t.bigint "bytes"
+    t.datetime "created_at", null: false
+    t.integer "deploy_number"
+    t.string "error", limit: 4000
+    t.datetime "finished_at"
+    t.json "found", default: {}, null: false
+    t.datetime "heartbeat_at", null: false
+    t.string "kind", null: false
+    t.integer "location_id", null: false
+    t.text "log"
+    t.integer "project_id", null: false
+    t.string "reason", null: false
+    t.string "sha"
+    t.string "snapshot_id"
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.string "token_digest", default: "", null: false
+    t.datetime "updated_at", null: false
+    t.index ["location_id"], name: "index_backup_runs_on_location_id"
+    t.index ["project_id", "created_at"], name: "index_backup_runs_on_project_id_and_created_at"
+    t.index ["project_id"], name: "index_backup_runs_on_project_id"
+    t.index ["project_id"], name: "index_backup_runs_one_queued_manual", unique: true, where: "status = 'queued' AND reason = 'manual'"
+    t.index ["project_id"], name: "index_backup_runs_one_running", unique: true, where: "status = 'running'"
   end
 
   create_table "deploys", force: :cascade do |t|
@@ -69,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_140000) do
     t.string "branch"
     t.string "compose_path"
     t.datetime "created_at", null: false
+    t.json "databases", default: [], null: false
     t.text "deploy_key_private"
     t.string "deploy_key_public"
     t.json "deploy_rule", default: {}, null: false
@@ -85,6 +112,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_140000) do
     t.datetime "synced_at"
     t.datetime "updated_at", null: false
     t.json "variables", default: [], null: false
+    t.json "volumes", default: [], null: false
     t.text "webhook_secret"
     t.datetime "webhook_verified_at"
     t.index ["name"], name: "index_projects_on_name", unique: true
@@ -157,6 +185,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_140000) do
     t.index ["email_address"], name: "index_users_on_email_address", unique: true
   end
 
+  add_foreign_key "backup_runs", "projects"
+  add_foreign_key "backup_runs", "storage_locations", column: "location_id"
   add_foreign_key "deploys", "projects", on_delete: :cascade
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
   add_foreign_key "secrets", "projects", on_delete: :cascade

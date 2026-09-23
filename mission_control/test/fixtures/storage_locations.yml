@@ -2,7 +2,9 @@
 unas:
   name: unas-nfs
   kind: nfs
-  settings: <%= { nfs_server: "10.0.1.20", nfs_export: "/volume1/houston" }.to_json %>
+  # Quoted: unquoted JSON is a YAML mapping, and the fixture would store YAML.
+  settings: '<%= { server: "10.0.1.20", export: "/volume1/houston" }.to_json %>'
+
   verified_at: <%= Time.current %>
   acknowledged_at: <%= Time.current %>
   default: true

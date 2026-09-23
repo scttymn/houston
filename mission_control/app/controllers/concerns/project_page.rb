@@ -15,5 +15,7 @@ module ProjectPage
       @missing = project.missing_secrets
       @secret_errors = secret_errors
       @hooks_route = SystemStatus.route(@installation, "hooks") if project.repo_url.present?
+      @storage = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first
+      @backup = project.backup_runs.order(:id).last
     end
 end

@@ -50,7 +50,7 @@ class Setup::StorageControllerTest < ActionDispatch::IntegrationTest
       assert_equal [
         %w[volume inspect houston-storage-unas-nfs],
         %w[volume create --driver local --opt type=nfs --opt o=addr=10.0.1.20,rw,nfsvers=4 --opt device=:/volume1/houston houston-storage-unas-nfs],
-        [ "run", "--rm", "-e", "RESTIC_PASSWORD", "-e", "RESTIC_REPOSITORY", "-v", "houston-storage-unas-nfs:/repo", RESTIC, "init" ]
+        [ "run", "--rm", "-e", "RESTIC_PASSWORD", "-e", "RESTIC_REPOSITORY", "-v", "houston-restic-cache:/root/.cache/restic", "-v", "houston-storage-unas-nfs:/repo", RESTIC, "init" ]
       ], fake.calls.map(&:args)
       assert_equal({ "RESTIC_PASSWORD" => password, "RESTIC_REPOSITORY" => "/repo" }, fake.calls.last.env)
       assert_not_includes fake.all_args.join(" "), password, "the password never goes on a command line"

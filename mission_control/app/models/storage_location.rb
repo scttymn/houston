@@ -53,15 +53,29 @@ class StorageLocation < ApplicationRecord
                       "--opt", "device=:#{settings["export"]}", volume_name)
   end
 
+  # restic's cache survives between runs (each run is a fresh container), so
+  # a run doesn't re-read the whole repository index.
+  RESTIC_CACHE = "houston-restic-cache:/root/.cache/restic"
+
   def restic(*command)
-    env = { "RESTIC_PASSWORD" => restic_password, "RESTIC_REPOSITORY" => repository }.merge(credential_env)
-    mounts = case kind
+    DockerCommand.run(*restic_args(*command), env: restic_env)
+  end
+
+  # docker run arguments for a restic command against this location. name:
+  # the container's; mounts: more -v values (what to back up).
+  def restic_args(*command, name: nil, mounts: [])
+    repo = case kind
     when "nfs" then [ "#{volume_name}:/repo" ]
     when "local" then [ "#{settings["path"]}:/repo" ]
     else []
     end
-    args = [ "run", "--rm" ] + env.keys.flat_map { |k| [ "-e", k ] } + mounts.flat_map { |m| [ "-v", m ] } + [ RESTIC_IMAGE, *command ]
-    DockerCommand.run(*args, env:)
+    [ "run", "--rm", *(name ? [ "--name", name ] : []), *restic_env.keys.flat_map { |k| [ "-e", k ] },
+      *([ RESTIC_CACHE ] + repo + mounts).flat_map { |m| [ "-v", m ] }, RESTIC_IMAGE, *command ]
+  end
+
+  # The secrets, for the docker process's environment (never argv).
+  def restic_env
+    { "RESTIC_PASSWORD" => restic_password, "RESTIC_REPOSITORY" => repository }.merge(credential_env)
   end
 
   private

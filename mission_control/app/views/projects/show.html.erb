@@ -12,10 +12,19 @@
         <% end %>
       </div>
     </div>
+    <% if @storage %>
+      <div class="backup-now">
+        <%= button_to "Back up now", project_backups_path(@project.name), class: "button button--small" %>
+        <%= render "projects/backup_run", run: @backup %>
+      </div>
+    <% end %>
   </div>
 
   <% if notice %>
     <div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div>
+  <% end %>
+  <% if alert %>
+    <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= alert %></span></div>
   <% end %>
 
   <div class="board__body">

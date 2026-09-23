@@ -1,7 +1,11 @@
 # Records docker invocations instead of running them. A responder block can
 # return a DockerCommand::Result per call (default: success, no output).
 class FakeDocker
-  Call = Data.define(:args, :env)
+  # A piped command (docker exec … | docker run -i …) is recorded as one
+  # call: from's args, "|", to's args.
+  Call = Data.define(:args, :env, :stdin, :timeout) do
+    def initialize(args:, env:, stdin: nil, timeout: nil) = super
+  end
 
   attr_reader :calls, :streams
 
@@ -19,9 +23,13 @@ class FakeDocker
     true
   end
 
-  def call(args, env)
-    @calls << Call.new(args:, env:)
+  def call(args, env, stdin: nil, timeout: nil)
+    @calls << Call.new(args:, env:, stdin:, timeout:)
     @responder&.call(args, env) || DockerCommand::Result.new(success: true, output: "")
+  end
+
+  def pipe(from, to, env, timeout: nil)
+    call(from + [ "|" ] + to, env, timeout:)
   end
 
   def all_args = calls.flat_map(&:args)
@@ -36,5 +44,5 @@ module FakeDockerHelper
     DockerCommand.runner = original
   end
 
-  def failure(output) = DockerCommand::Result.new(success: false, output:)
+  def failure(output, code: 1) = DockerCommand::Result.new(success: false, output:, code:)
 end

@@ -23,6 +23,36 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_equal %w[equip equip-db], project.hosts.pluck(:name).sort
   end
 
+  # Build step 5: what a backup holds. Absent (an older sync) is none.
+  test "sync records the data to back up" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ], databases: [ { service: "db", image: "postgres:17" } ]))
+    assert_response :success
+    project = Project.find_by!(name: "equip")
+    assert_equal [ { "name" => "storage", "path" => "/rails/storage" } ], project.volumes
+    assert_equal [ { "service" => "db", "image" => "postgres:17" } ], project.databases
+
+    sync(equip_payload(variables: optional))
+    assert_response :success
+    assert_equal [], project.reload.volumes
+    assert_equal [], project.databases
+
+    project.update!(volumes: [ { "name" => "keep", "path" => "/keep" } ])
+    {
+      "volumes" => [ { volumes: "storage" }, { volumes: [ { name: "storage", path: "rails/storage" } ] },
+                     { volumes: [ { name: "Bad Name", path: "/x" } ] }, { volumes: [ { name: "storage" } ] },
+                     { volumes: Array.new(51) { |i| { name: "v#{i}", path: "/v#{i}" } } } ],
+      "databases" => [ { databases: [ { service: "pg", image: "postgres:17" } ] }, { databases: [ { service: "db" } ] }, { databases: {} } ]
+    }.each do |field, cases|
+      cases.each do |change|
+        sync(equip_payload(**change))
+        assert_response :unprocessable_entity, change.inspect
+        assert_includes json["errors"].keys, field, "#{change.inspect}: #{json}"
+      end
+    end
+    assert_equal [ { "name" => "keep", "path" => "/keep" } ], project.reload.volumes
+  end
+
   test "sync rejects what the CLI would never send" do
     {
       "name" => [ { name: "Equip" }, { name: "admin" }, { name: "hooks" }, { name: "-x" }, { name: nil } ],
