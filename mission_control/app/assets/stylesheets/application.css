@@ -270,3 +270,4 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .domain-state--no-go, .domain-state--can-t-check { color: var(--nogo-fg); }
 .domain-state--dns-pending, .domain-state--zone-not-in-cloudflare-yet { color: var(--hold-fg); }
 .flight__domains span { display: block; }
+.token-row { grid-template-columns: 1fr auto auto auto; }

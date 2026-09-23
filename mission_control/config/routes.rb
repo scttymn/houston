@@ -29,6 +29,10 @@ Rails.application.routes.draw do
     post "projects/:name/deploys", to: "deploys#create"
     patch "deploys/:id", to: "deploys#update"
     post "runner/jobs/claim", to: "runner_jobs#claim"
+
+    namespace :v1 do
+      get "me", to: "me#show"
+    end
   end
 
   # Add project (at /link, so no project name can shadow it).
@@ -46,6 +50,10 @@ Rails.application.routes.draw do
     resources :secrets, only: %i[ update destroy ], param: :key do
       post :generate, on: :member
     end
+  end
+
+  namespace :settings do
+    resources :tokens, only: %i[ index create destroy ]
   end
 
   root "projects#index"

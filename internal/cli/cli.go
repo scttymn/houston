@@ -88,6 +88,21 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	deployCmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
 	root.AddCommand(deployCmd)
+	var accessID, accessSecret string
+	login := &cobra.Command{
+		Use:   "login [url]",
+		Short: "Save Mission Control's URL and an API token for --server commands",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runLogin(args, accessID, accessSecret, stdin, stdout, stderr)
+			return nil
+		},
+	}
+	login.Flags().StringVar(&accessID, "access-client-id", "", "a Cloudflare Access service token's client ID, if Access guards admin.<base>")
+	login.Flags().StringVar(&accessSecret, "access-client-secret", "", "its client secret")
+	root.AddCommand(login, command("logout", "Forget the saved server and token", func() int {
+		return runLogout(stdout, stderr)
+	}))
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)
