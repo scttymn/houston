@@ -76,6 +76,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	root.AddCommand(command("init", "Set up this Rails app for Houston (compose.yml, Dockerfile stages, .env)", func() int {
 		return runInit(file, stdin, stdout, stderr)
 	}))
+	var asJSON bool
+	inspect := command("inspect", "Show what Houston reads from the compose file (what Mission Control is told)", func() int {
+		return runInspect(file, asJSON, stdout, stderr)
+	})
+	inspect.Flags().BoolVar(&asJSON, "json", false, "print JSON, as Mission Control reads it")
+	root.AddCommand(inspect)
 	var ref string
 	deployCmd := command("deploy", "Deploy this checkout on a Houston server (run there, as the houston user)", func() int {
 		return runDeploy(file, ref, stdout, stderr, d)

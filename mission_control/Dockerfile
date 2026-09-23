@@ -17,9 +17,9 @@ WORKDIR /rails
 # Mission Control drives Docker on its server (restic, volumes); it needs the CLI.
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
 
-# Install base packages
+# Install base packages. git and ssh read linked repos (with a deploy key).
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl libjemalloc2 sqlite3 && \
+    apt-get install --no-install-recommends -y curl git libjemalloc2 openssh-client sqlite3 && \
     ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 

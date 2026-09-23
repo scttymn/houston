@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_100000) do
   create_table "deploys", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "error"
@@ -54,17 +54,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_090000) do
 
   create_table "projects", force: :cascade do |t|
     t.string "app_service", null: false
+    t.string "branch"
+    t.string "compose_path"
     t.datetime "created_at", null: false
+    t.text "deploy_key_private"
+    t.string "deploy_key_public"
     t.json "deploy_rule", default: {}, null: false
     t.json "domains", default: [], null: false
     t.string "health", null: false
     t.string "name", null: false
     t.integer "port", null: false
+    t.string "repo_url"
     t.json "services", default: [], null: false
     t.datetime "synced_at"
     t.datetime "updated_at", null: false
     t.json "variables", default: [], null: false
+    t.text "webhook_secret"
+    t.datetime "webhook_verified_at"
     t.index ["name"], name: "index_projects_on_name", unique: true
+  end
+
+  create_table "repo_links", force: :cascade do |t|
+    t.string "branch", default: "main", null: false
+    t.string "compose_path", default: "compose.yml", null: false
+    t.datetime "created_at", null: false
+    t.text "deploy_key_private", null: false
+    t.string "deploy_key_public", null: false
+    t.json "preview"
+    t.string "preview_sha"
+    t.string "repo_url", null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "secrets", force: :cascade do |t|

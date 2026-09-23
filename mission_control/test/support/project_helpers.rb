@@ -1,7 +1,10 @@
 # Projects and deploys as houston deploy leaves them.
 module ProjectHelpers
   def make_project(name, services: %w[app], domains: [], variables: [], deploy_rule: { "on" => "commit", "branch" => "main" })
-    Project.create!(name:, app_service: "app", services:, domains:, variables:, health: "/up", port: 80, deploy_rule:)
+    # Like a sync: the project claims its container names.
+    Project.create!(name:, app_service: "app", services:, domains:, variables:, health: "/up", port: 80, deploy_rule:).tap do |project|
+      project.host_names.each { |host| project.hosts.create!(name: host) }
+    end
   end
 
   def make_deploy(project, number, status, sha: format("%040x", number), step: nil, log: "", error: nil, started: number.hours.ago)

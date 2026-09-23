@@ -156,6 +156,8 @@ services:
       - mission-control-storage:/rails/storage
       - houston-config:/houston
       - /var/run/docker.sock:/var/run/docker.sock
+      # Mission Control reads linked repos' compose files with the CLI's own parser.
+      - /usr/local/bin/houston:/usr/local/bin/houston:ro
 
   # Waits for the token Mission Control writes in setup step 2, then connects.
   cloudflared:

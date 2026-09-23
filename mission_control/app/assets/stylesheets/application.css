@@ -250,3 +250,10 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
   .flight tr, .flight td { display: block; }
   .rows li { grid-template-columns: 48px 1fr auto; }
 }
+
+/* Add project (build step 4) */
+.link { max-width: 960px; }
+.link-step .panel__row input[type=text] { height: 40px; padding: 0 10px; border: 1px solid var(--ink); background: var(--white); }
+.deploy-key { margin: 0; padding: 10px 12px; background: var(--ink); color: var(--on-dark); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.problems pre { margin: 0; white-space: pre-wrap; color: var(--nogo-fg); font-size: 13px; }
+.link-save { display: flex; justify-content: flex-end; align-items: center; gap: 16px; flex-wrap: wrap; }

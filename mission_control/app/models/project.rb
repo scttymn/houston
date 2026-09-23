@@ -5,6 +5,8 @@ class Project < ApplicationRecord
   has_many :secrets, dependent: :delete_all
   has_many :deploys, dependent: :delete_all
 
+  encrypts :deploy_key_private, :webhook_secret
+
   # <name>.<base>, the app's default host.
   def host(installation = Installation.current)
     "#{name}.#{installation.base_domain}"

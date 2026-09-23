@@ -91,7 +91,7 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		return exitUsage
 	}
 
-	synced, err := d.Mission.Sync(ctx, syncRequest(p))
+	synced, err := d.Mission.Sync(ctx, mission.RequestFor(p))
 	if err != nil {
 		var hold *mission.HoldError
 		switch {
@@ -194,26 +194,6 @@ func checkRef(g Git, dir, ref string, rule project.Deploy) (sha, fullRef string,
 		}
 	}
 	return head, ref, nil
-}
-
-func syncRequest(p *project.Project) mission.SyncRequest {
-	services := make([]string, 0, len(p.Compose.Services))
-	for name := range p.Compose.Services {
-		services = append(services, name)
-	}
-	sort.Strings(services)
-	vars := []mission.Variable{}
-	for _, v := range p.Variables {
-		if v.Kind == project.Secret {
-			vars = append(vars, mission.Variable{Name: v.Name, Required: v.Required})
-		}
-	}
-	domains := append([]string{}, p.Houston.Domains...)
-	return mission.SyncRequest{
-		Name: p.Name, AppService: p.AppService, Services: services, Domains: domains, Variables: vars,
-		Health: p.Houston.Health, Port: p.AppPort,
-		DeployRule: mission.DeployRule{On: p.Houston.Deploy.On, Branch: p.Houston.Deploy.Branch, Tags: p.Houston.Deploy.Tags},
-	}
 }
 
 // run is one started deploy: every failure from here on is reported.

@@ -1,0 +1,127 @@
+# Plan: Push to deploy (build step 4)
+
+Spec v11: https://claude.ai/artifact/R3d4fzN1u5QUP4kT88mqug (§7 linking a project, webhook handling, the deploy job; §8 custom domains; §10 status, pages, API, security notes; §12 build step 4; §14 webhook headers and `git ls-remote` with a deploy key from Mission Control's container).
+Design: https://claude.ai/artifact/UswdZ62N4ygiKdGh1vDEPH (AddProject, DeployLog, Main boards). The design wins over the spec where they differ, except where the spec's follow-ups (§13) supersede it: `compose.yml` replaces "houston.yml", the runner is `houston-runner-1`, and "Run tests" is step 00.
+
+## Goal
+
+Link a repo in Mission Control, and every push the deploy rule matches is deployed by Houston's runners: the webhook rings, Mission Control reads the refs itself, and a runner tests and deploys the new commit, with the log live on the deploy page. Custom domains get their DNS.
+
+## Scope
+
+- **Add project:** repo URL, a generated deploy key, an access check, the branch and compose path, a preview of what Houston found (read with the CLI's own parser), and Save.
+- **Webhooks:** `POST hooks.<base>/<name>` verified by an HMAC or token header, then "check for changes" (`git ls-remote` against the deploy rule), queueing a deploy of each moved ref. One queued deploy per project, switched to the newest SHA.
+- **Runners:** `houston runner` in the `houston-runner-1…n` containers claims a job, fetches the commit, runs `houston test` (step 00) and `houston deploy`.
+- **Live deploy page** (Turbo Streams over Solid Cable) and **custom-domain DNS** (§8 states).
+- **Defer:**
+  - **CLI personal API tokens and `--server` commands** (`secrets`, `status`, `logs`, `console`): build step 4b, right after this one (your decision).
+  - **Volume placement and backups:** build step 5.
+- **Boundary:** the local API's runner token and the "never through the tunnel" rule (build step 3) stay as they are. Webhooks are the only thing served on `hooks.<base>`.
+
+## Batches
+
+1. **Link a repo** (below): `houston inspect`, Mission Control's git access with a deploy key, reading `compose.yml`, the preview, and Save.
+2. **Webhooks and check for changes:**
+   - `hooks.<base>` locked down to `POST /<name>` (and the reachability `GET /ping`)
+   - signature verification for GitHub, Gitea/Forgejo, GitLab and Houston headers; rate limiting
+   - the webhook secret shown until the first verified delivery, then rotatable
+   - `git ls-remote` against the deploy rule; queued deploys coalescing to the newest SHA
+   - the Check for changes button, and the `hooks.<base>` probe on the flight board
+3. **Runners and the queue:**
+   - the claim API (long poll) and `houston runner`: fetch with the deploy key, step 00 `houston test`, `houston deploy` with the claimed deploy
+   - the runner image, and two runners in the installer (same-path workspace mounts)
+   - sweeping stale test projects; RUNNERS n/m in the strip
+4. **Live deploy page:** log and steps streamed; step 00 shown.
+5. **Custom-domain DNS:** zones found by suffix, proxied CNAMEs with `managed-by:houston project:<name>`, the states WILDCARD / DNS OK / DNS PENDING / ZONE NOT IN CLOUDFLARE YET, and owned records no project uses removed.
+6. **Real run on svnmns.com:** a push to a git host → a webhook through Cloudflare → a runner deploys it; a custom domain in a zone that isn't in Cloudflare shows its state.
+
+## Batch 1: Link a repo
+
+### Design (short)
+- **`houston inspect [--json]`** (new CLI command) loads the compose file with the same loader as every other command. On success it prints JSON:
+  - `sync`: exactly the request `houston deploy` sends. `deploy.syncRequest` moves to `mission.RequestFor(p)`, used by both.
+  - `preview`: services with their images, the app's port, health, CPU/memory limits, `commands.test` present or not, and the backup schedule and named volumes.
+  - With problems: exit 2, and the loader's problem lines on stderr, as `houston dev` prints them.
+- **Mission Control reads the file with that binary:**
+  - The installer mounts the host's `/usr/local/bin/houston` read-only into the mission-control container, which is the same architecture.
+  - The production image gains `git` and `openssh-client`.
+  - One parser for compose everywhere, and Mission Control never interprets `compose.yml` itself.
+- **`RepoLink`** (a draft; Save turns it into the project's link):
+  - `repo_url`, `branch` (default `main`), `compose_path` (default `compose.yml`), and an ed25519 key pair from `ssh-keygen`: the private key encrypted, the public key shown.
+  - Drafts older than a day are deleted when a new one is made.
+- **`GitRemote`** (a runner seam like `DockerCommand`) runs git with:
+  - `GIT_SSH_COMMAND="ssh -i <0600 temp key> -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=<storage>/known_hosts"`
+  - `GIT_TERMINAL_PROMPT=0`, `GIT_ALLOW_PROTOCOL=ssh:https`, a 60 s timeout, and `--` before the URL
+  - **Trust on first use:** the first contact records the host key in `storage/known_hosts` (on the persistent volume). A changed key fails, saying so.
+  - **Check access:** `git ls-remote --heads -- <url>`, then the branch must exist.
+  - **Read:** `git clone --depth 1 --single-branch --branch <b> --no-tags --filter=blob:none --no-checkout -- <url> <tmp>`, then `git -C <tmp> checkout HEAD -- <compose_path>`, then `houston -f <tmp>/<path> inspect --json`. The temp dir and key are removed in `ensure`.
+- **Inputs are refused before git sees them:**
+  - URLs other than `ssh://`, `https://`, or scp-style `user@host:path`, including `file://`, `ext::`, local paths, and anything starting with `-`
+  - branch names git's `check-ref-format --branch` rejects
+  - compose paths that are absolute, contain `..`, or aren't `.yml`/`.yaml`
+- **Pages** (the design's AddProject board, sections 01 and 02; secrets are set on the project page after Save, as built in step 3):
+  - `GET /projects/new`: the repo URL, and a generated key once a URL is entered.
+  - Check access → GO "Houston can read the repo", or NO-GO with git's first error line (the key's path scrubbed).
+  - Branch and compose path, then Read → "What Houston found `<branch> @ <sha7>`": name → `<name>.<base>`, domains, app, services, deploys (+ "tests run first" when `commands.test` is set), backups (schedule and volumes as the file says).
+  - Problems are listed as the CLI prints them, and Save stays disabled.
+  - **Save:**
+    - `ProjectSync` validates and claims the container names (step 3's code, so name clashes and the unique index apply). Then it stores the link (repo, branch, compose path, deploy key) and a webhook secret (32 random bytes, encrypted) for Batch 2.
+    - A project `houston deploy` already registered, with no link yet, is linked. One that's already linked → "already linked to <repo>".
+    - The Deploy button and the webhook section (§7 step 5) arrive with Batches 2–3; the page doesn't show them before they work.
+- **Authz:** every page requires the signed-in admin (the default).
+- **CLI counterpart (lands in build step 4b):** linking is one model (`RepoLink` → `ProjectSync.save!` + link), so the page is a thin layer over it. Step 4b's token-authenticated API and `houston link --server <repo-url> [--branch] [--file]` call the same model.
+
+### Contract pin
+- **`houston inspect --json`:** exit 0 with JSON `{sync: SyncRequest, preview: {…}}`; exit 2 with problems on stderr; exit 2 when the file is missing.
+- **`POST /projects/new/access`** `{repo_url}` → the page with GO / NO-GO. Invalid URL → 422 with the field error, and git isn't run.
+- **`POST /projects/new/read`** `{branch, compose_path}` → the preview, or the problems. Invalid → 422; git and houston aren't run.
+- **`POST /projects`** (Save) → redirect to the project page. Clash → 422 naming the owner. Already linked → 422. No read preview in the session's draft → 422 "read the file first".
+
+### Crash-gap template (Save)
+```text
+Durable step 1 (primary): the project + its hosts + its link, one transaction (ProjectSync.save! extended)
+Dies before: nothing follows in Batch 1 (DNS happens at the first deploy's sync, as in step 3)
+Retry: Save again → the project exists and is linked to this repo → idempotent success (not "already linked")
+```
+
+### AC ↔ test map (Batch 1)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | `houston inspect --json`: `sync` equals `mission.RequestFor(p)`, and `preview` has services/images, port, health, limits, test, backups; problems → exit 2 with the loader's lines; missing file → exit 2 | `internal/cli/inspect_test.go` `TestInspect` (Phoenix fixture golden + a broken file) | Contract, Parity |
+| 2 | `houston deploy` sends `mission.RequestFor(p)` (the moved function), unchanged | `internal/deploy` `TestDeployHappyPath` (existing, still green) + `internal/mission` `TestRequestFor` | Parity |
+| 3 | A new draft has an ed25519 key: the public key starts `ssh-ed25519 `, the private key is encrypted at rest (raw column ≠ PEM), and drafts older than a day are deleted | `models/repo_link_test.rb` | Contract |
+| 4 | Hostile inputs refused before git runs (table): `file:///etc`, `ext::sh -c id`, `/srv/repo`, `-oProxyCommand=id`, `https://x/y.git --upload-pack=id`; branch `-x` / `a..b`; compose path `/etc/passwd`, `../x.yml`, `compose.txt` → 422 with the field; FakeGit saw no calls | `controllers/project_links_test.rb` `test "hostile repo input never reaches git"` | Contract (hostile input) |
+| 5 | Check access: FakeGit is called with `ls-remote --heads -- <url>` and the env (IdentitiesOnly, BatchMode, accept-new, the known_hosts path, `GIT_ALLOW_PROTOCOL`); exit 0 with the branch → GO; the branch missing → NO-GO naming it; exit 128 → NO-GO with git's first line; the temp key file is gone afterwards | `test "checking access to the repo"` | Contract, Signals |
+| 6 | Read: clone + checkout of just the compose path + `houston inspect`; the preview shows every §7 fact from the fixture JSON; problems are shown and Save is disabled; the temp dir is removed even when inspect fails | `test "reading compose.yml"` | Contract, Crash & repair |
+| 7 | Save: creates the project (facts from `sync`) and its link and webhook secret (encrypted); a container-name clash → 422 naming the owner, nothing saved; a project registered by `houston deploy` → linked; linked to another repo → 422; Save twice → idempotent | `test "saving links the project"` | Contract, Re-entry, Concurrency (reuses step 3's index) |
+| 8 | Signed out: every link page and action → sign-in; git never runs | `test "linking needs the admin"` | Authz |
+| 9 | Save without a read preview → 422 "read the file first" | `test "save needs a read preview"` | Preconditions |
+| 10 | **Real (VM):** in Mission Control's container, `ls-remote` of a public HTTPS repo works; over SSH to a Forgejo container in the VM with the generated deploy key: the first contact records the host key; a replaced host key → NO-GO "host key changed"; the whole flow on a real repo reads its `compose.yml` | `install/test/link-repo.sh` | Parity (§14) |
+
+### Deploy notes
+- The installer adds the read-only `houston` mount to mission-control, and the image rebuild adds `git` / `openssh-client`. A rerun on an existing server picks up both.
+- New tables: `repo_links`, plus link columns on `projects` (`repo_url`, `branch`, `compose_path`, `deploy_key_private` (encrypted), `deploy_key_public`, `webhook_secret` (encrypted), `webhook_verified_at`). The migration runs down and up.
+
+### Agent loop checkpoints
+- Red: all Batch 1 rows fail for the missing code. Report the RED map, then continue.
+- Batch 1 green → scotty-review with the cold pass → Batch 2, expanded from this file.
+- Ready: scotty-review over the whole branch, the full Go and Rails suites, lint on touched files, and the real run.
+
+### Done (Batch 1)
+- **Red:** rows 1–9 failed for the missing code (the compile failures in Go; 9 errors in Mission Control). **Green:** the Go suite and Mission Control (102 runs), `go vet`, and rubocop on the 13 touched Ruby files.
+- **Found on the way:**
+  - `repo_link.rb` needed `require "open3"`.
+  - "Read the file first" only rendered when a draft existed. It now shows without one.
+  - My `make_project` test helper created projects that owned no container names, so a clash test passed a save it should have refused. Real projects always claim their names (sync, linking), and the helper now does too.
+- **Mutations, each caught:** any repo URL accepted; a compose path climbing out with `..`; no `--` before the URL; a linked project re-linked to another repo; `StrictHostKeyChecking=no`.
+- **Real (row 10), `install/test/link-repo.sh`: LINK PASS, 11 checks.** Ubuntu 24.04, Mission Control's production container, Forgejo 13 on its network, the Add project pages driven over HTTP as the admin:
+  - Before the key is added → NO-GO, "Permission denied (publickey)"; the page shows the generated key.
+  - Once added as a read-only deploy key → GO, and Forgejo's host key is recorded on first use (`ssh-keygen -F` finds it in `storage/known_hosts`; Debian hashes the entries).
+  - Read → `houston inspect` (the host's CLI mounted read-only) shows "spike → spike.houston.test, db · postgres:17"; Save links the project, with hosts `spike`, `spike-db`.
+  - A public repo over HTTPS (`github.com/basecamp/kamal`) → GO.
+  - Forgejo recreated with new host keys → NO-GO, "host key changed".
+  - The first run failed every POST with a CSRF 422, for a script reason. Rails' tokens are per form, and my helper took the header's sign-out form token. The script now takes the token from the form it posts to.
+
+### Decisions (from you)
+1. **The real run's git host:** a Forgejo container in the test VM ("keeps things easily testable"). Its webhook still goes out through Cloudflare to `hooks.svnmns.com`.
+2. **CLI API tokens and `--server` commands become build step 4b**, right after this: "It makes this always work from the cli (agentic interactions)." So every Mission Control action should have a CLI path.

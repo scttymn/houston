@@ -25,15 +25,16 @@ class ProjectSync
     errors.empty?
   end
 
-  # Saves the project and its host names in one transaction. Raises Refused
-  # when another project owns one of the names.
-  def save!
+  # Saves the project and its host names (and link) in one transaction.
+  # Raises Refused when another project owns one of the names.
+  # link: the repo link's attributes, when Add project saves it.
+  def save!(link: nil)
     Project.transaction do
       @project = Project.find_or_initialize_by(name: @payload["name"])
       @project.update!(app_service: @payload["app_service"], services: @payload["services"], domains: @payload["domains"],
                        variables: @payload["variables"].map { |v| { "name" => v["name"], "required" => v["required"] == true } },
                        health: @payload["health"], port: @payload["port"], deploy_rule: @payload["deploy_rule"] || {},
-                       synced_at: Time.current)
+                       synced_at: Time.current, **link.to_h)
       claim_hosts
     end
     @project

@@ -37,8 +37,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select ".stat", /NEXT BACKUP\s*—/
     assert_select "h2", /Nothing on the pad yet/i
     assert_select ".path", /x-houston/i
-    assert_select ".path [aria-disabled=true]", /Add project/
-    assert_select ".path a", { text: /Add project/, count: 0 }
+    assert_select ".path a[href='/link']", /Add project/
     assert_select ".path pre", /houston init/
   end
 

@@ -21,6 +21,12 @@ Rails.application.routes.draw do
     patch "deploys/:id", to: "deploys#update"
   end
 
+  # Add project (at /link, so no project name can shadow it).
+  get "link", to: "project_links#new", as: :link
+  post "link/access", to: "project_links#access", as: :link_access
+  post "link/read", to: "project_links#read", as: :link_read
+  post "link", to: "project_links#create"
+
   resources :projects, only: :show, param: :name do
     resources :deploys, only: :show, param: :number
     resources :secrets, only: %i[ update destroy ], param: :key do
