@@ -67,7 +67,7 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if _, err := os.Stat(dockerfilePath + ".dockerignore"); err == nil {
 		ignorePath = dockerfilePath + ".dockerignore"
 	}
-	ignoreDocker, err := planDockerignore(ignorePath, dir)
+	ignoreDocker, err := planDockerignore(ignorePath, dir, defaultDockerignore(contextDir, composePath, dockerfilePath))
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -168,13 +168,23 @@ func relName(path, dir string) string {
 	return path
 }
 
-// defaultDockerignore keeps what the default production stage mustn't
-// serve out of the image.
-const defaultDockerignore = `# Kept out of the image: the default production stage copies this folder and serves it.
-.git
-.env
-.houston
-`
+// defaultDockerignore keeps what the default production stage mustn't serve
+// out of the image: .git, .env, .houston, and the build files this project
+// uses (the compose file and Dockerfile, by their names in the context, and
+// the ignore files). A build file outside the context isn't in it anyway.
+func defaultDockerignore(contextDir string, buildFiles ...string) string {
+	b := strings.Builder{}
+	b.WriteString("# Kept out of the image: the default production stage copies this folder and\n" +
+		"# serves it. The first three stay out whatever the project does; the build\n" +
+		"# files are left out of a fresh site too.\n.git\n.env\n.houston\n")
+	for _, f := range buildFiles {
+		if rel, err := filepath.Rel(contextDir, f); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+			b.WriteString(filepath.ToSlash(rel) + "\n")
+		}
+	}
+	b.WriteString(".dockerignore\n.gitignore\n")
+	return b.String()
+}
 
 // dockerignoreHas: the patterns that already exclude each entry.
 var dockerignoreHas = map[string][]string{
@@ -183,13 +193,13 @@ var dockerignoreHas = map[string][]string{
 	".houston": {".houston", ".houston/", "/.houston", "/.houston/"},
 }
 
-// planDockerignore writes the default .dockerignore, or appends the entries
-// an existing one doesn't already exclude.
-func planDockerignore(path, dir string) (*change, error) {
+// planDockerignore writes the default .dockerignore (fresh is what it
+// would be), or appends the entries an existing one doesn't already exclude.
+func planDockerignore(path, dir, fresh string) (*change, error) {
 	name := relName(path, dir)
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return &change{path, defaultDockerignore, "created " + name}, nil
+		return &change{path, fresh, "created " + name}, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("can't read %s: %w", name, err)
 	}

@@ -660,6 +660,26 @@ func TestInit_DoesntShadowAnotherComposeFile(t *testing.T) {
 // Review R4: .dockerignore keeps .git, .env and .houston out of the image.
 func TestInit_Dockerignore(t *testing.T) {
 	terminal(t, false)
+	// Written fresh, it leaves out the build files init actually used, by
+	// their names in the build context.
+	t.Run("the build files by their own names", func(t *testing.T) {
+		dir := app(t, "static", "demo")
+		write(t, dir, "docker-compose.yml", "name: demo\nservices:\n  app:\n    build: { context: ., dockerfile: Dockerfile.site }\n    ports: [\"8080:8080\"]\nx-houston:\n  health: /\n")
+		if code, _, stderr := runWithInput(&fakeDocker{}, "", "-f", filepath.Join(dir, "docker-compose.yml"), "init"); code != 0 {
+			t.Fatalf("exit %d, stderr %s", code, stderr)
+		}
+		got := read(t, filepath.Join(dir, ".dockerignore"))
+		for _, want := range []string{"\ndocker-compose.yml\n", "\nDockerfile.site\n"} {
+			if !strings.Contains(got, want) {
+				t.Errorf(".dockerignore lacks %q:\n%s", want, got)
+			}
+		}
+		for _, not := range []string{"\ncompose.yml\n", "\nDockerfile\n"} {
+			if strings.Contains(got, not) {
+				t.Errorf(".dockerignore names %q, which this project doesn't use:\n%s", not, got)
+			}
+		}
+	})
 	t.Run("a Dockerfile's own ignore file wins", func(t *testing.T) {
 		dir := app(t, "static", "demo")
 		write(t, dir, "Dockerfile.dockerignore", "tmp\n")

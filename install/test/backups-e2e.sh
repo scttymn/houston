@@ -23,7 +23,11 @@ as_houston() { orb -m "$name" -u houston bash -lc "$1"; }
 rails() { vm docker compose -f /opt/houston/compose.yml exec -T mission-control bin/rails runner "$1" 2>/dev/null | tail -1; }
 gitc='git -c user.name=e2e -c user.email=e2e@houston.test'
 
-cleanup() { if [ "${KEEP:-}" = 1 ]; then echo "kept machine $name"; else orb delete -f "$name" >/dev/null 2>&1 || true; fi; }
+keydir="" # a private copy of a master key while it's in use: never left behind
+cleanup() {
+  [ -n "$keydir" ] && rm -rf "$keydir"
+  if [ "${KEEP:-}" = 1 ]; then echo "kept machine $name"; else orb delete -f "$name" >/dev/null 2>&1 || true; fi
+}
 trap cleanup EXIT
 
 echo "== creating $name and installing Houston"
@@ -138,7 +142,7 @@ if [ -n "${EQUIP_SOURCE:-}" ]; then
   (umask 077 && cp "$EQUIP_SOURCE/config/master.key" "$keydir/master.key")
   vm env HOUSTON_SERVER=http://127.0.0.1:3000 HOUSTON_API_TOKEN="$token" sh -c \
     "houston secrets set RAILS_MASTER_KEY --project houston-equip-test < '$keydir/master.key'" >/dev/null && ok "RAILS_MASTER_KEY set from stdin" || bad "RAILS_MASTER_KEY"
-  rm -rf "$keydir"
+  rm -rf "$keydir"; keydir=""
   as_houston 'cd ~/equip && houston deploy' >/tmp/backups-e2e-equip-2.log 2>&1 && ok "equip GO" || { bad "equip deploy"; tail -20 /tmp/backups-e2e-equip-2.log; }
   out=$(orb -m "$name" -u houston env HOUSTON_SERVER=http://127.0.0.1:3000 HOUSTON_API_TOKEN="$token" bash -lc "cd ~/equip && houston backup --follow" 2>&1)
   printf '%s' "$out" | grep -q '^GO: houston-equip-test backed up' && ok "equip backed up" || bad "equip backup: $out"

@@ -35,7 +35,7 @@ keydir=$(mktemp -d "$repo/.houston/key.XXXXXX")
 (umask 077 && cp "$EQUIP_SOURCE/config/master.key" "$keydir/master.key")
 vm env HOUSTON_SERVER=http://127.0.0.1:3000 HOUSTON_API_TOKEN="$token" sh -c \
   "houston secrets set RAILS_MASTER_KEY --project houston-equip-test < '$keydir/master.key'" >/dev/null && ok "RAILS_MASTER_KEY set from stdin" || bad "RAILS_MASTER_KEY"
-rm -rf "$keydir"
+rm -rf "$keydir"; keydir=""
 orb -m "$name" -u houston bash -lc 'cd ~/equip && houston deploy' >/tmp/restore-e2e-equip.log 2>&1 && ok "equip deployed by hand: GO" || { bad "equip deploy"; tail -20 /tmp/restore-e2e-equip.log; }
 
 eweb() { vm sh -c 'docker ps -q --filter label=service=houston-equip-test --filter label=role=web | head -n1'; }

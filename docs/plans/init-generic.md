@@ -230,6 +230,83 @@ Commands: `bin/go test ./internal/cli/ ./internal/project/ -run 'TestInit|TestLo
 - Batch 1 green → scotty-review with a cold pass → Done notes → the spec update → commit.
 - Batch 2 is expanded from this file when it starts.
 
+## Batch 2: The real run
+
+### Design (short)
+- **Copies only, never the repos:** a static site made here; `~/code/equip` and `~/code/estherpictures_com` copied into the scratchpad without `.git`, `config/master.key`, `.env`, `tmp`, `log`, `storage`, `node_modules` or `_build`. Each is given a fresh git history.
+- **`houston init` on each (the Mac build):**
+  - Static site: nothing to edit.
+  - equip and estherpictures: `init` completes their own Dockerfiles and writes the default compose. Then I make the edits their developer would (the compose file's port, health, variables and volumes; real `dev` and `test` stages) and write each one down: those notes are the migration steps for build step 8.
+- **`install/test/init-e2e.sh`** on a fresh OrbStack Houston (wildcard mode, hand deploys as the houston user):
+  - **the static site:** `init` with no edits → `houston deploy` GO → kamal-proxy serves its `index.html`, and `/.git/HEAD` and `/.env` answer 404 (the checkout is a git repo; `.dockerignore` keeps both out of the image)
+  - **with `EQUIP_SOURCE`:** the prepared equip copy → GO → `/up` 200
+  - **with `ESTHER_SOURCE`:** the prepared estherpictures copy → GO → its home page 200
+- **The e2e scripts' `EQUIP_SOURCE`** becomes this regenerated copy (the old one came from the Rails init).
+
+### AC ↔ test map (Batch 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The static site deploys as `init` wrote it, and `.git`/`.env` aren't served | `init-e2e.sh` (static) | Parity |
+| 2 | equip: `init` completes its Dockerfile (its lines unchanged), then with the written-down edits `dev --production` answers `/up` 200 locally and a deploy is GO with `/up` 200 | `init-e2e.sh` (`EQUIP_SOURCE`), the local check in the transcript | Parity |
+| 3 | estherpictures: the same, its home page 200 | `init-e2e.sh` (`ESTHER_SOURCE`), the local check | Parity |
+| 4 | `houston init` again on each → "already set up" | the transcript | Re-entry |
+| 5 | The restore e2e still passes with the regenerated equip copy | `EQUIP_SOURCE=… restore-e2e.sh` | Parity |
+
+### Done (Batch 2)
+- **`init-e2e.sh`: INIT PASS** (second run):
+  - **The static site, `init` only:** deploy GO, `/` served (health `/` passed), and `/.env`, `/.git/HEAD`, `/compose.yml`, `/Dockerfile` → 404.
+  - **equip:** `init` on a fresh checkout writes only the `.env` template, and the deploy HOLDs for `RAILS_MASTER_KEY` until it's set from stdin → GO, `/up` 200.
+  - **estherpictures:** HOLD for `PHX_HOST` and `SECRET_KEY_BASE`, then Generate and a set → GO (release hook `bin/migrate`), home page 200, data volume made.
+  - The master key isn't in the log (checked).
+- **Row 5, `restore-e2e.sh` with the regenerated `EQUIP_SOURCE`: RESTORE PASS** (61 checks). equip, set up by the generic `init` plus its edits, was linked, deployed, backed up, changed and restored: all 59 requests to `/up` during the restore answered 200, the data came back, and generation 1's volume was gone. The master key isn't in the log (checked).
+- **Local, on the copies:**
+  - equip: `dev --production` → `/up` and `/` 200 (15 s); `dev` → development Puma served until stopped.
+  - estherpictures: `dev --production` → home 200, and `/.env`, `/.git/HEAD`, `/Dockerfile` 404; `dev` → home 200 and `app.js` 200, with no bundler or live-reload errors after its two app edits.
+- **Found by the real run, fixed test-first:**
+  - **Generate made keys too short for Phoenix.** Mission Control's Generate made 43 characters (`urlsafe_base64(32)`). Phoenix refuses a `SECRET_KEY_BASE` under 64 bytes, so the first estherpictures request failed locally with a short key, and a generated key would have failed the same way on the server. Both doors (the project page and the API) now share `Secret.generated_value`, 64 random bytes (86 characters). Tests: ≥ 64 bytes, URL-safe; both mutations caught.
+  - **The default static site served its build files.** `/compose.yml` → 200: config, not secrets, but a fresh site shouldn't publish it. A fresh `.dockerignore` now also leaves out the build files, by the names the project uses (a review LOW: `-f docker-compose.yml` or a custom Dockerfile name was missed at first). An existing one still gets only `.git`, `.env` and `.houston`.
+  - **My script, twice:** "init isn't settled" was wrong, because a fresh checkout has no `.env`, so `init` rightly writes its template. The check is now "only `.env`".
+- **This Mac:** ports 3000, 4000, 4100 and 8080 were taken by other projects' containers. Each local check published on a free port, not committed.
+- **scotty-review (cold pass): approve.** Two LOW, both fixed: the build files by their resolved names; the master key copy removed by the scripts' exit traps (`init-e2e.sh`, `backups-e2e.sh`, and `restore-e2e-equip.sh` once its run ended).
+
+### Migration notes (for build step 8)
+What `houston init` does to an app with its own Dockerfile, and the edits after it, as made on the copies.
+
+**Every app:**
+1. `houston init`. It names the final stage `production`, appends `dev` and `test` as copies of it, writes the default `compose.yml`, and adds `.houston` to `.dockerignore` (plus `/.env` to `.gitignore` if missing).
+2. **Replace the appended `dev` and `test` stages** with real ones: dev tools and dev dependencies, and a command that serves the code `houston dev` mounts. Keep compiled dependencies outside the mounted folder.
+3. **Rewrite the compose file's `app` service** for the app:
+   - the port, published on `127.0.0.1` (dev only; the server ignores it)
+   - the variables the app needs: `${VAR}` when the server must have it, `${VAR:-}` when dev can do without
+   - the bind mount at the image's working directory
+   - named volumes for data
+4. **Set `x-houston`:**
+   - `health`: a path that answers 200 without a login
+   - `app_port` when production listens elsewhere than dev
+   - `commands` and `hooks`
+5. `houston init` again → "already set up". `houston dev`, `houston test`, `houston dev --production`.
+
+**equip (Rails 8.1, SQLite):**
+- `dev` from `base`: `RAILS_ENV=development`, `BUNDLE_DEPLOYMENT=0`, `BUNDLE_WITHOUT=""`; the build stage's `apt-get` line; `COPY vendor/* ./vendor/` and the Gemfiles; `bundle install`; `CMD` `bin/rails db:prepare && exec bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid`.
+- `test` from `dev`: `RAILS_ENV=test`, `COPY . .`.
+- The compose file:
+  - `127.0.0.1:3000:3000`
+  - `RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}` (required: the server HOLDs until it's set; dev needs it in `.env`, since `config/master.key` stays out of the image)
+  - `.:/rails` and `storage:/rails/storage`
+- `x-houston`: `health: /up`, `app_port: 80` (Thruster), `commands` (`bin/rails console`, `bin/rails test`), `hooks.release: bin/rails db:migrate`.
+
+**estherpictures (Phoenix 1.8, SQLite, from Coolify):**
+- `dev` from `${BUILDER_IMAGE}`: the builder's `apt-get` block plus `inotify-tools` (live reload); `WORKDIR /app`; hex and rebar; `MIX_ENV=dev`, `MIX_DEPS_PATH=/mix/deps`, `MIX_BUILD_ROOT=/mix/_build` (compiled dependencies outside the mounted folder); `mix.exs`, `mix.lock` and `config` copied; `mix deps.get && mix deps.compile`; `CMD` `mix ecto.create --quiet && mix ecto.migrate && exec mix phx.server`.
+- `test` from `dev`: `MIX_ENV=test`, `COPY . .`, `mix deps.get && mix compile`.
+- **App edits:**
+  - `config/dev.exs`: `http: [ip: {0, 0, 0, 0}]` (Phoenix binds 127.0.0.1, which is unreachable from outside the container)
+  - `config/config.exs`: esbuild's `NODE_PATH` uses `Mix.Project.deps_path()`, not `../deps` (otherwise the JS bundle can't find `phoenix` when the dependencies live elsewhere)
+- The compose file:
+  - `127.0.0.1:4000:4000`
+  - `SECRET_KEY_BASE: ${SECRET_KEY_BASE}` and `PHX_HOST: ${PHX_HOST}` (both required; Generate makes a key long enough)
+  - `.:/app`, and `data:/opt/estherpictures/data` (the Dockerfile's `DATABASE_PATH` and uploads)
+- `x-houston`: `health: /` (its home page; no health route), `commands` (`console: { dev: iex -S mix, server: bin/esther_pictures remote }`, `test: mix test`), `hooks.release: bin/migrate` (its release script). Its entrypoint also migrates before starting, which is harmless twice.
+
 ## Open questions
 None blocking. Two defaults to change if you'd rather:
 - **The app port:** 8080 (unprivileged, and what the dev fixture already uses).

@@ -1,4 +1,10 @@
-# Kept out of the image: the default production stage copies this folder and serves it.
+# Kept out of the image: the default production stage copies this folder and
+# serves it. The first three stay out whatever the project does; the build
+# files are left out of a fresh site too.
 .git
 .env
 .houston
+compose.yml
+Dockerfile
+.dockerignore
+.gitignore

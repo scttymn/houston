@@ -22,7 +22,7 @@ class Api::V1::SecretsController < Api::V1::BaseController
   end
 
   def generate
-    save(SecureRandom.urlsafe_base64(32))
+    save(Secret.generated_value)
   end
 
   def destroy

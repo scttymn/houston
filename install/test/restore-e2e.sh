@@ -31,7 +31,11 @@ through_proxy() { vm docker run --rm --network kamal curlimages/curl:8.16.0 -s -
 psql_in() { vm docker exec "$1" psql -qtA -U postgres -d postgres -c "$2" 2>&1; }
 sqlite_in() { vm docker run --rm --user 0 -v "$1:/data" --entrypoint sqlite3 houston/mission-control:local /data/app.sqlite3 "$2" 2>&1; }
 
-cleanup() { if [ "${KEEP:-}" = 1 ]; then echo "kept machine $name"; else orb delete -f "$name" >/dev/null 2>&1 || true; fi; }
+keydir="" # a private copy of a master key while it's in use (restore-e2e-equip.sh): never left behind
+cleanup() {
+  [ -n "$keydir" ] && rm -rf "$keydir"
+  if [ "${KEEP:-}" = 1 ]; then echo "kept machine $name"; else orb delete -f "$name" >/dev/null 2>&1 || true; fi
+}
 trap cleanup EXIT
 
 echo "== creating $name and installing Houston"

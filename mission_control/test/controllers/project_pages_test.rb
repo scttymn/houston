@@ -79,7 +79,9 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     post generate_project_secret_path("equip", "RAILS_MASTER_KEY")
     assert_redirected_to project_path("equip")
     value = @project.secrets.find_by!(key: "RAILS_MASTER_KEY").value
-    assert_operator value.length, :>=, 43
+    # Long enough for any framework's key (Phoenix and Rails want 64 bytes).
+    assert_operator value.bytesize, :>=, 64
+    assert_match(/\A[A-Za-z0-9_-]+\z/, value)
     follow_redirect!
     assert_not_includes response.body, value
 

@@ -19,7 +19,7 @@ class SecretsController < ApplicationController
   # A value nobody needs to know (spec §7), e.g. POSTGRES_PASSWORD.
   def generate
     secret = @project.secrets.find_or_initialize_by(key: @key)
-    secret.update!(value: SecureRandom.urlsafe_base64(32))
+    secret.update!(value: Secret.generated_value)
     redirect_to project_path(@project.name), notice: "#{@key} generated and saved."
   end
 

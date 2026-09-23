@@ -51,7 +51,9 @@ class ApiV1SecretsTest < ActionDispatch::IntegrationTest
     api :post, "/SENTRY_DSN/generate"
     assert_response :success
     value = @project.secrets.find_by!(key: "SENTRY_DSN").value
-    assert_operator value.length, :>=, 43
+    # Long enough for any framework's key (Phoenix and Rails want 64 bytes).
+    assert_operator value.bytesize, :>=, 64
+    assert_match(/\A[A-Za-z0-9_-]+\z/, value)
     assert_not_includes response.body, value
   end
 end

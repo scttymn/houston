@@ -105,7 +105,7 @@ func TestInit_DefaultsRun(t *testing.T) {
 	stop = dev("--production")
 	production := filepath.Join(dir, ".houston", "compose.production.yml")
 	serves(production)
-	for _, path := range []string{"/.env", "/.git/HEAD"} {
+	for _, path := range []string{"/.env", "/.git/HEAD", "/compose.yml", "/Dockerfile"} {
 		out, err := exec.Command("docker", "compose", "-p", name, "--project-directory", dir, "-f", composeFile, "-f", production,
 			"exec", "-T", "app", "wget", "-qO-", "http://127.0.0.1:8080"+path).CombinedOutput()
 		if err == nil || !bytes.Contains(out, []byte("404")) {
