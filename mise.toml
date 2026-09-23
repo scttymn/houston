@@ -1,3 +1,3 @@
 # Editor tooling only (gopls). Build and test with bin/go and bin/test.
 [tools]
-go = "1.25"
+go = "1.26"
