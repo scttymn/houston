@@ -15,7 +15,7 @@ import (
 
 // runLogin implements houston login [url]: checks the token against the
 // server (/api/v1/me) and only then saves it for --server commands.
-func runLogin(args []string, accessID, accessSecret string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runLogin(args []string, accessID, accessSecret, sshTarget string, stdin io.Reader, stdout, stderr io.Writer) int {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(stderr, "houston login: %v\n", err)
@@ -48,7 +48,7 @@ func runLogin(args []string, accessID, accessSecret string, stdin io.Reader, std
 			token = readLine(in)
 		}
 	}
-	c := server.Config{URL: strings.TrimRight(url, "/"), Token: strings.TrimSpace(token), AccessClientID: accessID, AccessClientSecret: accessSecret}
+	c := server.Config{URL: strings.TrimRight(url, "/"), Token: strings.TrimSpace(token), AccessClientID: accessID, AccessClientSecret: accessSecret, SSH: sshTarget}
 	me, err := server.New(c).Me(context.Background())
 	if err != nil {
 		fmt.Fprintf(stderr, "houston login: %v\n", err)

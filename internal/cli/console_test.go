@@ -151,13 +151,16 @@ func TestConsoleAndLogs_StopEarly(t *testing.T) {
 				}
 			})
 		}
-		for _, flag := range []string{"--server", "--tail"} {
-			t.Run(cmd+"/"+flag, func(t *testing.T) {
-				d := &fakeDocker{}
-				if code, _, _ := run(d, cmd, flag); code != 2 || d.calls() != 0 {
-					t.Errorf("exit = %d, calls = %d; want 2 and none", code, d.calls())
-				}
-			})
-		}
+		t.Run(cmd+"/--server without a login", func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("HOUSTON_SERVER", "")
+			t.Setenv("HOUSTON_API_TOKEN", "")
+			_, path := newProject(t, phoenixWithConsole, nil)
+			d := &fakeDocker{}
+			code, _, stderr := run(d, "-f", path, cmd, "--server")
+			if code != 1 || d.calls() != 0 || !strings.Contains(stderr, "houston login") {
+				t.Errorf("exit = %d, calls = %d, stderr %q; want 1, none, and houston login", code, d.calls(), stderr)
+			}
+		})
 	}
 }

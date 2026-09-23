@@ -41,6 +41,7 @@ Rails.application.routes.draw do
       end
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
+        resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
         end

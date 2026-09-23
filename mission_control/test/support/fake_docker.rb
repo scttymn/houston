@@ -3,11 +3,20 @@
 class FakeDocker
   Call = Data.define(:args, :env)
 
-  attr_reader :calls
+  attr_reader :calls, :streams
 
-  def initialize(&responder)
+  # stream: the chunks a streamed command (docker logs) writes.
+  def initialize(stream: [], &responder)
     @calls = []
+    @streams = []
+    @stream = stream
     @responder = responder
+  end
+
+  def stream(args, timeout: nil)
+    @streams << args
+    @stream.each { |chunk| yield chunk }
+    true
   end
 
   def call(args, env)

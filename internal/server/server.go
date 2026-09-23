@@ -28,6 +28,7 @@ type Config struct {
 	Token              string `json:"token"`
 	AccessClientID     string `json:"access_client_id,omitempty"`
 	AccessClientSecret string `json:"access_client_secret,omitempty"`
+	SSH                string `json:"ssh,omitempty"` // houston@<LAN address>, for console --server
 }
 
 func configPath(home string) string { return filepath.Join(home, ".config", "houston", "server.json") }
@@ -143,12 +144,8 @@ func (cl *Client) do(ctx context.Context, method, path string, payload any) (int
 	if err != nil {
 		return 0, nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+cl.c.Token)
+	cl.headers(req)
 	req.Header.Set("Content-Type", "application/json")
-	if cl.c.AccessClientID != "" {
-		req.Header.Set("CF-Access-Client-Id", cl.c.AccessClientID)
-		req.Header.Set("CF-Access-Client-Secret", cl.c.AccessClientSecret)
-	}
 	res, err := cl.http.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("can't reach %s: %w", cl.c.URL, err)
@@ -387,4 +384,48 @@ func (cl *Client) postJSON(ctx context.Context, path string, payload, into any) 
 		return fmt.Errorf("%s", message(body))
 	}
 	return json.Unmarshal(body, into)
+}
+
+// Logs copies the running app's output to w; with follow, until the server
+// ends it (an hour at most) or ctx does.
+func (cl *Client) Logs(ctx context.Context, project string, follow bool, tail int, w io.Writer) error {
+	q := url.Values{"tail": {fmt.Sprint(tail)}}
+	if follow {
+		q.Set("follow", "1")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cl.c.URL+"/api/v1/projects/"+url.PathEscape(project)+"/logs?"+q.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	cl.headers(req)
+	res, err := (&http.Client{}).Do(req) // no timeout: a followed log runs as long as it runs
+	if err != nil {
+		return fmt.Errorf("can't reach %s: %w", cl.c.URL, err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusUnauthorized {
+		return ErrRefused
+	}
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+		return fmt.Errorf("%s", message(body))
+	}
+	_, err = io.Copy(w, res.Body)
+	return err
+}
+
+func (cl *Client) headers(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+cl.c.Token)
+	if cl.c.AccessClientID != "" {
+		req.Header.Set("CF-Access-Client-Id", cl.c.AccessClientID)
+		req.Header.Set("CF-Access-Client-Secret", cl.c.AccessClientSecret)
+	}
+}
+
+// SSHTarget is where console --server connects: HOUSTON_SSH, else the saved one.
+func (cl *Client) SSHTarget(getenv func(string) string) string {
+	if t := getenv("HOUSTON_SSH"); t != "" {
+		return t
+	}
+	return cl.c.SSH
 }

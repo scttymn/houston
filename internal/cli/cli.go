@@ -64,14 +64,20 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		return runDev(file, production, stderr, d)
 	})
 	dev.Flags().BoolVar(&production, "production", false, "run the production build target instead, with the code baked into the image")
+	var consoleOnServer bool
+	consoleCmd := command("console", "Run x-houston.commands.console in the running app (--server: on the server, over SSH on the LAN)", func() int {
+		if consoleOnServer {
+			return runConsoleServer(file, stderr)
+		}
+		return runConsole(file, stderr, d)
+	})
+	consoleCmd.Flags().BoolVar(&consoleOnServer, "server", false, "in the app running on the server (SSH to houston@<LAN address>)")
 	root.AddCommand(
 		dev,
 		command("test", "Run x-houston.commands.test in a throwaway copy of the project", func() int {
 			return runTest(file, stdout, stderr, d)
 		}),
-		command("console", "Run x-houston.commands.console in the running app", func() int {
-			return runConsole(file, stderr, d)
-		}),
+		consoleCmd,
 	)
 	root.AddCommand(command("init", "Set up this Rails app for Houston (compose.yml, Dockerfile stages, .env)", func() int {
 		return runInit(file, stdin, stdout, stderr)
@@ -95,18 +101,19 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	deployCmd.Flags().StringVar(&deployProject, "project", "", "with --server: the project (default: the compose file's name)")
 	deployCmd.Flags().BoolVar(&deployFollow, "follow", false, "with --server: follow it to its result; exit 0 on GO, 1 on NO-GO")
 	root.AddCommand(deployCmd)
-	var accessID, accessSecret string
+	var accessID, accessSecret, loginSSH string
 	login := &cobra.Command{
 		Use:   "login [url]",
 		Short: "Save Mission Control's URL and an API token for --server commands",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code = runLogin(args, accessID, accessSecret, stdin, stdout, stderr)
+			code = runLogin(args, accessID, accessSecret, loginSSH, stdin, stdout, stderr)
 			return nil
 		},
 	}
 	login.Flags().StringVar(&accessID, "access-client-id", "", "a Cloudflare Access service token's client ID, if Access guards admin.<base>")
 	login.Flags().StringVar(&accessSecret, "access-client-secret", "", "its client secret")
+	login.Flags().StringVar(&loginSSH, "ssh", "", "for console --server: houston@<the server's LAN address>")
 	root.AddCommand(login, command("logout", "Forget the saved server and token", func() int {
 		return runLogout(stdout, stderr)
 	}))
@@ -200,10 +207,19 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	runnerCmd.MarkFlagRequired("name")
 	runnerCmd.MarkFlagRequired("workspace")
 	root.AddCommand(runnerCmd)
-	logs := command("logs", "Show the app's logs", func() int {
+	var logsOnServer bool
+	var logsTail int
+	var logsProject string
+	logs := command("logs", "Show the app's logs (--server: the app running on the server)", func() int {
+		if logsOnServer {
+			return runLogsServer(file, logsProject, follow, logsTail, stdout, stderr)
+		}
 		return runLogs(file, follow, stderr, d)
 	})
 	logs.Flags().BoolVarP(&follow, "follow", "f", false, "keep following new output")
+	logs.Flags().BoolVar(&logsOnServer, "server", false, "the app running on the server")
+	logs.Flags().IntVar(&logsTail, "tail", 200, "with --server: how many lines to start with")
+	logs.Flags().StringVar(&logsProject, "project", "", "with --server: the project (default: the compose file's name)")
 	root.AddCommand(logs)
 
 	root.SetArgs(args)

@@ -199,6 +199,36 @@ From a laptop (or an agent), with a named API token: see status, deploys and the
 - **Mutations, each caught:** tags picked in string order (`v1.9` over `v1.10`); the webhook secret shown after its first delivery.
 - **Cleanup:** the link-save response has its own type (`LinkSaved`) instead of borrowing `Webhook`'s fields.
 
+## Batch 5: App logs and console
+
+### Design (short)
+- **`GET /api/v1/projects/:name/logs?tail=<1–10000, default 200>&follow=1`:** Mission Control finds the running app container (`docker ps --filter label=service=<name> --filter label=role=web`, the newest) and **streams** `docker logs --timestamps --tail N [--follow]` as `text/plain` (`ActionController::Live`).
+  - No running container → 404 "<name> isn't running".
+  - A follow stops when the client goes away (the write fails, and the docker process is killed), and after at most an hour.
+  - `DockerCommand` gains `stream(*args) { |chunk| }`, with FakeDocker to match.
+- **`houston logs --server [-f] [--tail N] [--project]`:** copies that stream to stdout. `houston logs` without `--server` is the local one, as before.
+- **`houston console --server`** (LAN-only, your decision):
+  - `commands.console.server` from the local compose file (a string console serves both).
+  - It runs `ssh -t <target> 'docker exec -it "$(docker ps -q --filter label=service=<name> --filter label=role=web | head -n1)" sh -c '"'"'<command>'"'"''` and passes the exit code through.
+  - The target: `HOUSTON_SSH`, else `houston login --ssh houston@<LAN IP>` (saved with the server).
+  - With no target → exit 2 saying how to set one and how to authorize your key (`ssh-copy-id houston@<server>`).
+  - The project name and command are quoted for the remote shell.
+
+### AC ↔ test map (Batch 5)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Logs stream the docker output of the newest running app container, with `--tail 200` by default, `--follow` when asked, and `--timestamps` | `integration/api_v1_logs_test.rb` `test "app logs stream"` | Contract |
+| 2 | Not running → 404; `tail` of 0, 10001 or `x` → 422; an unknown project → 404; no token → 401 | `test "logs are guarded"` | Contract, Authz |
+| 3 | CLI `logs --server -f --tail 50` asks with `follow=1&tail=50` and copies the stream to stdout; without `--server`, the local path is unchanged | `internal/cli` `TestLogsServer` | Contract |
+| 4 | CLI `console --server`: `ssh -t <target>` with the remote command, the name and a hostile console command (`echo 'hi'; id`) quoted, the exit code passed through; `HOUSTON_SSH` beats the saved one | `TestConsoleServer` | Contract (hostile input) |
+| 5 | No SSH target → exit 2 with `houston login --ssh` and `ssh-copy-id`; no console command → exit 2; `login --ssh` saves the target | same | Preconditions |
+
+### Done (Batch 5)
+- **Red:** 2 Rails tests failed, and the Go tests didn't compile. **Green:** Mission Control 149 runs and the Go suite; rubocop and gofmt are clean.
+- **An old test retired:** build step 1 pinned `logs --server` / `--tail` as unknown flags until they existed. Now that they do, the test checks that `--server` without a login exits 1 pointing at `houston login`, and never touches docker.
+- **Mutations, each caught:** the console command unquoted for the remote shell; `follow` never sent; any `tail` accepted.
+- **The real proof** (a real log stream through Cloudflare, a real console over SSH) is Batch 6.
+
 ### Decisions (from you)
 1. **`console --server` is LAN-only for now** ("LAN-only is fine for now"). Reaching it through `cloudflared access ssh` from anywhere else is a later addition.
 
