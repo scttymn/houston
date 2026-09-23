@@ -66,4 +66,13 @@ class BackupJobTest < ActiveJob::TestCase
     assert_nil run.snapshot_id
     assert_equal "running", takeover.reload.status
   end
+
+  test "a deploy's snapshot has its own queue" do
+    manual = BackupRun.request!(@project)
+    deploy = @project.backup_runs.create!(location: manual.location, kind: "deploy", reason: "deploy", deploy_number: 2, status: "queued", heartbeat_at: Time.current)
+    assert_equal "backups", BackupJob.new(manual).queue_name
+    assert_equal "snapshots", BackupJob.new(deploy).queue_name
+    workers = YAML.load(ERB.new(Rails.root.join("config/queue.yml").read).result, aliases: true).dig("production", "workers")
+    assert_includes workers, { "queues" => [ "snapshots" ], "threads" => 2, "processes" => 1, "polling_interval" => 1 }
+  end
 end

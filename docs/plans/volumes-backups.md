@@ -27,7 +27,7 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
 2. **Retention and the project page:** `forget` after each backup (`--keep-daily <auto>` / `--keep-last <deploy>`), `prune` once a day per location; the Snapshots panel (Scheduled / Pre-deploy, with sizes) and the Backup plan panel. (Split from the old Batch 2, which was past the ~12-row signal.)
 3. **The API and the CLI:** `/api/v1` snapshots and backups; `houston snapshots --server`, `houston backup --server [--follow]`; the last backup in `houston status`.
 4. **The schedule:** `backups.schedule` (daily HH:MM, in Houston's time zone, UTC by default; Decision 4) through sync; a recurring tick; once per day per project, caught up after downtime; NEXT BACKUP on the flight board; a failed backup shows as NO-GO.
-5. **The pre-deploy snapshot:** the runner API (one per deploy, idempotent), deploy step "Snapshot" just before Release (Decision 2) in Go and on the deploy page, skipped with no data, its failure stops the deploy (Decision 1).
+5. **The pre-deploy snapshot:** the runner API (one per deploy, idempotent), deploy step "Snapshot" after Build and before Accessories (Decision 2, refined in Batch 5) in Go and on the deploy page, skipped with no data, its failure stops the deploy (Decision 1).
 6. **Volume placement:** a location per named volume (Add project, the project page, `houston volumes --server`); sync creates new volumes there (NFS subdirectory, host path); a volume that exists elsewhere is a NO-GO, not a silent move; the SQLite-on-NFS warning; Postgres data stays on local disk.
 7. **Storage locations in Settings and per-project backup targets:** list with capabilities (live volumes / backups), add (the first-run form, reused), make default, the password shown once; the project's backup target; `houston storage list|add` (secrets from stdin).
 8. **The real run:** on OrbStack, the equip copy (SQLite in WAL mode) and the spike (Postgres), with an NFS server container as a location and a host path as another: Back up now, the schedule, a pre-deploy snapshot, retention, and the snapshot's contents restored by hand and opened (`sqlite3`, `pg_restore --list`).
@@ -323,3 +323,53 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
   - **A failed scheduled backup doesn't run again the same day** (once per local day, by design). It shows as "backup NO-GO" on the flight board, and Back up now is there.
   - **Changing the time zone mid-day** can make that day's scheduled backup run twice or not at all, because the local date moves.
 - Settings › General is where the header's Settings link goes now, with a sub-nav to API tokens.
+
+## Batch 5: The pre-deploy snapshot
+
+### Decision 2, refined
+The snapshot goes **after Build and before Accessories**, not just before Release. The Accessories step boots the accessories and **reboots any whose config changed**: a new Postgres image (16 → 17), new options. A snapshot after that could meet a database that won't start on its old data, and it wouldn't be the data as the old version left it. After the build is where Decision 2 wanted it: the long part is done, and nothing has touched the data yet.
+
+### Design (short)
+- **Runner API** (runner token, localhost only; the deploy's own token in `X-Houston-Deploy-Token`, like progress reports):
+  - `POST /api/deploys/:id/snapshot` → 202 with the run: a `deploy`-kind run, reason `deploy`, `deploy_number`.
+    - **One per deploy:** a unique index on `(project_id, deploy_number)` where reason is deploy. A retried POST gets the same run.
+    - "Nothing deployed yet" (a first deploy) → 200 `{status: "skipped", error: "nothing deployed yet"}`, and no run.
+    - No backup storage → 409, so the deploy stops (Decision 1).
+    - A token that isn't the deploy's → 403; a deploy no longer in flight → 409. No run either way.
+  - `GET /api/deploys/:id/snapshot` → that run (same checks).
+- **Its own queue:** `BackupJob` for a deploy run goes on `snapshots` (2 threads). A deploy never waits behind another project's hours-long backup; it waits only for its own project's running backup (`running` stays unique per project).
+- **`--retry-lock 10m`** on `restic backup` and `forget`: a snapshot can now overlap the daily prune, which holds the repository's exclusive lock.
+- **Go `internal/deploy`:** step `Snapshot` after Build, before Accessories.
+  - It POSTs, then polls every 2 s (`Options.SnapshotEvery`) until the run finishes.
+  - GO → the log line `ok  snapshot 5c5edd4c · kind:deploy sha:<running> · 391 MB`. Skipped → `no snapshot: <why>`, and the deploy goes on.
+  - NO-GO → the deploy is NO-GO "pre-deploy snapshot failed: …; the old version keeps serving". Nothing after it runs.
+  - The deploy's deadline passing while it waits → NO-GO "the pre-deploy snapshot didn't finish before the deploy's deadline". Mission Control's run goes on; restic can finish the snapshot.
+  - A hand `houston deploy` does the same (it has a deploy and a token).
+- **Mission Control:** `Deploy::STEPS` gains `Snapshot` between Build and Accessories, so the deploy page lists it.
+
+### AC ↔ test map (Batch 5)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | POST with the deploy's token: 202, a queued deploy-kind run with its number, on the `snapshots` queue; again → the same run, one job | `integration/api_snapshots_test.rb` `test "a deploy asks for its snapshot"` | At-least-once |
+| 2 | A first deploy → skipped, no run; no storage → 409; the wrong token → 403; a finished deploy → 409; a personal token → 401; through Cloudflare (`Cf-Ray`) → refused | `test "who may ask, and when"` | Authz, Preconditions |
+| 3 | GET: the run's view; after it's GO, the snapshot id and bytes | `test "a deploy asks for its snapshot"` | Contract |
+| 4 | The database allows one deploy snapshot per deploy number | `models/backup_run_test.rb` `test "one snapshot per deploy"` | Concurrency |
+| 5 | `restic backup` and `forget` carry `--retry-lock 10m`; a deploy run's job is on `snapshots`, and a manual one's on `backups`; `queue.yml` has the worker | `models/backup_test.rb`, `jobs/backup_job_test.rb` | Concurrency |
+| 6 | `Deploy::STEPS` has Snapshot between Build and Accessories; the deploy page lists it | `models/deploy_test.rb` (step states), `deploy_pages_test.rb` | Contract |
+| 7 | The mission client's `Snapshot` and `SnapshotStatus`: paths, the token header, decoding, 403/409 as errors | `internal/mission` `TestClientSnapshots` | Contract |
+| 8 | Deploy: Snapshot runs after the push and before the accessories; GO logs the line and goes on; skipped logs why and goes on | `internal/deploy` `TestDeploySnapshot` | Contract |
+| 9 | Deploy: a NO-GO snapshot → NO-GO with its error, and no accessory boot, release or kamal deploy; the deadline passing while it waits → NO-GO with the reason | `TestDeploySnapshotStops` | Crash & repair |
+
+### Done (Batch 5)
+- **Decision 2, refined:** the snapshot comes after Build and before Accessories, because the Accessories step can reboot a changed Postgres. See above.
+- **Red:** Mission Control had 7 failures in the new tests; the Go packages didn't build. **Green:** Mission Control 198 runs and the Go suite. The migration runs down and up. rubocop, gofmt and go vet are clean.
+- **Two existing tests changed on purpose:** the happy path's and a claimed deploy's mission calls now include `snapshot`.
+- **Added:**
+  - `internal/humanize`, so the CLI and the deploy log print sizes the same way (it was in `internal/cli`).
+  - A retried POST after the snapshot is done still gets the same run. This came from the review; the first version only retried while the run was queued.
+- **Mutations, each caught:**
+  - Rails: no token check; no in-flight check; deploy snapshots on the backups queue; deploy snapshots deduped like manual ones; no `--retry-lock`.
+  - Go: a NO-GO snapshot letting the deploy go on; the deadline read as a plain timeout; a refused request letting the deploy go on.
+- **scotty-review (cold pass):** nothing to fix.
+  - Ownership and "in flight" are checked before a run is created. A takeover mid-wait stops as any stop does. The wait is bounded by the deploy's deadline, and an API blip mid-wait is logged and retried until then.
+  - **Noted:** a very large snapshot counts against the deploy's 30-minute deadline. Batch 8's real run will show real durations.

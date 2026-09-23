@@ -78,4 +78,11 @@ class BackupRunTest < ActiveSupport::TestCase
     taken = BackupRun.find_by!(scheduled_for: Date.new(2026, 9, 22))
     assert_no_enqueued_jobs { assert_equal taken, BackupRun.request!(@project, reason: "schedule", scheduled_for: Date.new(2026, 9, 22)) }
   end
+
+  test "one snapshot per deploy" do
+    row = ->(number) { { project_id: @project.id, location_id: storage_locations(:unas).id, kind: "deploy", reason: "deploy", status: "queued", deploy_number: number, token_digest: "", heartbeat_at: Time.current } }
+    BackupRun.insert!(row.(7))
+    assert_raises(ActiveRecord::RecordNotUnique) { BackupRun.insert!(row.(7).merge(status: "go")) }
+    BackupRun.insert!(row.(8))
+  end
 end

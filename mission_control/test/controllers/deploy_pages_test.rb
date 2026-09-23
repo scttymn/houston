@@ -22,6 +22,8 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_select ".deploy-steps li:first-child[data-step=Test]", /00/
     assert_select ".deploy-steps [data-step=Secrets][data-state=done]"
     assert_select ".deploy-steps [data-step=Build][data-state=current]"
+    # The pre-deploy snapshot comes after the build, before the accessories.
+    assert_select ".deploy-steps [data-step=Build] + [data-step=Snapshot][data-state=pending] + [data-step=Accessories]"
     assert_select ".deploy-steps [data-step=Deploy][data-state=pending]"
     assert_select "pre.log", /step output/
     assert_select "turbo-cable-stream-source[signed-stream-name]"

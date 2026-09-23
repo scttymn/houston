@@ -61,7 +61,7 @@ class BackupTest < ActiveSupport::TestCase
     assert_includes restic.each_cons(2).to_a, [ "-v", "houston-storage-unas-nfs:/repo" ]
     assert_includes restic.each_cons(2).to_a, [ "-v", "equip_storage:/data/storage:ro" ]
     assert_includes restic.each_cons(2).to_a, [ "-v", "houston-backup.equip:/out:ro" ]
-    assert_equal [ StorageLocation::RESTIC_IMAGE, "backup", "--host", "houston", "--json", "--tag", "project:equip", "--tag", "sha:#{"a" * 40}",
+    assert_equal [ StorageLocation::RESTIC_IMAGE, "backup", "--retry-lock", "10m", "--host", "houston", "--json", "--tag", "project:equip", "--tag", "sha:#{"a" * 40}",
                    "--tag", "kind:auto", "--tag", "reason:manual", "--exclude-file", "/out/.houston/exclude", "/data", "/out" ],
                  restic.drop(restic.index(StorageLocation::RESTIC_IMAGE))
     assert_equal "restic-password-xyz", fake.calls[9].env["RESTIC_PASSWORD"]
@@ -116,7 +116,7 @@ class BackupTest < ActiveSupport::TestCase
     back_up(fake)
     forgets = restic_forgets(fake)
     assert_equal 1, forgets.size
-    assert_equal [ StorageLocation::RESTIC_IMAGE, "forget", "--host", "houston", "--tag", "project:equip,kind:auto", "--group-by", "", "--json", "--keep-daily", "14" ],
+    assert_equal [ StorageLocation::RESTIC_IMAGE, "forget", "--retry-lock", "10m", "--host", "houston", "--tag", "project:equip,kind:auto", "--group-by", "", "--json", "--keep-daily", "14" ],
                  forgets.first.args.drop(forgets.first.args.index(StorageLocation::RESTIC_IMAGE))
     assert_equal "go", @run.status
     assert_nil Rails.cache.read([ "snapshots", "equip", storage_locations(:unas).id ]), "a GO backup clears the snapshots cache"

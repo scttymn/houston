@@ -33,7 +33,7 @@ class Deploy < ApplicationRecord
   scope :summary, -> { select(column_names - [ "log" ]) }
 
   # houston deploy's steps (internal/deploy), after houston runner's Test (step 00).
-  STEPS = %w[Test Secrets Build Accessories Release Deploy Post-deploy].freeze
+  STEPS = %w[Test Secrets Build Snapshot Accessories Release Deploy Post-deploy].freeze
   def short_sha = sha.first(7)
 
   # Each step as :done, :current, :failed, :pending, or :skipped (a hand

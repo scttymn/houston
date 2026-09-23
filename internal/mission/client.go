@@ -268,6 +268,39 @@ func message(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
+// Snapshot is a deploy's pre-deploy snapshot, as Mission Control runs it:
+// queued, running, go, no_go, or skipped (Error says why).
+type Snapshot struct {
+	ID         int    `json:"id"`
+	Status     string `json:"status"`
+	SnapshotID string `json:"snapshot_id"`
+	SHA        string `json:"sha"` // the version that was serving
+	Bytes      int64  `json:"bytes"`
+	Error      string `json:"error"`
+}
+
+// Snapshot asks for d's pre-deploy snapshot (a retry gets the same one).
+func (c *Client) Snapshot(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.snapshot(ctx, http.MethodPost, d)
+}
+
+// SnapshotStatus is d's pre-deploy snapshot as it stands.
+func (c *Client) SnapshotStatus(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.snapshot(ctx, http.MethodGet, d)
+}
+
+func (c *Client) snapshot(ctx context.Context, method string, d Deploy) (Snapshot, error) {
+	var s Snapshot
+	status, body, err := c.do(ctx, method, "/api/deploys/"+strconv.Itoa(d.ID)+"/snapshot", map[string]string{"X-Houston-Deploy-Token": d.Token}, nil)
+	if err != nil {
+		return s, err
+	}
+	if status != http.StatusOK && status != http.StatusAccepted {
+		return s, errors.New(message(body))
+	}
+	return s, json.Unmarshal(body, &s)
+}
+
 // JobProject is what a runner needs to fetch a claimed deploy's commit.
 type JobProject struct {
 	Name        string `json:"name"`

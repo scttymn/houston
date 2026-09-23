@@ -13,6 +13,11 @@ default: &default
       threads: 1
       processes: 1
       polling_interval: 1
+    # Pre-deploy snapshots: a deploy is waiting on each.
+    - queues: [ snapshots ]
+      threads: 2
+      processes: 1
+      polling_interval: 1
 
 development:
   <<: *default

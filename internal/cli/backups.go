@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sevenmoons/houston/internal/humanize"
 	"github.com/sevenmoons/houston/internal/server"
 )
 
@@ -28,7 +29,7 @@ func runSnapshots(file, projectFlag string, asJSON bool, stdout, stderr io.Write
 		fmt.Fprintf(stdout, "No snapshots of %s yet.\n", name)
 	}
 	for _, s := range snapshots {
-		fmt.Fprintf(stdout, "%s  %-6s  %-18s  %s  %-8s  %s\n", utc(s.Time), s.Kind, snapshotNote(s), short(s.SHA), humanSize(s.Bytes), s.ShortID)
+		fmt.Fprintf(stdout, "%s  %-6s  %-18s  %s  %-8s  %s\n", utc(s.Time), s.Kind, snapshotNote(s), short(s.SHA), humanize.Bytes(s.Bytes), s.ShortID)
 	}
 	return 0
 }
@@ -70,7 +71,7 @@ func runBackup(file, projectFlag string, follow bool, stdout, stderr io.Writer) 
 		}
 		switch b.Status {
 		case "go":
-			fmt.Fprintf(stdout, "GO: %s backed up: snapshot %s, %s\n", name, short8(b.SnapshotID), humanSize(b.Bytes))
+			fmt.Fprintf(stdout, "GO: %s backed up: snapshot %s, %s\n", name, short8(b.SnapshotID), humanize.Bytes(b.Bytes))
 			if b.Error != "" {
 				fmt.Fprintf(stdout, "warning: %s\n", b.Error)
 			}
@@ -96,7 +97,7 @@ func backupLine(b *server.Backup) string {
 		if b.FinishedAt != nil {
 			when = utc(*b.FinishedAt)
 		}
-		return fmt.Sprintf("GO %s · %s · %s", when, short8(b.SnapshotID), humanSize(b.Bytes))
+		return fmt.Sprintf("GO %s · %s · %s", when, short8(b.SnapshotID), humanize.Bytes(b.Bytes))
 	case b.Status == "no_go":
 		return "NO-GO: " + b.Error
 	case b.Status == "skipped":
@@ -112,22 +113,6 @@ func short8(id string) string {
 		return id[:8]
 	}
 	return id
-}
-
-// humanSize is bytes in 1024s with three significant digits, as Mission
-// Control's pages show sizes (Rails' number_to_human_size).
-func humanSize(n int64) string {
-	if n < 1024 {
-		return fmt.Sprintf("%d B", n)
-	}
-	v := float64(n)
-	for _, unit := range []string{"KB", "MB", "GB", "TB"} {
-		v /= 1024
-		if v < 1024 || unit == "TB" {
-			return strconv.FormatFloat(v, 'g', 3, 64) + " " + unit
-		}
-	}
-	return ""
 }
 
 // runSettings shows Houston's settings; with a time zone, sets it first.

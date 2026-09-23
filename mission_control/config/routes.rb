@@ -28,6 +28,8 @@ Rails.application.routes.draw do
     get "projects/:name/secrets/:key", to: "secrets#show", constraints: { key: %r{[^/]+} }
     post "projects/:name/deploys", to: "deploys#create"
     patch "deploys/:id", to: "deploys#update"
+    post "deploys/:id/snapshot", to: "snapshots#create"
+    get "deploys/:id/snapshot", to: "snapshots#show"
     post "runner/jobs/claim", to: "runner_jobs#claim"
 
     namespace :v1 do

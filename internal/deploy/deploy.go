@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sevenmoons/houston/internal/humanize"
 	"github.com/sevenmoons/houston/internal/kamal"
 	"github.com/sevenmoons/houston/internal/mission"
 	"github.com/sevenmoons/houston/internal/project"
@@ -55,6 +56,8 @@ type Mission interface {
 	Secret(ctx context.Context, project, key string) (string, bool, error)
 	StartDeploy(ctx context.Context, project, sha, ref string) (mission.Deploy, error)
 	Report(ctx context.Context, d mission.Deploy, p mission.Progress) error
+	Snapshot(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	SnapshotStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
 }
 
 type Options struct {
@@ -76,6 +79,8 @@ type Options struct {
 	// RunTests runs x-houston.commands.test first (step 00) with Houston.
 	RunTests bool
 	Houston  string // this binary, for houston test
+	// SnapshotEvery: how often the pre-deploy snapshot is checked; zero: 2 s.
+	SnapshotEvery time.Duration
 }
 
 type Deps struct {
@@ -300,6 +305,13 @@ func (r *run) deploy(tookOver bool) int {
 		return r.fail(msg)
 	}
 
+	// After the long build, before anything touches the data: the accessories
+	// may reboot (a new Postgres image) and the release hook migrates.
+	r.report.step("Snapshot")
+	if code, stopped := r.snapshot(); stopped {
+		return code
+	}
+
 	if len(r.p.Compose.Services) > 1 {
 		r.report.step("Accessories")
 		if code, err := r.kamal("accessory", "boot", "all", "--version", r.sha); err != nil || code != 0 {
@@ -336,6 +348,52 @@ func (r *run) deploy(tookOver bool) int {
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
 	r.report.finish("go", "")
 	return 0
+}
+
+// snapshot asks Mission Control for the pre-deploy snapshot of the version
+// that's serving, and waits for it. stopped: the deploy ends here, with code.
+func (r *run) snapshot() (code int, stopped bool) {
+	s, err := r.d.Mission.Snapshot(r.ctx, r.report.deploy)
+	for {
+		switch {
+		case r.ctx.Err() != nil && errors.Is(context.Cause(r.ctx), context.DeadlineExceeded):
+			msg := "the pre-deploy snapshot didn't finish before the deploy's deadline; the old version keeps serving"
+			r.report.logf("NO-GO: %s\n", msg)
+			r.report.finish("no_go", msg)
+			fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
+			return exitFailure, true
+		case r.ctx.Err() != nil:
+			return r.stop(), true
+		case err != nil && s.ID == 0:
+			return r.fail(fmt.Sprintf("pre-deploy snapshot failed: %v; the old version keeps serving", err)), true
+		case err != nil:
+			r.report.logf("checking the snapshot: %v\n", err) // a blip: keep checking until the deadline
+		case s.Status == "go":
+			r.report.logf("ok  snapshot %s · kind:deploy sha:%s · %s\n", first(s.SnapshotID, 8), first(s.SHA, 7), humanize.Bytes(s.Bytes))
+			return 0, false
+		case s.Status == "skipped":
+			r.report.logf("no snapshot: %s\n", s.Error)
+			return 0, false
+		case s.Status == "no_go":
+			return r.fail(fmt.Sprintf("pre-deploy snapshot failed: %s; the old version keeps serving", s.Error)), true
+		}
+		select {
+		case <-r.ctx.Done():
+		case <-time.After(orDefault(r.o.SnapshotEvery, 2*time.Second)):
+			id := s.ID
+			s, err = r.d.Mission.SnapshotStatus(r.ctx, r.report.deploy)
+			if s.ID == 0 {
+				s.ID = id
+			}
+		}
+	}
+}
+
+func first(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 // secrets fetches every value, resolves the composites, and prepares what

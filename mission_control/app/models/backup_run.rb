@@ -4,6 +4,8 @@
 class BackupRun < ApplicationRecord
   class Refused < StandardError; end
 
+  NOTHING_DEPLOYED = "nothing deployed yet"
+
   STATUSES = %w[queued running go no_go skipped].freeze
   KINDS = %w[auto deploy].freeze
   REASONS = %w[schedule manual deploy restore].freeze
@@ -27,15 +29,20 @@ class BackupRun < ApplicationRecord
   # A manual one already queued is returned as it is (a double click).
   # scheduled_for: the local date a scheduled backup is for; that day's run
   # (whatever its status) is returned instead of a second one.
-  def self.request!(project, reason: "manual", scheduled_for: nil)
-    raise Refused, "nothing deployed yet" unless project.running_deploy
+  # deploy_number: a pre-deploy snapshot (kind deploy), one per deploy.
+  def self.request!(project, reason: "manual", scheduled_for: nil, deploy_number: nil)
+    raise Refused, NOTHING_DEPLOYED unless project.running_deploy
     location = project.backup_location
     raise Refused, "no backup storage yet (finish setup's storage step)" unless location
 
-    same = scheduled_for ? { scheduled_for: } : { status: "queued", reason: }
+    same = if deploy_number then { reason: "deploy", deploy_number: }
+    elsif scheduled_for then { scheduled_for: }
+    else { status: "queued", reason: }
+    end
     run = transaction do
       project.backup_runs.find_by(same) ||
-        project.backup_runs.create!(location:, kind: "auto", reason:, scheduled_for:, status: "queued", heartbeat_at: Time.current)
+        project.backup_runs.create!(location:, kind: deploy_number ? "deploy" : "auto", reason:, scheduled_for:, deploy_number:,
+                                    status: "queued", heartbeat_at: Time.current)
     end
     BackupJob.perform_later(run) if run.previously_new_record?
     run

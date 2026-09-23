@@ -195,15 +195,21 @@ func (g *fakeGit) Output(dir string, args ...string) (string, error) {
 }
 
 type fakeMission struct {
-	mu        sync.Mutex
-	calls     []string
-	syncErr   error
-	secrets   map[string]string
-	startErr  error
-	deploy    mission.Deploy
-	reports   []mission.Progress
-	reportErr func(p mission.Progress) error
-	domains   map[string]mission.DomainState
+	mu    sync.Mutex
+	calls []string
+	// The pre-deploy snapshot: what the POST answers, then each GET in turn
+	// (the last one repeats). Default: nothing deployed yet, skipped.
+	snapshot     mission.Snapshot
+	snapshotErr  error
+	snapshotPoll []mission.Snapshot
+	onSnapshot   func() // called when the snapshot is asked for
+	syncErr      error
+	secrets      map[string]string
+	startErr     error
+	deploy       mission.Deploy
+	reports      []mission.Progress
+	reportErr    func(p mission.Progress) error
+	domains      map[string]mission.DomainState
 }
 
 func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error) {
@@ -217,6 +223,33 @@ func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (missio
 func (m *fakeMission) Secret(ctx context.Context, project, key string) (string, bool, error) {
 	v, ok := m.secrets[key]
 	return v, ok, nil
+}
+
+func (m *fakeMission) Snapshot(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "snapshot")
+	if m.onSnapshot != nil {
+		m.onSnapshot()
+	}
+	if m.snapshotErr != nil {
+		return mission.Snapshot{}, m.snapshotErr
+	}
+	if m.snapshot.Status == "" {
+		return mission.Snapshot{Status: "skipped", Error: "nothing deployed yet"}, nil
+	}
+	return m.snapshot, nil
+}
+
+func (m *fakeMission) SnapshotStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "snapshot?")
+	s := m.snapshotPoll[0]
+	if len(m.snapshotPoll) > 1 {
+		m.snapshotPoll = m.snapshotPoll[1:]
+	}
+	return s, nil
 }
 
 func (m *fakeMission) StartDeploy(ctx context.Context, project, sha, ref string) (mission.Deploy, error) {
@@ -284,6 +317,38 @@ type harness struct {
 	exec    *fakeExec
 	claimed *mission.Deploy
 	tests   bool
+	// snapshotEvery: how often the pre-deploy snapshot is polled.
+	snapshotEvery time.Duration
+}
+
+// reported: some progress report named step.
+func (h *harness) reported(step string) bool {
+	for _, r := range h.mission.reports {
+		if r.Step == step {
+			return true
+		}
+	}
+	return false
+}
+
+// finishedWith: the deploy was finished with status and error.
+func (h *harness) finishedWith(status, err string) bool {
+	for _, r := range h.mission.reports {
+		if r.Status == status {
+			return r.Error == err
+		}
+	}
+	return false
+}
+
+// indexOf is the first call in whats that starts with prefix, or -1.
+func indexOf(whats []string, prefix string) int {
+	for i, w := range whats {
+		if strings.HasPrefix(w, prefix) {
+			return i
+		}
+	}
+	return -1
 }
 
 func newHarness(t *testing.T, compose string) *harness {
@@ -325,6 +390,7 @@ func (h *harness) run() int {
 		Claimed:        h.claimed,
 		RunTests:       h.tests,
 		Houston:        "/usr/local/bin/houston",
+		SnapshotEvery:  h.snapshotEvery,
 	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission, Exec: h.exec})
 }
 
@@ -345,7 +411,7 @@ func TestDeployHappyPath(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, h.stderr.String())
 	}
 
-	if want := []string{"sync", "start " + sha + " refs/heads/main"}; !reflect.DeepEqual(h.mission.calls, want) {
+	if want := []string{"sync", "start " + sha + " refs/heads/main", "snapshot"}; !reflect.DeepEqual(h.mission.calls, want) {
 		t.Errorf("mission calls = %v, want %v", h.mission.calls, want)
 	}
 	want := []string{"build", "push", "kamal accessory boot all --version " + sha, "release", "kamal deploy --skip-push --version " + sha, "post_deploy"}
@@ -802,7 +868,7 @@ func TestDeployContinuesAClaimedDeploy(t *testing.T) {
 	if code := h.run(); code != 0 {
 		t.Fatalf("exit %d\n%s", code, h.stderr.String())
 	}
-	if !reflect.DeepEqual(h.mission.calls, []string{"sync"}) {
+	if !reflect.DeepEqual(h.mission.calls, []string{"sync", "snapshot"}) {
 		t.Errorf("mission calls = %v; a claimed deploy isn't started again", h.mission.calls)
 	}
 	if whats := h.docker.whats(); len(whats) == 0 || whats[0] != "kamal lock release --version "+sha {
@@ -897,5 +963,70 @@ func TestDeployLogsDomainStates(t *testing.T) {
 	}
 	if strings.Contains(log, "shop.example.com") {
 		t.Error("a domain that's fine isn't worth a log line")
+	}
+}
+
+// The pre-deploy snapshot runs after the image is pushed and before the
+// accessories: after the long build, before anything touches the data.
+func TestDeploySnapshot(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.snapshotEvery = time.Millisecond
+	h.mission.snapshot = mission.Snapshot{ID: 21, Status: "queued"}
+	h.mission.snapshotPoll = []mission.Snapshot{{ID: 21, Status: "running"},
+		{ID: 21, Status: "go", SnapshotID: "5c5edd4c" + strings.Repeat("0", 56), SHA: strings.Repeat("b", 40), Bytes: 410000000}}
+
+	var before []string
+	h.mission.onSnapshot = func() { before = h.docker.whats() }
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if indexOf(before, "push") < 0 || indexOf(before, "kamal accessory boot") >= 0 {
+		t.Errorf("docker calls before the snapshot: %v; want the push, and no accessory boot yet", before)
+	}
+	if !strings.Contains(h.stdout.String(), "ok  snapshot 5c5edd4c · kind:deploy sha:bbbbbbb · 391 MB") {
+		t.Errorf("log:\n%s", h.stdout.String())
+	}
+	if !h.reported("Snapshot") {
+		t.Error("no Snapshot step reported")
+	}
+
+	// A first deploy: nothing deployed yet, skipped, and the deploy goes on.
+	h = newHarness(t, shopCompose)
+	if code := h.run(); code != 0 || !strings.Contains(h.stdout.String(), "no snapshot: nothing deployed yet") {
+		t.Errorf("skipped: exit %d\n%s", code, h.stdout.String())
+	}
+}
+
+func TestDeploySnapshotStops(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.snapshotEvery = time.Millisecond
+	h.mission.snapshot = mission.Snapshot{ID: 21, Status: "queued"}
+	h.mission.snapshotPoll = []mission.Snapshot{{ID: 21, Status: "no_go", Error: "restic backup failed (exit 1): Fatal: repository not found"}}
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if !h.finishedWith("no_go", "pre-deploy snapshot failed: restic backup failed (exit 1): Fatal: repository not found; the old version keeps serving") {
+		t.Errorf("reports: %+v", h.mission.reports)
+	}
+	for _, after := range []string{"kamal accessory boot", "kamal deploy"} {
+		if indexOf(h.docker.whats(), after) >= 0 {
+			t.Errorf("%s ran after a failed snapshot: %v", after, h.docker.whats())
+		}
+	}
+
+	h = newHarness(t, shopCompose)
+	h.mission.snapshotErr = errors.New("no backup storage yet (finish setup's storage step)")
+	if code := h.run(); code != 1 || !h.finishedWith("no_go", "pre-deploy snapshot failed: no backup storage yet (finish setup's storage step); the old version keeps serving") {
+		t.Errorf("refused: exit %d, reports %+v", code, h.mission.reports)
+	}
+
+	// The deploy's deadline passes while it waits.
+	h = newHarness(t, shopCompose)
+	h.snapshotEvery = time.Millisecond
+	h.timing.Timeout = 300 * time.Millisecond
+	h.mission.snapshot = mission.Snapshot{ID: 21, Status: "queued"}
+	h.mission.snapshotPoll = []mission.Snapshot{{ID: 21, Status: "running"}}
+	if code := h.run(); code != 1 || !h.finishedWith("no_go", "the pre-deploy snapshot didn't finish before the deploy's deadline; the old version keeps serving") {
+		t.Errorf("deadline: exit %d, reports %+v", code, h.mission.reports)
 	}
 }

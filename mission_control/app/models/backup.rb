@@ -126,7 +126,8 @@ class Backup
       tags = [ "project:#{@project.name}", "sha:#{@sha}", "kind:#{@run.kind}", "reason:#{@run.reason}" ]
       tags << "deploy:#{@run.deploy_number}" if @run.deploy_number
       volumes = @project.volumes.map { |v| "#{@project.name}_#{v["name"]}:/data/#{v["name"]}:ro" }
-      command = [ "backup", "--host", "houston", "--json", *tags.flat_map { |t| [ "--tag", t ] } ]
+      # --retry-lock: a pre-deploy snapshot can meet the daily prune's exclusive lock.
+      command = [ "backup", "--retry-lock", "10m", "--host", "houston", "--json", *tags.flat_map { |t| [ "--tag", t ] } ]
       command += [ "--exclude-file", "/out/.houston/exclude", "/data" ] if volumes.any?
       command << "/out"
       ran = docker(*@location.restic_args(*command, name: container(:restic), mounts: volumes + [ "#{staging}:/out:ro" ]), env: @location.restic_env)
@@ -150,7 +151,7 @@ class Backup
     # A failure is a warning; the new snapshot is safe and the next run tries again.
     def forget
       keep = @run.kind == "deploy" ? [ "--keep-last", @project.keep_deploy.to_s ] : [ "--keep-daily", @project.keep_auto.to_s ]
-      ran = docker(*@location.restic_args("forget", "--host", "houston", "--tag", "project:#{@project.name},kind:#{@run.kind}", "--group-by", "", "--json", *keep),
+      ran = docker(*@location.restic_args("forget", "--retry-lock", "10m", "--host", "houston", "--tag", "project:#{@project.name},kind:#{@run.kind}", "--group-by", "", "--json", *keep),
                    env: @location.restic_env)
       @warnings << "old snapshots weren't forgotten: #{tail(ran.output)}" unless ran.success
     end

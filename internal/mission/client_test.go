@@ -203,3 +203,47 @@ func TestClientClaims(t *testing.T) {
 		t.Errorf("wrong token: %v", err)
 	}
 }
+
+func TestClientSnapshots(t *testing.T) {
+	ctx := context.Background()
+	var tokens []string
+	c := server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		tokens = append(tokens, r.Header.Get("X-Houston-Deploy-Token"))
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/deploys/9/snapshot":
+			w.WriteHeader(http.StatusAccepted)
+			io.WriteString(w, `{"id":21,"status":"queued"}`)
+		case "GET /api/deploys/9/snapshot":
+			io.WriteString(w, `{"id":21,"status":"go","snapshot_id":"5c5edd4c`+strings.Repeat("0", 56)+`","sha":"`+strings.Repeat("a", 40)+`","bytes":410000000}`)
+		case "POST /api/deploys/10/snapshot":
+			io.WriteString(w, `{"status":"skipped","error":"nothing deployed yet"}`)
+		case "POST /api/deploys/11/snapshot":
+			w.WriteHeader(http.StatusConflict)
+			io.WriteString(w, `{"error":"no backup storage yet (finish setup's storage step)"}`)
+		case "POST /api/deploys/12/snapshot":
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error":"that token isn't this deploy's"}`)
+		}
+	})
+
+	s, err := c.Snapshot(ctx, Deploy{ID: 9, Token: "t9"})
+	if err != nil || s.ID != 21 || s.Status != "queued" {
+		t.Errorf("Snapshot = %+v, %v", s, err)
+	}
+	s, err = c.SnapshotStatus(ctx, Deploy{ID: 9, Token: "t9"})
+	if err != nil || s.Status != "go" || s.Bytes != 410000000 || !strings.HasPrefix(s.SnapshotID, "5c5edd4c") || s.SHA != strings.Repeat("a", 40) {
+		t.Errorf("SnapshotStatus = %+v, %v", s, err)
+	}
+	if !reflect.DeepEqual(tokens, []string{"t9", "t9"}) {
+		t.Errorf("deploy tokens sent = %v", tokens)
+	}
+	if s, err := c.Snapshot(ctx, Deploy{ID: 10, Token: "t"}); err != nil || s.Status != "skipped" || s.Error != "nothing deployed yet" {
+		t.Errorf("first deploy: %+v, %v", s, err)
+	}
+	if _, err := c.Snapshot(ctx, Deploy{ID: 11, Token: "t"}); err == nil || !strings.Contains(err.Error(), "no backup storage yet") {
+		t.Errorf("no storage: %v", err)
+	}
+	if _, err := c.Snapshot(ctx, Deploy{ID: 12, Token: "t"}); err == nil || !strings.Contains(err.Error(), "isn't this deploy's") {
+		t.Errorf("wrong token: %v", err)
+	}
+}
