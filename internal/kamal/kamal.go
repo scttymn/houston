@@ -42,7 +42,36 @@ const (
 type Target struct {
 	BaseDomain string // <name>.<BaseDomain> is the app's default host
 	Arch       string // amd64 or arm64; Kamal requires builder.arch
+	Generation int    // the project's data generation; 0 or 1: today's names
 }
+
+// Names are a project's Docker and Kamal names in one data generation. A
+// restore builds generation g+1 beside the live one; generation 1 is the
+// names every project had before generations (docs/plans/restore.md).
+type Names struct {
+	Project    string
+	Generation int
+}
+
+// Volume is a named volume's Docker name: <project>_<volume>, or
+// <project>.g<g>_<volume> (project names have no dots, so no clash).
+func (n Names) Volume(volume string) string {
+	if n.Generation <= 1 {
+		return n.Project + "_" + volume
+	}
+	return fmt.Sprintf("%s.g%d_%s", n.Project, n.Generation, volume)
+}
+
+// Accessory is a service's Kamal accessory name: <service>, or <service>-g<g>.
+func (n Names) Accessory(service string) string {
+	if n.Generation <= 1 {
+		return service
+	}
+	return fmt.Sprintf("%s-g%d", service, n.Generation)
+}
+
+// Container is the accessory's container (and <SERVICE>_HOST): <project>-<accessory>.
+func (n Names) Container(service string) string { return n.Project + "-" + n.Accessory(service) }
 
 var (
 	labelRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -112,7 +141,7 @@ type accessory struct {
 func Config(p *project.Project, t Target) ([]byte, error) {
 	var ps problems
 	checkTarget(t, &ps)
-	g := newGenerator(p, &ps)
+	g := newGenerator(p, t.Generation, &ps)
 	cfg := g.config(t)
 	if len(ps) > 0 {
 		return nil, ps.errors(p)
@@ -130,7 +159,7 @@ func Config(p *project.Project, t Target) ([]byte, error) {
 // container).
 func SecretsFile(p *project.Project) ([]byte, error) {
 	var ps problems
-	g := newGenerator(p, &ps)
+	g := newGenerator(p, 1, &ps) // names only: the same in every generation
 	g.config(Target{})
 	if len(ps) > 0 {
 		return nil, ps.errors(p)
@@ -173,6 +202,7 @@ func validDomain(s string) bool {
 
 type generator struct {
 	p     *project.Project
+	names Names
 	ps    *problems
 	kinds map[string]project.VariableKind
 	hosts map[string]string // DB_HOST → shop-db
@@ -187,13 +217,14 @@ type secretUse struct {
 	template string // the compose value, resolved at deploy time
 }
 
-func newGenerator(p *project.Project, ps *problems) *generator {
-	g := &generator{p: p, ps: ps, kinds: map[string]project.VariableKind{}, hosts: map[string]string{}, secretNames: map[string]secretUse{}}
+func newGenerator(p *project.Project, generation int, ps *problems) *generator {
+	g := &generator{p: p, names: Names{Project: p.Name, Generation: generation}, ps: ps, kinds: map[string]project.VariableKind{},
+		hosts: map[string]string{}, secretNames: map[string]secretUse{}}
 	for _, v := range p.Variables {
 		g.kinds[v.Name] = v.Kind
 	}
 	for name := range p.Compose.Services {
-		g.hosts[project.HostVar(name)] = p.Name + "-" + name
+		g.hosts[project.HostVar(name)] = g.names.Container(name)
 	}
 	return g
 }
@@ -240,7 +271,7 @@ func (g *generator) config(t Target) deployYAML {
 		// Kamal skips booting an accessory whose container exists (spike
 		// S10); houston deploy compares this label to spot a changed config.
 		acc.Labels = map[string]string{ConfigLabel: configHash(acc)}
-		cfg.Accessories[name] = acc
+		cfg.Accessories[g.names.Accessory(name)] = acc
 	}
 	return cfg
 }
@@ -458,7 +489,7 @@ func (g *generator) volumes(svc types.ServiceConfig) []string {
 		if v.Type != types.VolumeTypeVolume {
 			continue
 		}
-		spec := g.p.Name + "_" + v.Source + ":" + v.Target
+		spec := g.names.Volume(v.Source) + ":" + v.Target
 		if v.ReadOnly {
 			spec += ":ro"
 		}
@@ -575,9 +606,9 @@ func uncarriable(v string) string {
 // secret name. lookup gives a variable's value from Mission Control (false:
 // no value). Values are resolved the way compose would: service hosts are
 // the project's containers, and ${X:?msg} with no value is an error.
-func ResolveSecrets(p *project.Project, lookup func(string) (string, bool)) (map[string]string, error) {
+func ResolveSecrets(p *project.Project, generation int, lookup func(string) (string, bool)) (map[string]string, error) {
 	var ps problems
-	g := newGenerator(p, &ps)
+	g := newGenerator(p, generation, &ps)
 	g.config(Target{})
 	if len(ps) > 0 {
 		return nil, ps.errors(p)
@@ -605,9 +636,9 @@ func ResolveSecrets(p *project.Project, lookup func(string) (string, bool)) (map
 
 // AppEnv is the app container's environment: the clear values plus each
 // secret key's value (following its alias). The release hook runs with it.
-func AppEnv(p *project.Project, secrets map[string]string) (map[string]string, error) {
+func AppEnv(p *project.Project, generation int, secrets map[string]string) (map[string]string, error) {
 	var ps problems
-	g := newGenerator(p, &ps)
+	g := newGenerator(p, generation, &ps)
 	cfg := g.config(Target{})
 	if len(ps) > 0 {
 		return nil, ps.errors(p)
@@ -635,19 +666,19 @@ func AppEnv(p *project.Project, secrets map[string]string) (map[string]string, e
 
 // AppVolumes are the app's named volumes as docker -v values, the same ones
 // Kamal mounts (the release hook's container needs them too).
-func AppVolumes(p *project.Project) []string {
+func AppVolumes(p *project.Project, generation int) []string {
 	var ps problems
-	return newGenerator(p, &ps).volumes(p.Compose.Services[p.AppService])
+	return newGenerator(p, generation, &ps).volumes(p.Compose.Services[p.AppService])
 }
 
 // ConfigLabel is the label on each accessory holding its config's hash.
 const ConfigLabel = "houston.config"
 
 // AccessoryLabels returns each accessory's config hash (see ConfigLabel), by
-// service name, as deploy.yml labels them.
-func AccessoryLabels(p *project.Project) map[string]string {
+// accessory name (the generation's), as deploy.yml labels them.
+func AccessoryLabels(p *project.Project, generation int) map[string]string {
 	var ps problems
-	cfg := newGenerator(p, &ps).config(Target{})
+	cfg := newGenerator(p, generation, &ps).config(Target{})
 	out := map[string]string{}
 	for name, a := range cfg.Accessories {
 		out[name] = a.Labels[ConfigLabel]

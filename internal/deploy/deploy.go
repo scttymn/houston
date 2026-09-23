@@ -133,7 +133,7 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		}
 		return early(exitFailure, "houston deploy: "+msg+"\n", msg)
 	}
-	target := kamal.Target{BaseDomain: strings.TrimPrefix(synced.Host, p.Name+"."), Arch: o.Arch}
+	target := kamal.Target{BaseDomain: strings.TrimPrefix(synced.Host, p.Name+"."), Arch: o.Arch, Generation: synced.Generation}
 	config, err := kamal.Config(p, target)
 	if err != nil {
 		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
@@ -160,7 +160,7 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	runCtx, cancel := context.WithCancelCause(deadlineCtx)
 	defer cancel(nil)
 
-	r := &run{ctx: runCtx, o: o, d: d, p: p, dir: dir, file: abs, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
+	r := &run{ctx: runCtx, o: o, d: d, p: p, generation: target.Generation, dir: dir, file: abs, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
 		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now()}}
@@ -244,6 +244,7 @@ type run struct {
 	o           Options
 	d           Deps
 	p           *project.Project
+	generation  int // the data generation sync reported: which volumes and accessories
 	dir         string
 	file        string // the compose file, absolute
 	sha         string
@@ -407,7 +408,7 @@ func (r *run) secrets() string {
 		}
 		return v, ok
 	}
-	values, err := kamal.ResolveSecrets(r.p, lookup)
+	values, err := kamal.ResolveSecrets(r.p, r.generation, lookup)
 	if fetchErr != nil {
 		return fetchErr.Error()
 	}
@@ -428,7 +429,7 @@ func (r *run) secrets() string {
 		r.kamalEnv = append(r.kamalEnv, "HOUSTON_S_"+name+"="+carrier)
 		r.kamalArgs = append(r.kamalArgs, "-e", "HOUSTON_S_"+name)
 	}
-	if r.appEnv, err = kamal.AppEnv(r.p, values); err != nil {
+	if r.appEnv, err = kamal.AppEnv(r.p, r.generation, values); err != nil {
 		return err.Error()
 	}
 	return ""
@@ -483,7 +484,7 @@ func (r *run) release(hook string) string {
 	defer os.Remove(envFile)
 
 	args := []string{"run", "--rm", "--name", r.p.Name + "-release-" + r.sha[:7], "--network", "kamal", "--env-file", envFile}
-	for _, v := range kamal.AppVolumes(r.p) {
+	for _, v := range kamal.AppVolumes(r.p, r.generation) {
 		args = append(args, "-v", v)
 	}
 	args = append(args, r.image, "sh", "-c", hook)
@@ -501,7 +502,7 @@ func (r *run) release(hook string) string {
 // carries a different config label than deploy.yml's: Kamal's boot skips
 // an accessory whose container exists (spike S10). Volumes are kept.
 func (r *run) rebootChangedAccessories() string {
-	labels := kamal.AccessoryLabels(r.p)
+	labels := kamal.AccessoryLabels(r.p, r.generation)
 	names := make([]string, 0, len(labels))
 	for name := range labels {
 		names = append(names, name)

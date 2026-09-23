@@ -218,8 +218,8 @@ Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` s
 
 ## Batch 3: Data generations
 
-### Spike first (on OrbStack, before the code)
-`install/test/generations-spike.sh`: the spike fixture deployed by hand, then, with Houston's generated Kamal config edited as generation 2 would write it:
+### The Kamal checks (after the code, with the real thing)
+Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secrets, its accessory boot). Instead, `install/test/generations-e2e.sh` runs an ordinary `houston deploy` on OrbStack with the project set to generation 2, and checks:
 - accessory `db-g2` (container `spike-db-g2`, volume `spike.g2_pgdata`) boots while `spike-db` serves
 - the app deployed with `DB_HOST=spike-db-g2` and volume `spike.g2_data` reaches it and mounts it
 - `kamal accessory remove db` removes only generation 1's container
@@ -252,6 +252,20 @@ Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` s
 | 5 | Mission Control: generation 1 names as today; generation 2's for placement (the volume and its directory), backups (mounts, the Postgres container) and claimed container names | `models/generation_test.rb`, `volume_placement_test.rb`, `backup_test.rb` | Contract |
 | 6 | A project named `equip-db-g2` and project `equip`'s generation 2 can't both claim `equip-db-g2` | `models/project_host_test.rb` | Concurrency |
 | 7 | The migration: every existing project is generation 1 | `models/project_test.rb` | Migrate |
+
+### Done (Batch 3)
+- **Red:** Go tests failed and didn't compile; Mission Control had 1 failure and 4 errors in the new tests. **Green:** Mission Control 240 runs and the Go suite. Both migrations run down and up. rubocop, gofmt and go vet are clean.
+- **Generation 1 is unchanged:** the phoenix, rails and spike goldens pass untouched. Generation 2's golden (`phoenix.g2.deploy.yml`) was generated and then reviewed line by line against generation 1's: the only differences are the names, and db's config hash (its volume changed).
+- **The real check** (`install/test/generations-e2e.sh`, OrbStack): **GENERATIONS PASS.**
+  - Generation 2's Postgres (`spike-db-g2`, volume `spike.g2_pgdata`) runs beside generation 1's.
+  - The app's `DB_HOST` is `spike-db-g2` and resolves on the kamal network. It mounts `spike.g2_data`.
+  - Removing generation 1's Postgres leaves the app serving.
+  - An image removed from the host pulls back from Houston's registry.
+- **Found by the real check (red first):** the first run's deploy at generation 2 went NO-GO. Its pre-deploy snapshot read the *project's* generation (2, not built yet). **A snapshot must read the serving generation**, so each deploy records the generation it ran on (`deploys.generation`, set at start and at claim), and backups read the running deploy's. That's what Batch 6's safety snapshot needs: taken while generation g+1 is being built, it has to capture g.
+- **Mutations, each caught:**
+  - Go: volumes ignoring the generation; the deploy ignoring sync's generation; service hosts ignoring it; no reserved names.
+  - Rails: placement ignoring the generation; backups reading generation 1; claims ignoring the generation; sync not saying it.
+- **Not checked, and not needed:** whether `kamal deploy --skip-push` pulls a missing image by itself. Batch 6's runner pulls it explicitly before the switch.
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.

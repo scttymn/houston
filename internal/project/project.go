@@ -331,11 +331,17 @@ var allowedServiceKeys = map[string]bool{
 	"depends_on": true, "command": true, "healthcheck": true, "restart": true, "deploy": true,
 }
 
+// generationName is a data generation's accessory name: <service>-g<n>.
+var generationName = regexp.MustCompile(`-g[0-9]+$`)
+
 func checkServiceKeys(raw map[string]any, ps *problems) {
 	services, _ := raw["services"].(map[string]any)
 	for _, svc := range sortedKeys(services) {
 		keys, _ := services[svc].(map[string]any)
 		base := "services." + svc
+		if generationName.MatchString(svc) {
+			ps.add(base, "names ending in -g<number> are reserved for Houston's data generations (a restore's accessories); rename the service")
+		}
 		for _, k := range sortedKeys(keys) {
 			switch {
 			case k == "env_file":

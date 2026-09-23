@@ -119,10 +119,13 @@ type Database struct {
 }
 
 type SyncResult struct {
-	Project string                 `json:"project"`
-	Host    string                 `json:"host"` // <name>.<base>
-	DNS     string                 `json:"dns"`
-	Domains map[string]DomainState `json:"domains"`
+	// Generation is the project's data generation: its volumes' and
+	// accessories' names (0 from an older Mission Control: generation 1).
+	Generation int                    `json:"generation"`
+	Project    string                 `json:"project"`
+	Host       string                 `json:"host"` // <name>.<base>
+	DNS        string                 `json:"dns"`
+	Domains    map[string]DomainState `json:"domains"`
 }
 
 // DomainState is a custom domain's DNS after a sync: DNS OK, DNS PENDING,

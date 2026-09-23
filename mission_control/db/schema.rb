@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -54,6 +54,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_220000) do
     t.datetime "created_at", null: false
     t.string "error"
     t.datetime "finished_at"
+    t.integer "generation", default: 1, null: false
     t.datetime "heartbeat_at", null: false
     t.text "log", default: "", null: false
     t.integer "number", null: false
@@ -113,6 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_220000) do
     t.string "branch"
     t.string "compose_path"
     t.datetime "created_at", null: false
+    t.integer "data_generation", default: 1, null: false
     t.json "databases", default: [], null: false
     t.text "deploy_key_private"
     t.string "deploy_key_public"

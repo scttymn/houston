@@ -21,9 +21,16 @@ class Project < ApplicationRecord
   # Container-name prefixes this project owns on the server: its own name
   # (Kamal's app containers and service label) and <name>-<service> for
   # each accessory.
-  def host_names
-    [ name ] + (services - [ app_service ]).map { |service| "#{name}-#{service}" }
+  def host_names(generation: data_generation)
+    [ name ] + accessories.map { |service| Generation.new(self, generation).container(service) }
   end
+
+  # The names of the generation the next deploy uses.
+  def generation = Generation.new(self, data_generation)
+
+  # The names of the generation that's serving (the running deploy's): what a
+  # snapshot reads, even while a restore builds the next one.
+  def serving_generation = Generation.new(self, running_deploy&.generation || data_generation)
 
   # Required variables the file references that have no value yet.
   def missing_secrets

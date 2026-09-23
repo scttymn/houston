@@ -22,6 +22,7 @@ class Backup
     @run = run
     @token = token
     @project = run.project
+    @serving = @project.serving_generation
     @location = run.location
     @warnings = []
     @log = +""
@@ -71,7 +72,7 @@ class Backup
     end
 
     def dump_postgres(service, image)
-      container = "#{@project.name}-#{service}"
+      container = @serving.container(service)
       listed = docker("exec", container, "sh", "-c", LIST_DATABASES)
       lines = listed.output.lines.map(&:strip).reject(&:empty?)
       unless listed.success && lines.all? { |l| l.match?(/\A\h+\z/) }
@@ -96,7 +97,7 @@ class Backup
     def conninfo(name) = "dbname='#{name.b.gsub(/[\\']/) { "\\#{$&}" }}'"
 
     def copy_sqlite
-      mounts = @project.volumes.flat_map { |v| [ "-v", "#{@project.name}_#{v["name"]}:/data/#{v["name"]}" ] }
+      mounts = @project.volumes.flat_map { |v| [ "-v", "#{@serving.volume(v["name"])}:/data/#{v["name"]}" ] }
       ran = docker("run", "--rm", "--name", container(:sqlite), "--user", "0", *mounts, "-v", "#{staging}:/out",
                    "--entrypoint", "ruby", tools, "/rails/lib/backup/sqlite.rb", "/data", "/out")
       result = begin
@@ -125,7 +126,7 @@ class Backup
     def restic_backup
       tags = [ "project:#{@project.name}", "sha:#{@sha}", "kind:#{@run.kind}", "reason:#{@run.reason}" ]
       tags << "deploy:#{@run.deploy_number}" if @run.deploy_number
-      volumes = @project.volumes.map { |v| "#{@project.name}_#{v["name"]}:/data/#{v["name"]}:ro" }
+      volumes = @project.volumes.map { |v| "#{@serving.volume(v["name"])}:/data/#{v["name"]}:ro" }
       # --retry-lock: a pre-deploy snapshot can meet the daily prune's exclusive lock.
       command = [ "backup", "--retry-lock", "10m", "--host", "houston", "--json", *tags.flat_map { |t| [ "--tag", t ] } ]
       command += [ "--exclude-file", "/out/.houston/exclude", "/data" ] if volumes.any?

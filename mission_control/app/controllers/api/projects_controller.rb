@@ -21,7 +21,7 @@ class Api::ProjectsController < Api::BaseController
     # Only a sync that goes on to deploy makes volumes: until then (a HOLD,
     # say) where they live can still be chosen.
     VolumePlacement.new(project).place!
-    render json: { project: project.name, host: project.host, dns:, domains: }
+    render json: { project: project.name, host: project.host, dns:, domains:, generation: project.data_generation }
   rescue ProjectSync::Refused, VolumePlacement::Refused => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue Cloudflare::Error => e

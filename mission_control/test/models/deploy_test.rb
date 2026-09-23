@@ -41,4 +41,15 @@ class DeployTest < ActiveSupport::TestCase
     assert_equal "houston-runner-1", queued.reload.runner
     assert queued.owned_by?(token)
   end
+
+  test "a deploy records the generation it deploys" do
+    equip = Project.create!(name: "equip", app_service: "app", services: %w[app], health: "/up", port: 80, data_generation: 3)
+    deploy, = Deploy.start!(equip, sha: "a" * 40, ref: "refs/heads/main")
+    assert_equal 3, deploy.generation
+    equip.update!(data_generation: 4)
+    queued = Deploy.queue!(equip, sha: "b" * 40, ref: "refs/heads/main")
+    deploy.update!(status: "go", finished_at: Time.current)
+    claimed, = Deploy.claim!(queued, runner: "houston-runner-1")
+    assert_equal 4, claimed.generation, "a queued deploy takes the generation when it's claimed"
+  end
 end

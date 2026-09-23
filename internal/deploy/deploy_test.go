@@ -203,6 +203,7 @@ type fakeMission struct {
 	snapshotErr  error
 	snapshotPoll []mission.Snapshot
 	onSnapshot   func() // called when the snapshot is asked for
+	generation   int    // what sync reports
 	syncErr      error
 	secrets      map[string]string
 	startErr     error
@@ -217,7 +218,7 @@ func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (missio
 	if m.syncErr != nil {
 		return mission.SyncResult{}, m.syncErr
 	}
-	return mission.SyncResult{Project: req.Name, Host: req.Name + ".svnmns.com", DNS: "per_host", Domains: m.domains}, nil
+	return mission.SyncResult{Generation: m.generation, Project: req.Name, Host: req.Name + ".svnmns.com", DNS: "per_host", Domains: m.domains}, nil
 }
 
 func (m *fakeMission) Secret(ctx context.Context, project, key string) (string, bool, error) {
@@ -363,7 +364,7 @@ func newHarness(t *testing.T, compose string) *harness {
 		t.Fatal(err)
 	}
 	labels := map[string]string{}
-	for name, label := range kamal.AccessoryLabels(p) {
+	for name, label := range kamal.AccessoryLabels(p, 1) {
 		labels[p.Name+"-"+name] = label
 	}
 	return &harness{
@@ -822,7 +823,7 @@ func TestDeployRebootsAChangedAccessory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := kamal.AccessoryLabels(p)["db"]
+	current := kamal.AccessoryLabels(p, 1)["db"]
 
 	h := newHarness(t, shopCompose)
 	h.docker.labels = map[string]string{"shop-db": current}
@@ -1028,5 +1029,47 @@ func TestDeploySnapshotStops(t *testing.T) {
 	h.mission.snapshotPoll = []mission.Snapshot{{ID: 21, Status: "running"}}
 	if code := h.run(); code != 1 || !h.finishedWith("no_go", "the pre-deploy snapshot didn't finish before the deploy's deadline; the old version keeps serving") {
 		t.Errorf("deadline: exit %d, reports %+v", code, h.mission.reports)
+	}
+}
+
+// Generation 2 (a restore's): Kamal's config, the release hook's volumes and
+// the changed-accessory check all use generation 2's names.
+func TestDeployGeneration2(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.mission.generation = 2
+	p, err := project.Load(filepath.Join(h.dir, "compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.docker.labels = map[string]string{}
+	for name, label := range kamal.AccessoryLabels(p, 2) {
+		h.docker.labels[p.Name+"-"+name] = label
+	}
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	config, err := os.ReadFile(filepath.Join(h.dir, ".houston", "kamal", "config", "deploy.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"shop.g2_pgdata:", "db-g2:"} {
+		if !strings.Contains(string(config), want) {
+			t.Errorf("deploy.yml lacks %q:\n%s", want, config)
+		}
+	}
+	if release := strings.Join(h.docker.call("release").args, " "); !strings.Contains(release, "-v shop.g2_storage:/rails/storage") {
+		t.Errorf("the release hook's volumes: %s", release)
+	}
+	inspected := 0
+	for _, args := range h.docker.outputs {
+		if args[0] == "inspect" {
+			inspected++
+			if args[len(args)-1] != "shop-db-g2" {
+				t.Errorf("an accessory checked by another generation's name: %v", args)
+			}
+		}
+	}
+	if inspected == 0 {
+		t.Error("no accessory checked")
 	}
 }

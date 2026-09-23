@@ -496,7 +496,7 @@ func TestResolveSecrets(t *testing.T) {
 	values := map[string]string{"POSTGRES_PASSWORD": "pw $x", "SECRET_KEY_BASE": "skb"}
 	lookup := func(name string) (string, bool) { v, ok := values[name]; return v, ok }
 
-	got, err := ResolveSecrets(load(t, "testdata/phoenix.compose.yml"), lookup)
+	got, err := ResolveSecrets(load(t, "testdata/phoenix.compose.yml"), 1, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,10 +523,10 @@ x-houston:
   health: /up
 `)
 	none := func(string) (string, bool) { return "", false }
-	if _, err := ResolveSecrets(p, none); err == nil || !strings.Contains(err.Error(), "REQUIRED") {
+	if _, err := ResolveSecrets(p, 1, none); err == nil || !strings.Contains(err.Error(), "REQUIRED") {
 		t.Errorf("unset required variable: err = %v, want one naming REQUIRED", err)
 	}
-	got, err = ResolveSecrets(p, func(name string) (string, bool) { return "r", name == "REQUIRED" })
+	got, err = ResolveSecrets(p, 1, func(name string) (string, bool) { return "r", name == "REQUIRED" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,11 +537,11 @@ x-houston:
 
 func TestAppEnv(t *testing.T) {
 	p := load(t, "testdata/phoenix.compose.yml")
-	secrets, err := ResolveSecrets(p, func(name string) (string, bool) { return "v-" + name, true })
+	secrets, err := ResolveSecrets(p, 1, func(name string) (string, bool) { return "v-" + name, true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := AppEnv(p, secrets)
+	got, err := AppEnv(p, 1, secrets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,11 +554,11 @@ func TestAppEnv(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AppEnv = %#v\nwant %#v", got, want)
 	}
-	if _, err := AppEnv(p, map[string]string{}); err == nil {
+	if _, err := AppEnv(p, 1, map[string]string{}); err == nil {
 		t.Error("AppEnv without the secrets' values: want an error")
 	}
 	// The release hook mounts what the app mounts.
-	if got := AppVolumes(p); !reflect.DeepEqual(got, []string{"phoenixapp_media:/media"}) {
+	if got := AppVolumes(p, 1); !reflect.DeepEqual(got, []string{"phoenixapp_media:/media"}) {
 		t.Errorf("AppVolumes = %v", got)
 	}
 }
@@ -569,7 +569,7 @@ func TestAppEnv(t *testing.T) {
 func TestAccessoryConfigLabel(t *testing.T) {
 	label := func(compose string) string {
 		t.Helper()
-		labels := AccessoryLabels(parse(t, compose))
+		labels := AccessoryLabels(parse(t, compose), 1)
 		return labels["db"]
 	}
 	base := `name: shop

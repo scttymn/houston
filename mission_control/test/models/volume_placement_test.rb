@@ -72,4 +72,15 @@ class VolumePlacementTest < ActiveSupport::TestCase
     error = assert_raises(VolumePlacement::Refused) { place(failing) }
     assert_match "couldn't make equip_media's directory on unas-nfs: mount.nfs: Connection timed out", error.message
   end
+
+  test "placing generation 2's volumes" do
+    fake = missing
+    use_fake_docker(fake) { VolumePlacement.new(@project, generation: 2).place! }
+    calls = fake.calls.map(&:args)
+    assert_includes calls, [ "volume", "create", "equip.g2_storage" ]
+    assert_includes calls, [ "run", "--rm", "--user", "0", "-v", "houston-storage-unas-nfs:/location", "--entrypoint", "mkdir", BackupHelpers::TOOLS, "-p", "/location/volumes/equip.g2/media" ]
+    assert_includes calls, [ "volume", "create", "--driver", "local", "--opt", "type=nfs", "--opt", "o=addr=10.0.1.20,rw,nfsvers=4",
+                             "--opt", "device=:/volume1/houston/volumes/equip.g2/media", "equip.g2_media" ]
+    assert_not calls.any? { |a| a.last == "equip_storage" }, "generation 1's volumes untouched"
+  end
 end

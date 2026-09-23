@@ -70,7 +70,7 @@ class Deploy < ApplicationRecord
         took_over = current.abandon!
       end
       number = (project.deploys.maximum(:number) || 0) + 1
-      deploy = project.deploys.create!(number:, sha:, ref:, token_digest: digest(token), heartbeat_at: Time.current)
+      deploy = project.deploys.create!(number:, sha:, ref:, token_digest: digest(token), heartbeat_at: Time.current, generation: project.data_generation)
       [ deploy, token, took_over ]
     end
   end
@@ -108,6 +108,7 @@ class Deploy < ApplicationRecord
   def self.claim!(deploy, runner:)
     token = SecureRandom.urlsafe_base64(32)
     claimed = where(id: deploy.id, status: "queued").update_all(status: "in_flight", runner:, token_digest: digest(token),
+                                                                 generation: deploy.project.data_generation,
                                                                  heartbeat_at: Time.current, updated_at: Time.current)
     claimed == 1 ? [ deploy.reload, token ] : nil
   end

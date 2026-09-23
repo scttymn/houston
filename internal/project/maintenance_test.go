@@ -69,3 +69,14 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// <service>-g<n> is a data generation's accessory name (docs/plans/restore.md,
+// Batch 3): a compose service can't be called that.
+func TestLoad_ReservedGenerationNames(t *testing.T) {
+	path := writeCompose(t, doc{services: "  db-g2:\n    image: postgres:17\n"}.String())
+	problems := loadProblems(t, path)
+	if len(problems) != 1 || problems[0].Path != "services.db-g2" || !strings.Contains(problems[0].Msg, "reserved for Houston's data generations") {
+		t.Errorf("problems = %+v", problems)
+	}
+	mustLoad(t, writeCompose(t, doc{services: "  db-go:\n    image: postgres:17\n  g2:\n    image: redis:7\n"}.String()))
+}

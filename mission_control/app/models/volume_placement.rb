@@ -5,14 +5,16 @@
 class VolumePlacement
   class Refused < StandardError; end
 
-  def initialize(project)
+  # generation: whose volumes to make (a restore makes the next one's).
+  def initialize(project, generation: project.data_generation)
     @project = project
+    @generation = Generation.new(project, generation)
   end
 
   def place!
     @project.volumes.each do |v|
       volume = @project.project_volumes.create_or_find_by!(name: v["name"]) # the unique index settles two syncs at once
-      docker_name = "#{@project.name}_#{volume.name}"
+      docker_name = @generation.volume(volume.name)
       want = options(volume)
       inspected = DockerCommand.run("volume", "inspect", "--format", "{{json .Options}}", docker_name)
       if inspected.success
@@ -43,7 +45,7 @@ class VolumePlacement
       end
     end
 
-    def subdirectory(volume) = "volumes/#{@project.name}/#{volume.name}"
+    def subdirectory(volume) = @generation.directory(volume.name)
 
     # The directory must exist before a volume can point into it.
     def make_directory(volume)
@@ -56,7 +58,7 @@ class VolumePlacement
         root = location.volume_name
       end
       made = DockerCommand.run("run", "--rm", "--user", "0", "-v", "#{root}:/location", "--entrypoint", "mkdir", tools, "-p", "/location/#{subdirectory(volume)}")
-      raise Refused, "couldn't make #{@project.name}_#{volume.name}'s directory on #{location.name}: #{made.output.strip}" unless made.success
+      raise Refused, "couldn't make #{@generation.volume(volume.name)}'s directory on #{location.name}: #{made.output.strip}" unless made.success
     end
 
     def describe(options)

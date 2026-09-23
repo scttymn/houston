@@ -158,6 +158,30 @@ class BackupTest < ActiveSupport::TestCase
     assert_equal [ "volume", "rm", "-f", "houston-backup.equip" ], fake.calls.last.args
   end
 
+  test "a backup of generation 2" do
+    @project.update!(data_generation: 2)
+    @project.deploys.update_all(generation: 2) # the version that's serving runs on generation 2
+    fake = backup_docker
+    back_up(fake)
+    args = fake.calls.map(&:args)
+    assert(args.any? { |a| a[0] == "exec" && a[1] == "equip-db-g2" }, "pg_dump from generation 2's Postgres")
+    assert(args.any? { |a| a.each_cons(2).include?([ "-v", "equip.g2_storage:/data/storage:ro" ]) }, "generation 2's volume backed up")
+    assert_equal "go", @run.status
+  end
+
+  # A snapshot is of the version that's serving: the running deploy's
+  # generation, even while the project's next deploy (a restore's) is
+  # building another one.
+  test "a backup reads the serving generation" do
+    @project.update!(data_generation: 2)
+    fake = backup_docker
+    back_up(fake)
+    args = fake.calls.map(&:args)
+    assert(args.any? { |a| a[0] == "exec" && a[1] == "equip-db" }, "pg_dump from the serving generation's Postgres")
+    assert(args.any? { |a| a.each_cons(2).include?([ "-v", "equip_storage:/data/storage:ro" ]) }, "the serving generation's volume")
+    assert_equal "go", @run.status
+  end
+
   test "nothing to back up" do
     @project.update!(volumes: [], databases: [])
     fake = FakeDocker.new
