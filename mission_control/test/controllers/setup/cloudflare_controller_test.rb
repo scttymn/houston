@@ -52,6 +52,7 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
     assert_equal [ "svnmns.com", ACCOUNT, ZONE, TUNNEL ], [ installation.base_domain, installation.cloudflare_account_id, installation.cloudflare_zone_id, installation.tunnel_id ]
     assert_equal TOKEN, installation.cloudflare_api_token
     assert_equal "tunnel-token-xyz", installation.tunnel_token
+    assert_equal "wildcard", installation.dns_mode
     raw = Installation.connection.select_one("SELECT cloudflare_api_token, tunnel_token FROM installations")
     assert_not_includes raw.values.join, TOKEN, "the API token is stored encrypted"
     assert_not_includes raw.values.join, "tunnel-token-xyz", "the tunnel token is stored encrypted"
@@ -102,20 +103,62 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
     assert Installation.connected?
   end
 
-  test "never touches a DNS record Houston didn't create" do
+  def stub_through_ingress(existing_tunnel: true)
     stub_token_checks
-    stub_existing_tunnel([ { id: TUNNEL, name: "houston-svnmns" } ])
+    stub_existing_tunnel(existing_tunnel ? [ { id: TUNNEL, name: "houston-svnmns" } ] : [])
     cf(:get, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/token", result: "tunnel-token-xyz")
     cf(:put, "/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/configurations", result: {})
-    stub_existing_wildcard([ { id: "theirs", name: "*.svnmns.com", content: "somewhere.example.net", comment: nil } ])
+  end
+
+  test "shares the domain host by host when another server owns the wildcard" do
+    stub_through_ingress
+    stub_existing_wildcard([ theirs("*.svnmns.com") ])
+    stub_existing_record("admin.svnmns.com", [])
+    stub_existing_record("hooks.svnmns.com", [])
+    records = cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec" })
+
+    submit
+
+    assert_redirected_to root_path
+    assert_requested records.with(body: expected_record("admin.svnmns.com"))
+    assert_requested records.with(body: expected_record("hooks.svnmns.com"))
+    assert_not_requested records.with(body: expected_wildcard)
+    assert_not_requested :patch, /dns_records/
+    assert_not_requested :delete, /dns_records/
+    assert Installation.connected?
+    assert_equal "per_host", Installation.current.dns_mode
+  end
+
+  test "a record for admin. that Houston didn't create is a NO-GO" do
+    stub_through_ingress
+    stub_existing_wildcard([ theirs("*.svnmns.com") ])
+    stub_existing_record("admin.svnmns.com", [ theirs("admin.svnmns.com").merge(type: "A", content: "203.0.113.7") ])
+    stub_existing_record("hooks.svnmns.com", [])
 
     submit
 
     assert_response :unprocessable_entity
-    assert_select ".check", /\*\.svnmns\.com.*Houston didn't create/
+    assert_select ".check", /admin\.svnmns\.com.*Houston didn't create/
+    assert_not_requested :post, /dns_records/
     assert_not_requested :patch, /dns_records/
     assert_not_requested :delete, /dns_records/
     assert_not Installation.connected?
+  end
+
+  test "a rerun host by host updates Houston's own records" do
+    stub_through_ingress
+    stub_existing_wildcard([ theirs("*.svnmns.com") ])
+    stub_existing_record("admin.svnmns.com", [ { id: "ours", type: "CNAME", name: "admin.svnmns.com", content: "old.cfargotunnel.com", comment: "managed-by:houston" } ])
+    stub_existing_record("hooks.svnmns.com", [])
+    update = cf(:patch, "/zones/#{ZONE}/dns_records/ours", result: { id: "ours" })
+    create = cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec" })
+
+    submit
+
+    assert_redirected_to root_path
+    assert_requested update.with(body: expected_record("admin.svnmns.com"))
+    assert_requested create.with(body: expected_record("hooks.svnmns.com"))
+    assert_equal "per_host", Installation.current.dns_mode
   end
 
   test "a Cloudflare error mid-way can be retried" do

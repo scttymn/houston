@@ -309,6 +309,17 @@ Your answers: OrbStack test machines OK; images and binaries not published yet (
 - **Rows 5–7 (`install/test/orbstack.sh`):** Ubuntu 24.04, **Debian 13 (current stable)** and Debian 12 each passed all 16 checks. That covers the fresh install, the LAN `/up`, the printed code completing step 1 over HTTP, and a rerun keeping `.env` byte-for-byte and saying setup is complete. The machines are deleted afterwards.
 - **Row 8 (real Cloudflare through the VM) is pending the token file.**
 
+### Added after the preflight: sharing the base domain (host by host)
+- **The real preflight on svnmns.com** found an existing `*.svnmns.com` → another tunnel (your current server), with no `admin.`/`hooks.` records.
+- **Decision (you: "one at a time makes sense"):** when another server owns the wildcard, Houston never touches it. It adds explicit `admin.`/`hooks.` records now, and each app's name when it's first deployed, all `managed-by:houston`. Apps move over one at a time. Spec §8 updated.
+- **Test-first:**
+  - Host-by-host when the wildcard is foreign.
+  - A foreign `admin.` record (any type) is a NO-GO, and every name is checked before anything is written.
+  - A rerun updates Houston's own records.
+  - The pre-flight row names the mode.
+  Record lookups are by name with any type. 50 runs green.
+- **Test cleanup (`install/test/cloudflare.sh cleanup`)** also removes Houston's own `admin.`/`hooks.` records for the test tunnel. It still deletes only records with the comment that point at that tunnel.
+
 ### Open questions (for later batches, not blocking Batch 1)
 1. **Real Cloudflare checks (Batch 2):** automated tests stub the API with contract expectations, but spec §14 needs a real run. Can I use a Cloudflare API token and a base domain you pick (svnmns.com, or a spare domain)?
 2. **Installer testing (Batch 4):** I'd test `install.sh` in a throwaway OrbStack Linux machine (Ubuntu, then Debian). OK to create and delete those?

@@ -44,11 +44,11 @@ class CloudflareSetup
     tunnel_id = find_or_create_tunnel(account)
     tunnel_token = step("getting the tunnel's token") { @client.get("/accounts/#{account}/cfd_tunnel/#{tunnel_id}/token") }
     step("setting the tunnel's routes") { @client.put("/accounts/#{account}/cfd_tunnel/#{tunnel_id}/configurations", { config: { ingress: } }) }
-    point_wildcard(zone, tunnel_id)
+    dns_mode = point_dns(zone, tunnel_id)
 
     installation = Installation.current
     installation.update!(base_domain:, cloudflare_account_id: account, cloudflare_zone_id: zone, tunnel_id:,
-                         cloudflare_api_token: api_token, tunnel_token:, cloudflare_connected_at: Time.current)
+                         cloudflare_api_token: api_token, tunnel_token:, dns_mode:, cloudflare_connected_at: Time.current)
     hand_token_to_cloudflared(tunnel_token)
     true
   rescue Stop
@@ -98,18 +98,44 @@ class CloudflareSetup
       end
     end
 
-    def point_wildcard(zone, tunnel_id)
-      record = { type: "CNAME", name: "*.#{base_domain}", content: "#{tunnel_id}.cfargotunnel.com", proxied: true, comment: MANAGED }
-      step("creating the *.#{base_domain} record") do
-        existing = @client.get("/zones/#{zone}/dns_records", type: "CNAME", name: record[:name]).first
-        if existing.nil?
-          @client.post("/zones/#{zone}/dns_records", record)
-        elsif existing["comment"].to_s.start_with?(MANAGED)
-          @client.patch("/zones/#{zone}/dns_records/#{existing["id"]}", record)
-        else
-          fail!("*.#{base_domain} already exists and Houston didn't create it (no #{MANAGED} comment). Remove it in Cloudflare, then try again.")
-          raise Stop
+    # Owns *.<base> when it's free (or already Houston's). When another server
+    # owns it (a migration in progress), Houston never touches it and adds
+    # explicit records instead: admin. and hooks. now, each app's name when it
+    # is first deployed. Explicit records win over the wildcard. Every name is
+    # checked before anything is written.
+    def point_dns(zone, tunnel_id)
+      wildcard_name = "*.#{base_domain}"
+      wildcard = step("looking up #{wildcard_name}") { find_record(zone, wildcard_name) }
+      if wildcard.nil? || managed?(wildcard)
+        upsert(zone, tunnel_id, wildcard_name, wildcard)
+        return "wildcard"
+      end
+
+      names = %w[admin hooks].map { |label| "#{label}.#{base_domain}" }
+      existing = names.to_h { |name| [ name, step("looking up #{name}") { find_record(zone, name) } ] }
+      foreign = existing.select { |_, record| record && !managed?(record) }.keys
+      if foreign.any?
+        foreign.each do |name|
+          fail!("#{name} already exists and Houston didn't create it (no #{MANAGED} comment). Another server owns *.#{base_domain}, so Houston needs its own #{name}; remove that record in Cloudflare, then try again.")
         end
+        raise Stop
+      end
+      existing.each { |name, record| upsert(zone, tunnel_id, name, record) }
+      "per_host"
+    end
+
+    def find_record(zone, name)
+      @client.get("/zones/#{zone}/dns_records", name:).first
+    end
+
+    def managed?(record)
+      record["comment"].to_s.start_with?(MANAGED)
+    end
+
+    def upsert(zone, tunnel_id, name, existing)
+      record = { type: "CNAME", name:, content: "#{tunnel_id}.cfargotunnel.com", proxied: true, comment: MANAGED }
+      step("pointing #{name} at the tunnel") do
+        existing ? @client.patch("/zones/#{zone}/dns_records/#{existing["id"]}", record) : @client.post("/zones/#{zone}/dns_records", record)
       end
     end
 

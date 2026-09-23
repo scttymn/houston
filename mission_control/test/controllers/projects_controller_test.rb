@@ -90,4 +90,14 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_requested tunnel, times: 1
     assert_requested @registry, times: 1
   end
+
+  test "the pre-flight DNS row says how the domain is shared" do
+    stub_tunnel
+    get root_path
+    assert_select ".preflight li", /\*\.svnmns\.com.*New apps get a subdomain automatically/
+
+    Installation.current.update!(dns_mode: "per_host")
+    get root_path
+    assert_select ".preflight li", /admin\.svnmns\.com and hooks\.svnmns\.com.*another server has \*\.svnmns\.com/
+  end
 end

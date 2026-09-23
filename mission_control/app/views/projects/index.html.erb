@@ -67,7 +67,11 @@ git push</pre>
           <span class="mono state state--<%= state.downcase.delete("?").presence || "unknown" %>"><%= state %></span>
           <span><span>Tunnel houston-<%= base.split(".").first %></span><small><%= detail %></small></span>
         </li>
-        <li><span class="mono state state--go">GO</span><span><span>*.<%= base %></span><small>New apps get a subdomain automatically</small></span></li>
+        <% if @installation.dns_mode == "per_host" %>
+          <li><span class="mono state state--go">GO</span><span><span>admin.<%= base %> and hooks.<%= base %></span><small>Sharing the domain: another server has *.<%= base %>, so each app gets its own record when it's first deployed</small></span></li>
+        <% else %>
+          <li><span class="mono state state--go">GO</span><span><span>*.<%= base %></span><small>New apps get a subdomain automatically</small></span></li>
+        <% end %>
         <% if @storage %>
           <li><span class="mono state state--go">GO</span><span><span>Backup storage <%= @storage.name %></span><small>Default · password saved</small></span></li>
         <% end %>

@@ -5,7 +5,7 @@
 # header file for curl; it's never printed.
 #
 #   install/test/cloudflare.sh preflight   # what's already on the domain (changes nothing)
-#   install/test/cloudflare.sh cleanup     # delete Houston's test tunnel and managed wildcard
+#   install/test/cloudflare.sh cleanup     # delete Houston's test tunnel and the records it manages
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -48,14 +48,18 @@ print('tunnel $tunnel_name:', 'none' if not r else ', '.join(f\"{x['id']} ({x.ge
     [ -n "$account" ] && [ -n "$zone" ] || { echo "can't see exactly one account and the zone; nothing done"; exit 1; }
     tunnels=$(cf "$api/accounts/$account/cfd_tunnel?name=$tunnel_name&is_deleted=false" | jqr 'print(" ".join(x["id"] for x in d.get("result") or []))')
     for id in $tunnels; do
-      cf "$api/zones/$zone/dns_records?name=*.$base&type=CNAME" | jqr "
-for x in d.get('result') or []:
-    if (x.get('comment') or '').startswith('managed-by:houston') and x['content'] == '$id.cfargotunnel.com':
-        print(x['id'])" | while read -r record; do
-        cf -X DELETE "$api/zones/$zone/dns_records/$record" >/dev/null && echo "deleted *.$base (managed-by:houston, pointing at $tunnel_name)"
+      for name in "*.$base" "admin.$base" "hooks.$base"; do
+        records=$(cf "$api/zones/$zone/dns_records?name=$name" | TUNNEL_ID="$id" jqr '
+import os
+for x in d.get("result") or []:
+    if (x.get("comment") or "").startswith("managed-by:houston") and x["content"] == os.environ["TUNNEL_ID"] + ".cfargotunnel.com":
+        print(x["id"])')
+        for record in $records; do
+          cf -X DELETE "$api/zones/$zone/dns_records/$record" >/dev/null && echo "deleted $name (managed-by:houston, pointing at $tunnel_name)"
+        done
       done
       cf -X DELETE "$api/accounts/$account/cfd_tunnel/$id/connections" >/dev/null || true
-      cf -X DELETE "$api/accounts/$account/cfd_tunnel/$id" | jqr "print('deleted tunnel $tunnel_name' if d.get('success') else f'tunnel delete failed: {d.get(\"errors\")}')"
+      cf -X DELETE "$api/accounts/$account/cfd_tunnel/$id" | jqr 'print("deleted the tunnel" if d.get("success") else "tunnel delete failed: %s" % d.get("errors"))'
     done
     [ -n "$tunnels" ] || echo "no $tunnel_name tunnel; nothing to clean up"
     ;;

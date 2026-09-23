@@ -30,7 +30,17 @@ module CloudflareStubs
   end
 
   def stub_existing_wildcard(result)
-    cf(:get, "/zones/#{ZONE}/dns_records", query: { "type" => "CNAME", "name" => "*.svnmns.com" }, result:)
+    stub_existing_record("*.svnmns.com", result)
+  end
+
+  # Records are looked up by name with any type: an A record for admin. is as
+  # much "someone else's" as a CNAME.
+  def stub_existing_record(name, result)
+    cf(:get, "/zones/#{ZONE}/dns_records", query: { "name" => name }, result:)
+  end
+
+  def theirs(name, content = "c7de32ad-other.cfargotunnel.com")
+    { id: "theirs-#{name}", type: "CNAME", name:, content:, comment: nil }
   end
 
   def expected_ingress
@@ -42,7 +52,9 @@ module CloudflareStubs
     ] } }
   end
 
-  def expected_wildcard
-    { type: "CNAME", name: "*.svnmns.com", content: "#{TUNNEL}.cfargotunnel.com", proxied: true, comment: "managed-by:houston" }
+  def expected_wildcard = expected_record("*.svnmns.com")
+
+  def expected_record(name)
+    { type: "CNAME", name:, content: "#{TUNNEL}.cfargotunnel.com", proxied: true, comment: "managed-by:houston" }
   end
 end
