@@ -9,6 +9,9 @@ Builds on build step 5 (docs/plans/volumes-backups.md): each snapshot holds the 
 Then: "We could simply think of a maintenance page as an out of band option for deploys. It can be displayed at any time but most appropriately during a deploy."
 
 So the maintenance page is **an out-of-band switch the admin turns on and off**. Houston never turns it on or off by itself: not when a deploy or restore starts, succeeds or fails. It stays up until an admin turns it off, whatever happens in between.
+Then: "Honestly the maintenance page could be a Houston thing. So the app could completely go down and the maintenance page would always be visible."
+
+So **Houston serves the maintenance page itself**, from Mission Control, by routing the project's hostnames there at the tunnel. It shows even if the app, its containers and kamal-proxy are all down, and no deploy or restore can clear it: they never touch the tunnel.
 
 ## Goal
 
@@ -42,9 +45,10 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
   8. **Clean up:** generation g's accessories and volumes are removed (a failure here is a warning; the restore stands)
   - **A failure in steps 1–6** removes whatever generation g+1 got. Generation g keeps serving, untouched, and the restore is NO-GO.
   - **Writes made to the live app while the restore runs:** the ones after the safety snapshot and before the switch (seconds) are lost. Putting the maintenance page up first prevents that.
-- **The maintenance page** (out of band, the admin's switch):
+- **The maintenance page** (out of band, the admin's switch, served by Houston):
   - On or off at any time: the project page, `PUT /api/v1/projects/:name/maintenance`, `houston maintenance on|off`. The project shows MAINTENANCE on the flight board, with who turned it on and since when.
-  - **A deploy or restore never changes it.** If kamal-proxy drops the maintenance state when a new version is deployed (the spike checks), the runner puts it back right after the switch.
+  - **On:** the tunnel's ingress gets a rule per hostname of the project (`<name>.<base>` and its custom domains) sending it to Mission Control, before the catch-all to kamal-proxy. **Off:** the rules go. Mission Control serves the page for those hosts. It never touches kamal-proxy, the app, or its containers.
+  - **Deploys and restores never change it.** They don't touch the tunnel.
   - A restore takes its safety snapshot just before the switch either way. With the page up, nothing was written after it; without it, only the seconds between snapshot and switch.
 
 ## Batches
@@ -61,29 +65,29 @@ An admin can put up a **maintenance page** at any time, usually around a deploy 
    - the Restore button on each snapshot and the confirm page (the design's, noting whether the maintenance page is up), `/api/v1`, and `houston restore <snapshot> --confirm <name> [--follow]`
    - the preconditions: a linked repo, the snapshot in a location the project's backups used (the snapshot list reads all of them now), nothing queued or in flight
    - while a restore is queued or in flight: pushes don't queue deploys (the next check does), and backups wait (except its safety snapshot)
-5. **The runner's restore:** the steps above in Go, the generation switch, cleanup, every failure path, keeping the maintenance page as it was, and the deploy page's restore steps.
+5. **The runner's restore:** the steps above in Go, the generation switch, cleanup, every failure path, and the deploy page's restore steps.
 6. **The real run:** on OrbStack, restore the spike (Postgres, an NFS volume, SQLite) and equip, with and without the maintenance page up. It checks:
    - the zero-downtime restore (every request through it answered by one version or the other)
    - the data rolled back
    - a failed restore leaving the current version serving
-   - the maintenance page staying up through a restore, a deploy, and a failed one, until it's turned off
+   - the maintenance page staying up through a restore, a deploy, a failed one, and the app's containers stopped, until it's turned off
    - restoring the safety snapshot to go back
    - a restore whose image was pruned
 
-## Batch 1: Maintenance mode, and the spike
+## Batch 1: Houston's maintenance page, and the spike
 
 ### Spike first (spec §14): `install/test/restore-spike.sh`
-On an OrbStack machine with Houston installed and the spike fixture deployed twice (two SHAs):
-- **Maintenance:**
-  - **Whether `kamal deploy` of another version clears kamal-proxy's maintenance state.** If it does, the runner re-applies it after the switch, since a deploy or restore never changes it.
-  - Exactly what `kamal app maintenance` and `kamal app live` run against kamal-proxy (so Mission Control can do the same with `docker exec kamal-proxy …`), and the service name kamal-proxy knows the app by.
-  - What a request gets in maintenance (status, body), including after `kamal deploy` of the other SHA while in maintenance.
-  - That `live` brings it back.
+Two parts. **With the real Cloudflare account** (svnmns.com, the `orbstack.sh` setup; a `houston-maint-test` name that answers the other server's 404 first):
+- Add an ingress rule for one hostname → Mission Control, and time how long until a request through Cloudflare gets Mission Control's answer (cloudflared picks up remote config).
+- Remove the rule → the app again, timed the same way.
+- Whether a custom domain routes by the same rule.
+
+**On OrbStack** (for later batches, recorded now):
 - **A second generation beside the first:**
   - Accessory `db-g2` (container `spike-db-g2`) with its own volume, booted while `spike-db` serves.
-  - The app, deployed with `DB_HOST=spike-db-g2`, reaches it by that name on the `kamal` network.
+  - The app, deployed with `DB_HOST=spike-db-g2`, reaches it on the `kamal` network.
   - `kamal accessory remove db` removes only generation 1's container.
-  - Volumes named `spike.g2_data` are valid and mountable.
+  - `spike.g2_data` is a valid, mountable volume name.
 - **The image:** `docker rmi` the host's copy of the first SHA; `docker pull 127.0.0.1:5000/spike:<sha>` gets it back. Whether `kamal deploy --skip-push` pulls it itself.
 - **git:** `git fetch --depth 1 <old, non-tip sha>` from Forgejo works, or is refused (then the runner falls back to the branch without depth).
 
@@ -92,33 +96,44 @@ The notes go into this file before Batch 1's code.
 ### Design (short)
 - **`projects`:**
   - `maintenance_since` (datetime, null = off)
-  - `maintenance_by` (which admin or API token turned it on)
-- **`Maintenance`** (Mission Control):
-  - `on!(project, by:)` runs the kamal-proxy command the spike pins, through `DockerCommand`, then records `since` and `by`.
-  - `off!(project)` runs the resume command, then clears them.
-  - A failed command → an error, nothing recorded.
-  - "on" when already on runs the command again (cheap, and it repairs a proxy that lost the state) and keeps the first `since`.
-  - Refused before the app was ever deployed (kamal-proxy doesn't know it): "nothing deployed yet".
-- **The page:**
-  - a MAINTENANCE banner (since, by whom, "Turn it off")
-  - "Show maintenance page" (turning it on asks for confirmation: users see the page at once)
-- **The flight board:** a MAINTENANCE chip on the project's row.
+  - `maintenance_by` (the admin, or the API token's name)
+  - `maintenance_message` (optional, at most 500 characters, shown on the page)
+- **`TunnelRoutes`:** the tunnel's ingress, built from the database. It's the one place that knows the rules; `CloudflareSetup` uses it too.
+  - The order: admin → Mission Control; hooks webhook paths → Mission Control; hooks otherwise → 404; **each hostname of each project in maintenance → Mission Control**; everything else → kamal-proxy.
+  - `push!` PUTs the whole configuration. Two toggles at once are serialized on a lock, and each push is computed from the database after its own change is committed, so the last push always matches the database.
+- **`Maintenance`:**
+  - `on!(project, by:, message:)` records the state, then pushes. If Cloudflare refuses, it rolls the state back and raises with Cloudflare's words: the database never says "on" while the tunnel says off.
+  - `off!(project)` does the reverse.
+  - Refused when Cloudflare isn't connected (a LAN-only install has no tunnel to route).
+  - Adding or removing a custom domain on a project in maintenance (at sync) pushes the routes again.
+- **Mission Control serving it:**
+  - For any request whose host is a hostname of a project in maintenance, it serves only `MaintenancePage`: 503, `Retry-After: 60`, `Cache-Control: no-store`.
+  - The page is self-contained HTML: the project's name, "is down for maintenance", the message if any, and a meta refresh every 60 s. No Mission Control chrome and no assets.
+  - Every other route on those hosts is a 404, as on `hooks.<base>`.
+  - For a host that isn't in maintenance (a stale route): a plain 404.
+- **The page in Mission Control:**
+  - a MAINTENANCE banner (since, by whom, the message, "Turn it off")
+  - "Show maintenance page" with an optional message (turning it on asks for confirmation: users see the page within seconds)
+- **The flight board:** a MAINTENANCE chip.
 - **API:**
-  - `PUT /api/v1/projects/:name/maintenance {on: true|false}` → `{on, since, by}`
+  - `PUT /api/v1/projects/:name/maintenance {on: true|false, message?}` → `{on, since, by, message}`
   - `GET /api/v1/projects/:name` includes `maintenance`
 - **CLI:**
-  - `houston maintenance` shows the state; `houston maintenance on|off` sets it
+  - `houston maintenance` shows the state; `houston maintenance on [--message TEXT]|off` sets it
   - `houston status` shows a `maintenance` line when it's on
 
 ### AC ↔ test map (Batch 1)
 | # | Acceptance criterion | Test | Lens |
 |---|---|---|---|
-| 1 | `on!` runs the spike's kamal-proxy command for the project's service, then records since and by; `off!` resumes and clears; a failed command → error, nothing recorded; on while on runs it again and keeps since | `models/maintenance_test.rb` `test "turning the maintenance page on and off"` | Contract, Atomicity |
-| 2 | Refused before anything was deployed; the command never runs | `test "nothing to put in maintenance"` | Preconditions |
-| 3 | The page: the banner (since, by), on (confirmed) and off; signed out → sign-in, nothing run | `controllers/project_maintenance_test.rb` | Authz, Contract |
-| 4 | The flight board's MAINTENANCE chip | `controllers/projects_controller_test.rb` `test "a project in maintenance"` | Signals |
-| 5 | API: on/off, the project view's `maintenance` (by = the token's name); unknown project 404; the runner token 401; a failed command → 502 with its words | `integration/api_v1_maintenance_test.rb` | Authz, Contract |
-| 6 | CLI: `houston maintenance` shows; `on`/`off`; errors → exit 1; `status` shows it | `internal/cli` `TestMaintenance` | Contract |
+| 1 | `TunnelRoutes`: the order (admin, hooks, maintenance hosts including custom domains, catch-all); `CloudflareSetup` sends the same rules | `models/tunnel_routes_test.rb` | Contract |
+| 2 | `on!` records, then pushes the rules with the project's hosts; Cloudflare refusing → the state rolled back and the error raised; `off!` removes them; not connected → refused, nothing pushed | `models/maintenance_test.rb` `test "turning the maintenance page on and off"` | Atomicity, Preconditions |
+| 3 | Two projects toggled together: each push is computed after its own change, so the last one holds both | `test "two toggles at once"` | Concurrency |
+| 4 | A request for a host in maintenance → 503 page with the name and message, `Retry-After`, `no-store`, no chrome; any other path on that host → the same page; sign-in, the API and webhooks on that host → 404; a host not in maintenance → 404 | `integration/maintenance_page_test.rb` | Authz, Contract (hostile input) |
+| 5 | The page: the banner, on (with a message, 500 characters at most) and off; signed out → sign-in, nothing pushed | `controllers/project_maintenance_test.rb` | Authz, Contract |
+| 6 | The flight board's MAINTENANCE chip | `controllers/projects_controller_test.rb` `test "a project in maintenance"` | Signals |
+| 7 | A custom domain added to a project in maintenance (at sync) is routed too; one removed stops being routed | `integration/api_sync_test.rb` `test "maintenance follows the domains"` | Contract |
+| 8 | API: on/off with a message, the project view's `maintenance` (by = the token's name); unknown project 404; the runner token 401; Cloudflare refusing → 502 with its words | `integration/api_v1_maintenance_test.rb` | Authz, Contract |
+| 9 | CLI: `houston maintenance` shows; `on --message`/`off`; errors → exit 1; `status` shows it | `internal/cli` `TestMaintenance` | Contract |
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
