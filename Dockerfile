@@ -7,3 +7,19 @@ ENV CGO_ENABLED=0
 
 FROM base AS dev
 CMD ["bash"]
+
+# Release binaries: bin/release exports this stage into dist/.
+FROM base AS release-build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN for os in darwin linux; do for arch in arm64 amd64; do \
+      GOOS=$os GOARCH=$arch go build -trimpath \
+        -ldflags "-s -w -X github.com/sevenmoons/houston/internal/cli.version=${VERSION}" \
+        -o /dist/houston-$os-$arch ./cmd/houston || exit 1; \
+    done; done
+
+FROM scratch AS release
+COPY --from=release-build /dist/ /

@@ -66,7 +66,7 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 		changes = append(changes, change{dockerfilePath, docker.Content, msg})
 	}
 
-	compose, composeChange, code := planCompose(composePath, dir, docker.Workdir, stdin, stdout, stderr)
+	compose, composeChange, code := planCompose(composePath, dir, docker, stdin, stdout, stderr)
 	if code != 0 {
 		return code
 	}
@@ -103,7 +103,7 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 // planCompose returns the project the compose file will describe, and the
 // change to make (nil when it already has x-houston). The result is checked
 // with project.Parse before anything is written.
-func planCompose(path, dir, workdir string, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
+func planCompose(path, dir string, docker stack.DockerfileResult, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
 	existing, err := os.ReadFile(path)
 	var content, message string
 	switch {
@@ -112,7 +112,7 @@ func planCompose(path, dir, workdir string, stdin io.Reader, stdout, stderr io.W
 		if !ok {
 			return nil, nil, exitUsage
 		}
-		content = stack.RailsCompose(name, workdir)
+		content = stack.RailsCompose(name, docker.Workdir, docker.ProductionPort)
 		message = "created " + filepath.Base(path)
 	case err != nil:
 		fmt.Fprintf(stderr, "houston: can't read %s: %v\n", filepath.Base(path), err)
@@ -129,7 +129,7 @@ func planCompose(path, dir, workdir string, stdin io.Reader, stdout, stderr io.W
 		if !strings.HasSuffix(content, "\n") {
 			content += "\n"
 		}
-		content += "\n" + stack.RailsXHouston
+		content += "\n" + stack.RailsXHouston(docker.ProductionPort)
 		message = "added x-houston to " + filepath.Base(path)
 	}
 	p, err := project.Parse(path, []byte(content))

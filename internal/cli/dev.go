@@ -16,8 +16,9 @@ import (
 )
 
 // runDev implements `houston dev`: compose.yml plus a generated override that
-// forces the dev build target, run with `docker compose up --build`.
-func runDev(file string, stderr io.Writer, d docker.Runner) int {
+// forces the dev build target (or, with --production, the production one),
+// run with `docker compose up --build`.
+func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
@@ -31,14 +32,20 @@ func runDev(file string, stderr io.Writer, d docker.Runner) int {
 		return exitFailure
 	}
 	dir := filepath.Dir(abs)
-	if !warnAboutVariables(dir, p, stderr) {
+	values, ok := warnAboutVariables(dir, p, stderr)
+	if !ok {
 		return exitUsage
 	}
 	warnAboutOverrideFiles(dir, stderr)
 
-	override := filepath.Join(dir, ".houston", "compose.dev.yml")
-	if err := writeGenerated(override, variant.DevOverride(p)); err != nil {
-		fmt.Fprintf(stderr, "houston: can't write .houston/compose.dev.yml: %v\n", err)
+	name, content := "compose.dev.yml", variant.DevOverride(p)
+	if production {
+		name, content = "compose.production.yml", variant.ProductionOverride(p)
+		noteRailsMasterKey(p, values, stderr)
+	}
+	override := filepath.Join(dir, ".houston", name)
+	if err := writeGenerated(override, content); err != nil {
+		fmt.Fprintf(stderr, "houston: can't write .houston/%s: %v\n", name, err)
 		return exitFailure
 	}
 	// -p pins the project name: compose would otherwise let a stray
@@ -70,8 +77,8 @@ func failed(_ []byte, err error) bool { return err != nil }
 // warnAboutVariables warns, by name only, about required secrets that will be
 // blank because neither .env nor the shell sets them. Compose reads .env
 // itself; this parses it with compose-go's parser so both agree. It returns
-// false when .env can't be parsed.
-func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) bool {
+// .env's values, and false when .env can't be parsed.
+func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) (map[string]string, bool) {
 	envPath := filepath.Join(dir, ".env")
 	values := map[string]string{}
 	_, statErr := os.Stat(envPath)
@@ -81,7 +88,7 @@ func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) bool {
 		values, err = dotenv.ReadFile(envPath, func(string) (string, bool) { return "", false })
 		if err != nil {
 			fmt.Fprintf(stderr, "houston: .env: %v\n", err)
-			return false
+			return nil, false
 		}
 	}
 
@@ -105,7 +112,26 @@ func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) bool {
 	default:
 		fmt.Fprintf(stderr, "warning: .env has no value for: %s (the app gets them blank)\n", strings.Join(blank, ", "))
 	}
-	return true
+	return values, true
+}
+
+// noteRailsMasterKey explains the one thing a Rails app needs to boot from
+// its production image locally: Rails' .dockerignore keeps config/master.key
+// out of it, so the key has to come from .env.
+func noteRailsMasterKey(p *project.Project, values map[string]string, stderr io.Writer) {
+	for _, v := range p.Variables {
+		if v.Name != "RAILS_MASTER_KEY" {
+			continue
+		}
+		if values["RAILS_MASTER_KEY"] != "" {
+			return
+		}
+		if shell, ok := os.LookupEnv("RAILS_MASTER_KEY"); ok && shell != "" {
+			return
+		}
+		fmt.Fprintln(stderr, "note: the production image has no config/master.key; set RAILS_MASTER_KEY in .env for Rails to boot")
+		return
+	}
 }
 
 func warnAboutOverrideFiles(dir string, stderr io.Writer) {

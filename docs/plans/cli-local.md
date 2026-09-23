@@ -472,13 +472,69 @@ Commands: `bin/go test ./internal/cli/ -run TestInit` (rows 1–7), then the equ
 - **Rails with `RAILS_MASTER_KEY=""`:** confirmed on equip (see above).
 - That the Rails build stage's apt line in the fixture matches equip's (equip's Dockerfile is Rails' generated template).
 
+## Batch 6: `houston dev --production`, packaging, polish
+
+Batch 5 is green and committed (`e15e35a`), and the toolchain is on Go 1.26 (`50dad7e`). Batch 6 finishes build step 1.
+
+### 6a. Rails' production port (a Batch 5 miss, found while planning this batch)
+Rails 8's production stage runs Thruster on **port 80** (`EXPOSE 80`, `CMD ["./bin/thrust", …]`), while its dev stage runs `rails server` on 3000. `init` wrote only `ports: ["3000:3000"]`, so `AppPort` = 3000, and on the server kamal-proxy would health-check the wrong port. Fix: `init` reads the final stage's `EXPOSE` and, when it differs from the dev port 3000, writes `x-houston.port: <it>` (equip → `port: 80`). If there's no `EXPOSE`, it writes nothing, so the port stays 3000.
+
+### 6b. `houston dev --production`
+Spec §6: runs the `production` target locally, for checking the real thing before a risky deploy.
+- A new override, `.houston/compose.production.yml`: app `build.target: production`, app volumes named-only (`!override`, or `!reset []` when there are none, as in `test`), and app `ports: !override ["<host>:<AppPort>"]`. `<host>` is the published host port of the app's first `ports` entry; with none, it's `["<AppPort>"]` (a random host port). So `localhost:3000` reaches Thruster on 80. Other services run as written.
+- Same project name (`-p <name>`), same `.env`, same preflight and warnings as `dev`. `console`/`logs` therefore work against it too. The same named volumes are used, as in `dev`.
+- `--production` exists only on `dev`. `test --production` is a usage error.
+- Honest caveat, printed as a one-line note: the production image doesn't contain `config/master.key` (Rails' `.dockerignore` excludes it), so a Rails app needs `RAILS_MASTER_KEY` set in `.env` to boot this way. Houston doesn't read the key file for you.
+
+### 6c. Packaging
+- `houston --version` prints the version, stamped at build time with `-ldflags -X` (default `dev`).
+- Dockerfile `release` stage: cross-compiles `houston` for darwin/linux × arm64/amd64 (CGO off, `-trimpath`, stamped with `git describe`). `bin/release` runs `docker build --target release --output dist/` and writes `dist/houston-<os>-<arch>`.
+- `bin/install [PREFIX]` builds for this machine and installs `PREFIX/bin/houston` plus a `hou` symlink (default `PREFIX=~/.local`). `hou` is the same binary, and nothing in Houston depends on its name.
+- **Defer (open question):** where release binaries are published (GitHub Releases? Forgejo?) and a `curl | sh` laptop installer. That needs your call on hosting, so it goes with the server installer in build step 2.
+
+### 6d. Polish carried from earlier reviews
+- **`docker ps` failure message:** `docker.Runner.Output` includes docker's stderr in its error, not just "exit status 1".
+- **cobra's `completion` command:** disabled. It's untested surface, and shell completions can come back with a real install story.
+- **Still deferred, with homes:** root-owned files when the `cli` container runs on a Linux host (the runner image, build step 4); stale `<name>-test-*` sweeping and a job timeout (runners, build step 4); machine variables like `${HOME}` as secrets (build step 3); Rails + Postgres (build step 7).
+
+### AC ↔ test map (Batch 6)
+
+| # | AC | Test | Lens |
+|---|---|---|---|
+| 1 | Rails fixture (final stage `EXPOSE 80`) → compose gains `  port: 80` under `x-houston`, and Load gives `AppPort` 80. Without `EXPOSE` → no `port:` line, `AppPort` 3000 | `TestInit_ProductionPortFromExpose` (+ updated golden) | Contract, Parity |
+| 2 | Production override bytes for PhoenixApp (`target: production`, `volumes: !override [media:/media]`, `ports: !override ["4000:4000"]`). For RailsApp with `port: 80` → `["3000:80"]`. App with container-only `ports: ["8080"]` → `["8080"]` | `internal/variant/production_test.go` `TestProductionOverride` (table) | Contract |
+| 3 | `houston dev --production` → exact `up --build` argv with `.houston/compose.production.yml`, `-p <name>`; same warnings as `dev`; exit passthrough; the `RAILS_MASTER_KEY` note shown only when the file references it | `TestDevProduction_RunsCompose` | Contract, Signals |
+| 4 | `test --production`, `console --production` → exit 2, no Docker | `TestCLI_ProductionOnlyOnDev` | Honest surface |
+| 5 | `houston --version` prints the stamped version (and `dev` unstamped); `houston completion` → unknown command | `TestCLI_VersionAndNoCompletion` | Contract, Honest surface |
+| 6 | `docker.Runner.Output`: a fake `docker` on `PATH` that writes `boom from docker` to stderr and exits 1 → the error contains `boom from docker` | `internal/docker/docker_test.go` `TestOutput_IncludesStderr` | Signals |
+| 7 | **Real Docker:** busybox fixture `houston dev --production` → the container runs the `production` stage (`/stage` = `production`), the app's files come from the image (a file written on the host after start isn't visible), Ctrl-C stops cleanly | `TestDevProductionIntegration` | Parity |
+| 8 | **Real app (equip copy):** `init` writes `port: 80`. With `RAILS_MASTER_KEY` in the copy's `.env`, `houston dev --production` → `http://localhost:3000/up` 200 from Thruster; Ctrl-C clean | manual real-app check | Parity |
+| 9 | **Packaging:** `bin/release` produces 4 binaries (`file dist/*` shows Mach-O/ELF × arm64/x86-64); `bin/install <temp prefix>` installs `houston` and a `hou` symlink, and `hou --version` works | manual check (evidence in the transcript) | Contract |
+
+### Done (Batch 6)
+- Rows 1–3 and 5–7 went red first, then green. Row 4 is a guard: it already passed while `--production` didn't exist.
+- **Review finding, fixed test-first:** a host IP in `ports` (`127.0.0.1:3000:3000`) was dropped by the production override, so `dev --production` would have listened on every interface. It's now kept (`127.0.0.1:3000:80`).
+- **Row 8 (equip copy):** `init` wrote `port: 80`. With the copy's key in `.env`, `houston dev --production` served `/up` 200 in 66 s (first production build with asset precompile) through `3000:80`, `houston console` reported `env=production`, and Ctrl-C was clean.
+- **Row 9:** `bin/release` built `houston-{darwin,linux}-{arm64,amd64}` (Mach-O/ELF, static, stripped). `bin/install <temp prefix>` installed `houston` + `hou → houston`, and `hou --version` printed the git version.
+- **Build step 1 (CLI, local only) is complete.**
+
+### Lens run (Batch 6)
+| Lens | Where |
+|---|---|
+| Contract | 1–3, 5, 9 |
+| Parity | 1, 7, 8: the production variant matches what the server will run (target, port, no bind mounts) |
+| Honest surface | 4, 5: `--production` only where it works; completion removed until it's tested |
+| Signals | 3, 6 |
+| Crash/signals | 7 reuses `dev`'s Ctrl-C handling (proven in Batch 2) |
+| Authz, Concurrency, At-least-once, Migrate | N/A |
+
 ## Later batches (titles only)
 
 2. **`houston dev`**: fully specified below.
 3. **`houston test`**: fully specified below.
 4. **`houston console` / `houston logs [-f]`**: fully specified below.
 5. **`houston init` (Rails)**: fully specified below.
-6. **`houston dev --production` + packaging**: `hou` symlink, release builds, laptop install script. Decide whether to keep cobra's built-in `completion` command (shell completions) or disable it; it's untested surface today. Also: the `cli` container runs as root, so on a Linux host files it writes (go.sum, generated code) come out root-owned. That's fine on macOS/OrbStack, and should be fixed before Linux CI or runners use this image (found in the Batch 1 review).
+6. **`houston dev --production`, packaging and polish**: fully specified below.
 
 ## Agent loop checkpoints
 

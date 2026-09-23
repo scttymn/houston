@@ -5,6 +5,7 @@ package variant
 import (
 	"bytes"
 	"sort"
+	"strconv"
 
 	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/sevenmoons/houston/internal/project"
@@ -103,4 +104,33 @@ func render(doc *yaml.Node) []byte {
 		panic(err) // nodes built above always encode
 	}
 	return b.Bytes()
+}
+
+// ProductionOverride is the compose file Houston layers on top of compose.yml
+// for `houston dev --production`: the production build target, no bind mounts
+// (the code is baked into the image), and the app's published host port
+// pointed at the port the production image listens on (x-houston.port).
+func ProductionOverride(p *project.Project) []byte {
+	app := p.Compose.Services[p.AppService]
+	port := strconv.Itoa(p.AppPort)
+	if len(app.Ports) > 0 && app.Ports[0].Published != "" {
+		port = app.Ports[0].Published + ":" + port
+		if ip := app.Ports[0].HostIP; ip != "" {
+			port = ip + ":" + port // keep a localhost-only binding localhost-only
+		}
+	}
+	svc := []any{
+		"build", mapping("target", scalar("production")),
+		"ports", &yaml.Node{Kind: yaml.SequenceNode, Tag: "!override", Content: []*yaml.Node{quoted(port)}},
+	}
+	if len(app.Volumes) > 0 {
+		svc = append(svc, "volumes", namedVolumes(app.Volumes))
+	}
+	return render(mapping("services", mapping(p.AppService, mapping(svc...))))
+}
+
+// quoted keeps "3000:80" a string for every YAML reader (YAML 1.1 would read
+// it as a base-60 number).
+func quoted(s string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: s, Style: yaml.DoubleQuotedStyle}
 }

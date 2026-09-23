@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Build houston for this machine and install PREFIX/bin/houston plus a `hou`
+# symlink (default PREFIX: ~/.local).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+prefix="${1:-$HOME/.local}"
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$(uname -m)" in
+  x86_64) arch=amd64 ;;
+  arm64 | aarch64) arch=arm64 ;;
+  *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+out=".houston/houston-$os-$arch"
+docker compose --progress quiet run --rm -e GOOS="$os" -e GOARCH="$arch" cli \
+  go build -trimpath -ldflags "-X github.com/sevenmoons/houston/internal/cli.version=$version" -o "$out" ./cmd/houston
+mkdir -p "$prefix/bin"
+mv "$out" "$prefix/bin/houston"
+ln -sf houston "$prefix/bin/hou"
+echo "installed $prefix/bin/houston and $prefix/bin/hou ($version)"

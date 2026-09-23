@@ -3,9 +3,11 @@ package docker
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -31,7 +33,12 @@ func (cliRunner) LookPath() error {
 }
 
 func (cliRunner) Output(args ...string) ([]byte, error) {
-	return exec.Command("docker", args...).Output()
+	out, err := exec.Command("docker", args...).Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		return out, fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exit.Stderr)))
+	}
+	return out, err
 }
 
 // Run waits out Ctrl-C instead of dying on it. The terminal sends SIGINT to

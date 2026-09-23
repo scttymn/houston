@@ -12,6 +12,9 @@ import (
 	"golang.org/x/term"
 )
 
+// version is stamped at build time with -ldflags "-X .../internal/cli.version=…".
+var version = "dev"
+
 // Exit codes. Commands that run a child process return the child's code.
 const (
 	exitFailure = 1 // Houston couldn't do the work (Docker missing, can't write files)
@@ -21,7 +24,7 @@ const (
 // Main runs the houston command line and returns the process exit code.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Runner) int {
 	var file string
-	var follow bool
+	var follow, production bool
 	code := 0
 
 	root := &cobra.Command{
@@ -32,6 +35,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		// Like docker compose, -f/--file goes before the command
 		// (houston -f other.yml dev), which frees -f for `logs -f`.
 		TraverseChildren: true,
+		Version:          version,
 		// With TraverseChildren cobra hands unknown commands to root as
 		// arguments, so root rejects them itself; plain `houston` shows help.
 		Args: cobra.ArbitraryArgs,
@@ -43,6 +47,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		},
 	}
 	root.Flags().StringVarP(&file, "file", "f", "compose.yml", "the project's compose file (before the command)")
+	root.CompletionOptions.DisableDefaultCmd = true
 
 	command := func(use, short string, run func() int) *cobra.Command {
 		return &cobra.Command{
@@ -55,10 +60,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 			},
 		}
 	}
+	dev := command("dev", "Run the project locally (dev build target, code mounted)", func() int {
+		return runDev(file, production, stderr, d)
+	})
+	dev.Flags().BoolVar(&production, "production", false, "run the production build target instead, with the code baked into the image")
 	root.AddCommand(
-		command("dev", "Run the project locally (dev build target, code mounted)", func() int {
-			return runDev(file, stderr, d)
-		}),
+		dev,
 		command("test", "Run x-houston.commands.test in a throwaway copy of the project", func() int {
 			return runTest(file, stdout, stderr, d)
 		}),

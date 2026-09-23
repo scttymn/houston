@@ -16,6 +16,7 @@ volumes:
 
 x-houston:
   health: /up
+  port: 80
   commands:
     console: bin/rails console
     test: bin/rails test

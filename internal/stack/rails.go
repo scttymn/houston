@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,9 @@ type DockerfileResult struct {
 	AddedStages bool   // dev and test were inserted
 	NamedFinal  bool   // the final stage was named production
 	Workdir     string // the base stage's WORKDIR
+	// ProductionPort is the final stage's EXPOSE (0 when there is none).
+	// Rails 8's production image runs Thruster on 80, not rails server's 3000.
+	ProductionPort int
 }
 
 // RailsDockerfile adds dev and test stages after Rails' base stage and names
@@ -80,6 +84,13 @@ func RailsDockerfile(src string) (DockerfileResult, error) {
 	for _, l := range lines[stages[base].line:end(base)] {
 		if f := strings.Fields(l); len(f) == 2 && strings.EqualFold(f[0], "WORKDIR") {
 			res.Workdir = f[1]
+		}
+	}
+
+	for _, l := range lines[stages[len(stages)-1].line:] {
+		if f := strings.Fields(l); len(f) >= 2 && strings.EqualFold(f[0], "EXPOSE") {
+			res.ProductionPort, _ = strconv.Atoi(strings.SplitN(f[1], "/", 2)[0])
+			break
 		}
 	}
 
@@ -185,10 +196,20 @@ func devTestStages(apt, copies []string) []string {
 	)
 }
 
-// RailsXHouston is the x-houston block for a Rails app.
-const RailsXHouston = `x-houston:
-  health: /up
-  commands:
+// devPort is where the dev stage's rails server listens.
+const devPort = 3000
+
+// RailsXHouston is the x-houston block for a Rails app. productionPort is the
+// production image's port; it's written only when it differs from dev's.
+func RailsXHouston(productionPort int) string {
+	port := ""
+	if productionPort != 0 && productionPort != devPort {
+		port = fmt.Sprintf("  port: %d\n", productionPort)
+	}
+	return "x-houston:\n  health: /up\n" + port + railsCommands
+}
+
+const railsCommands = `  commands:
     console: bin/rails console
     test: bin/rails test
   hooks:
@@ -196,7 +217,7 @@ const RailsXHouston = `x-houston:
 `
 
 // RailsCompose is a new compose.yml for a Rails + SQLite app.
-func RailsCompose(name, workdir string) string {
+func RailsCompose(name, workdir string, productionPort int) string {
 	return fmt.Sprintf(`name: %s
 
 services:
@@ -213,5 +234,5 @@ services:
 volumes:
   storage:
 
-`, name, workdir, workdir) + RailsXHouston
+`, name, workdir, workdir) + RailsXHouston(productionPort)
 }

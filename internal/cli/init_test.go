@@ -343,3 +343,35 @@ func TestInit_FileFlagAndUsage(t *testing.T) {
 		}
 	})
 }
+
+func TestInit_ProductionPortFromExpose(t *testing.T) {
+	terminal(t, false)
+	t.Run("EXPOSE 80 in the final stage", func(t *testing.T) {
+		dir := railsApp(t, "demo")
+		initIn(t, dir, "")
+		p, err := project.Load(filepath.Join(dir, "compose.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.AppPort != 80 {
+			t.Errorf("AppPort = %d, want 80 (Thruster in the production image)", p.AppPort)
+		}
+	})
+	t.Run("no EXPOSE", func(t *testing.T) {
+		dir := railsApp(t, "demo")
+		src := read(t, filepath.Join(dir, "Dockerfile"))
+		must(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(strings.Replace(src, "EXPOSE 80\n", "", 1)), 0o644))
+		initIn(t, dir, "")
+		compose := read(t, filepath.Join(dir, "compose.yml"))
+		if strings.Contains(compose, "port:") {
+			t.Errorf("compose.yml has a port line without EXPOSE:\n%s", compose)
+		}
+		p, err := project.Load(filepath.Join(dir, "compose.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.AppPort != 3000 {
+			t.Errorf("AppPort = %d, want 3000", p.AppPort)
+		}
+	})
+}

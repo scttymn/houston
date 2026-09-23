@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Build houston for darwin/linux × arm64/amd64 into dist/, stamped with the
+# git version.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+version="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+docker build --target release --build-arg VERSION="$version" --output type=local,dest=dist .
+ls -l dist
