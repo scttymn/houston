@@ -78,7 +78,8 @@ class BackupJobTest < ActiveJob::TestCase
 
   test "a restore run's second delivery restores once" do
     restore, = Deploy.start!(@project, sha: "a" * 40, ref: "refs/heads/main")
-    restore.update!(kind: "restore", source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas), generation: 2)
+    restore.update!(kind: "restore", source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas), generation: 2,
+                    sync_payload: { "volumes" => [] })
     run = BackupRun.request_restore!(restore)
     assert_equal "snapshots", BackupJob.new(run).queue_name
     manifest = { version: 1, project: "equip", sha: "a" * 40, volumes: [], postgres: [], sqlite: [] }.to_json

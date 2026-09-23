@@ -169,11 +169,12 @@ class BackupTest < ActiveSupport::TestCase
     assert_equal "go", @run.status
   end
 
-  # A snapshot is of the version that's serving: the running deploy's
-  # generation, even while the project's next deploy (a restore's) is
-  # building another one.
+  # A snapshot is of the version that's serving, even while a restore builds
+  # generation 2 beside it: the project's generation moves only at the
+  # restore's switch (a restore's safety snapshot is this case).
   test "a backup reads the serving generation" do
-    @project.update!(data_generation: 2)
+    restore, = Deploy.start!(@project, sha: "b" * 40, ref: "refs/restore/33333333")
+    restore.update!(kind: "restore", generation: 2)
     fake = backup_docker
     back_up(fake)
     args = fake.calls.map(&:args)

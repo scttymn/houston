@@ -44,3 +44,27 @@ func TestConfigGeneration2(t *testing.T) {
 		t.Errorf("ResolveSecrets(2) = %v, %v", secrets["APP__DATABASE_URL"], err)
 	}
 }
+
+// What a restore removes: a generation's accessory containers, and the
+// volumes that begin with its prefix, which no other project's or
+// generation's do.
+func TestAccessoriesAndVolumePrefix(t *testing.T) {
+	p := load(t, "testdata/phoenix.compose.yml")
+	if got := Accessories(p, 1); !reflect.DeepEqual(got, []string{"phoenixapp-cache", "phoenixapp-db"}) {
+		t.Errorf("Accessories(1) = %v", got)
+	}
+	if got := Accessories(p, 3); !reflect.DeepEqual(got, []string{"phoenixapp-cache-g3", "phoenixapp-db-g3"}) {
+		t.Errorf("Accessories(3) = %v", got)
+	}
+	for _, c := range []struct {
+		generation int
+		want       string
+	}{{1, "phoenixapp_"}, {0, "phoenixapp_"}, {2, "phoenixapp.g2_"}} {
+		if got := (Names{Project: "phoenixapp", Generation: c.generation}).VolumePrefix(); got != c.want {
+			t.Errorf("VolumePrefix(%d) = %q, want %q", c.generation, got, c.want)
+		}
+	}
+	if _, labelled := config(t, p, target)["labels"]; labelled {
+		t.Errorf("generation 1's app is labelled: its deploy.yml is what it always was")
+	}
+}

@@ -11,7 +11,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,9 @@ const KamalImage = "ghcr.io/basecamp/kamal:v2.12.0"
 
 const (
 	DefaultTimeout = 30 * time.Minute
+	// A restore puts a whole snapshot back and snapshots again: hours for a
+	// big database, not minutes (docs/plans/restore.md, Batch 6).
+	RestoreTimeout = 4 * time.Hour
 	HeartbeatEvery = 15 * time.Second
 	FenceAfter     = 60 * time.Second
 )
@@ -58,6 +63,8 @@ type Mission interface {
 	Report(ctx context.Context, d mission.Deploy, p mission.Progress) error
 	Snapshot(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
 	SnapshotStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	RestoreData(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	RestoreDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
 }
 
 type Options struct {
@@ -79,7 +86,8 @@ type Options struct {
 	// RunTests runs x-houston.commands.test first (step 00) with Houston.
 	RunTests bool
 	Houston  string // this binary, for houston test
-	// SnapshotEvery: how often the pre-deploy snapshot is checked; zero: 2 s.
+	// SnapshotEvery: how often a run in Mission Control (a snapshot, a
+	// restore's data) is checked, and a must-arrive report retried; zero: 2 s.
 	SnapshotEvery time.Duration
 }
 
@@ -113,12 +121,20 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		return early(exitUsage, fmt.Sprintf("houston deploy: %v\n", err), err.Error())
 	}
 	dir := filepath.Dir(abs)
-	sha, ref, err := checkRef(d.Git, dir, o.Ref, p.Houston.Deploy)
+	restore := o.Claimed != nil && o.Claimed.Restore()
+	sha, ref, err := checkRef(d.Git, dir, o.Ref, p.Houston.Deploy, restore)
 	if err != nil {
 		return early(exitUsage, fmt.Sprintf("houston deploy: %v\n", err), err.Error())
 	}
 
-	synced, err := d.Mission.Sync(ctx, mission.RequestFor(p))
+	req := mission.RequestFor(p)
+	if restore {
+		req.RestoreDeploy, req.DeployToken = o.Claimed.ID, o.Claimed.Token
+	}
+	if serving, known := routed(d.Docker, p.Name); known {
+		req.ServingGeneration, req.ServingSHA = serving.generation, serving.sha
+	}
+	synced, err := d.Mission.Sync(ctx, req)
 	if err != nil {
 		var hold *mission.HoldError
 		var msg string
@@ -134,6 +150,10 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		return early(exitFailure, "houston deploy: "+msg+"\n", msg)
 	}
 	target := kamal.Target{BaseDomain: strings.TrimPrefix(synced.Host, p.Name+"."), Arch: o.Arch, Generation: synced.Generation}
+	if restore {
+		// A restore builds the next generation; sync reports the serving one.
+		target.Generation = o.Claimed.Generation
+	}
 	config, err := kamal.Config(p, target)
 	if err != nil {
 		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
@@ -155,6 +175,9 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	// unreachable for FenceAfter (see stop). Reports use ctx, so the final one
 	// still goes out after a timeout.
 	timeout, every, fence := orDefault(o.Timeout, DefaultTimeout), orDefault(o.HeartbeatEvery, HeartbeatEvery), orDefault(o.FenceAfter, FenceAfter)
+	if restore {
+		timeout = orDefault(o.Timeout, RestoreTimeout)
+	}
 	deadlineCtx, cancelDeadline := context.WithTimeout(ctx, timeout)
 	defer cancelDeadline()
 	runCtx, cancel := context.WithCancelCause(deadlineCtx)
@@ -163,10 +186,15 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	r := &run{ctx: runCtx, o: o, d: d, p: p, generation: target.Generation, dir: dir, file: abs, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
-		report:   &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now()}}
+		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now(),
+			retryEvery: orDefault(o.SnapshotEvery, 2*time.Second)}}
 	stopHeartbeat := r.report.heartbeat(every)
 	defer stopHeartbeat()
-	r.report.logf("Deploy #%d of %s: %s (%s)\n", dep.Number, p.Name, sha[:7], ref)
+	if restore {
+		r.report.logf("Restore #%d of %s: %s (%s), into data generation %d (deadline %s)\n", dep.Number, p.Name, sha[:7], ref, target.Generation, timeout)
+	} else {
+		r.report.logf("Deploy #%d of %s: %s (%s)\n", dep.Number, p.Name, sha[:7], ref)
+	}
 	if dep.TookOver > 0 {
 		r.report.logf("Took over deploy #%d, which had gone silent.\n", dep.TookOver)
 	}
@@ -184,13 +212,64 @@ func Run(ctx context.Context, o Options, d Deps) int {
 			}
 		}
 	}
+	if restore {
+		return r.restore()
+	}
 	return r.deploy(dep.TookOver > 0)
+}
+
+var ansi = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// serving is the app kamal-proxy routes a project to: its data generation
+// (0: nothing routed) and its commit.
+type serving struct {
+	generation int
+	sha        string
+}
+
+// routed reads what kamal-proxy routes the project to: the target container
+// of its <name>-web service, that container's houston.generation label
+// (none: generation 1), and the commit in its name (<name>-web-<sha>).
+// What serves is what the proxy routes to, not what runs: a switch killed
+// midway can leave the new version running, unrouted. known is false when
+// Docker or the proxy can't say.
+func routed(docker Docker, name string) (s serving, known bool) {
+	out, err := docker.Output("exec", "kamal-proxy", "kamal-proxy", "list")
+	if err != nil {
+		return serving{}, false
+	}
+	// Service  Host  Path  Target  State  TLS, colored even without a terminal.
+	target := ""
+	for _, line := range strings.Split(ansi.ReplaceAllString(string(out), ""), "\n") {
+		if f := strings.Fields(line); len(f) >= 4 && f[0] == name+"-web" {
+			target, _, _ = strings.Cut(f[3], ":")
+		}
+	}
+	if target == "" {
+		return serving{}, true
+	}
+	inspected, err := docker.Output("inspect", "-f", `{{index .Config.Labels "`+kamal.GenerationLabel+`"}}|{{.Name}}`, target)
+	if err != nil {
+		return serving{}, false
+	}
+	label, container, _ := strings.Cut(strings.TrimSpace(string(inspected)), "|")
+	s.generation = 1
+	if label != "" {
+		if s.generation, err = strconv.Atoi(label); err != nil {
+			return serving{}, false
+		}
+	}
+	if sha, ok := strings.CutPrefix(strings.TrimPrefix(container, "/"), name+"-web-"); ok && len(sha) >= 40 {
+		s.sha = sha[:40] // a replaced one is <sha>_replaced_<hex>
+	}
+	return s, true
 }
 
 // checkRef returns the commit and ref to deploy, or why they can't be: the
 // worktree must be clean, the ref must be the checked-out commit, and the
 // project's deploy rule must allow it.
-func checkRef(g Git, dir, ref string, rule project.Deploy) (sha, fullRef string, err error) {
+// A restore's commit is any the project had, so its deploy rule isn't checked.
+func checkRef(g Git, dir, ref string, rule project.Deploy, restore bool) (sha, fullRef string, err error) {
 	status, err := g.Output(dir, "status", "--porcelain")
 	if err != nil {
 		return "", "", fmt.Errorf("can't read the checkout's git status: %v", err)
@@ -214,6 +293,9 @@ func checkRef(g Git, dir, ref string, rule project.Deploy) (sha, fullRef string,
 		return "", "", fmt.Errorf("%s isn't the checked-out commit (%s)", ref, head)
 	}
 
+	if restore {
+		return head, ref, nil
+	}
 	on, branch, tags := rule.On, rule.Branch, rule.Tags
 	if on == "" {
 		on = "commit"
@@ -244,7 +326,7 @@ type run struct {
 	o           Options
 	d           Deps
 	p           *project.Project
-	generation  int // the data generation sync reported: which volumes and accessories
+	generation  int // the data generation: sync's for a deploy, the claim's (g+1) for a restore
 	dir         string
 	file        string // the compose file, absolute
 	sha         string
@@ -283,26 +365,7 @@ func (r *run) deploy(tookOver bool) int {
 	}
 
 	r.report.step("Build")
-	build := r.p.Compose.Services[r.p.AppService].Build
-	context, dockerfile := ".", "Dockerfile"
-	if build != nil && build.Context != "" {
-		context = build.Context
-	}
-	if build != nil && build.Dockerfile != "" {
-		dockerfile = build.Dockerfile
-	}
-	if !filepath.IsAbs(context) {
-		context = filepath.Join(r.dir, context)
-	}
-	if !filepath.IsAbs(dockerfile) {
-		dockerfile = filepath.Join(context, dockerfile)
-	}
-	// Kamal only deploys images labelled service=<name> (its own builder
-	// adds the label; Houston builds the image itself).
-	if msg := r.docker("the image didn't build", "build", "--target", "production", "--label", "service="+r.p.Name, "-t", r.image, "-f", dockerfile, context); msg != "" {
-		return r.fail(msg)
-	}
-	if msg := r.docker("couldn't push the image to Houston's registry", "push", r.image); msg != "" {
+	if msg := r.build(); msg != "" {
 		return r.fail(msg)
 	}
 
@@ -354,35 +417,61 @@ func (r *run) deploy(tookOver bool) int {
 // snapshot asks Mission Control for the pre-deploy snapshot of the version
 // that's serving, and waits for it. stopped: the deploy ends here, with code.
 func (r *run) snapshot() (code int, stopped bool) {
-	s, err := r.d.Mission.Snapshot(r.ctx, r.report.deploy)
+	s, err := r.await(r.d.Mission.Snapshot, r.d.Mission.SnapshotStatus, "the snapshot")
+	switch {
+	case errors.Is(err, errDeadline):
+		return r.noGo("the pre-deploy snapshot didn't finish before the deploy's deadline; the old version keeps serving"), true
+	case errors.Is(err, errStopped):
+		return r.stop(), true
+	case err != nil:
+		return r.fail(fmt.Sprintf("pre-deploy snapshot failed: %v; the old version keeps serving", err)), true
+	case s.Status == "skipped":
+		r.report.logf("no snapshot: %s\n", s.Error)
+	default:
+		r.logSnapshot(s)
+	}
+	return 0, false
+}
+
+func (r *run) logSnapshot(s mission.Snapshot) {
+	r.report.logf("ok  snapshot %s · kind:deploy sha:%s · %s\n", first(s.SnapshotID, 8), first(s.SHA, 7), humanize.Bytes(s.Bytes))
+}
+
+var (
+	errDeadline = errors.New("the deadline passed")
+	errStopped  = errors.New("stopped")
+)
+
+// await starts one of the deploy's runs in Mission Control (a snapshot, a
+// restore's data) and checks on it until it's go or skipped. The error is
+// why not: its NO-GO, errDeadline, errStopped (taken over, which a 409 also
+// means, or lost touch), or Mission Control refusing to start it.
+func (r *run) await(start, status func(context.Context, mission.Deploy) (mission.Snapshot, error), what string) (mission.Snapshot, error) {
+	s, err := start(r.ctx, r.report.deploy)
 	for {
 		switch {
 		case r.ctx.Err() != nil && errors.Is(context.Cause(r.ctx), context.DeadlineExceeded):
-			msg := "the pre-deploy snapshot didn't finish before the deploy's deadline; the old version keeps serving"
-			r.report.logf("NO-GO: %s\n", msg)
-			r.report.finish("no_go", msg)
-			fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
-			return exitFailure, true
+			return s, errDeadline
 		case r.ctx.Err() != nil:
-			return r.stop(), true
+			return s, errStopped
+		case errors.Is(err, mission.ErrTakenOver):
+			// No longer this runner's deploy: stop, touching nothing more.
+			r.report.cancel(errTakenOver)
+			return s, errStopped
 		case err != nil && s.ID == 0:
-			return r.fail(fmt.Sprintf("pre-deploy snapshot failed: %v; the old version keeps serving", err)), true
+			return s, err
 		case err != nil:
-			r.report.logf("checking the snapshot: %v\n", err) // a blip: keep checking until the deadline
-		case s.Status == "go":
-			r.report.logf("ok  snapshot %s · kind:deploy sha:%s · %s\n", first(s.SnapshotID, 8), first(s.SHA, 7), humanize.Bytes(s.Bytes))
-			return 0, false
-		case s.Status == "skipped":
-			r.report.logf("no snapshot: %s\n", s.Error)
-			return 0, false
+			r.report.logf("checking %s: %v\n", what, err) // a blip: keep checking until the deadline
+		case s.Status == "go" || s.Status == "skipped":
+			return s, nil
 		case s.Status == "no_go":
-			return r.fail(fmt.Sprintf("pre-deploy snapshot failed: %s; the old version keeps serving", s.Error)), true
+			return s, errors.New(s.Error)
 		}
 		select {
 		case <-r.ctx.Done():
 		case <-time.After(orDefault(r.o.SnapshotEvery, 2*time.Second)):
 			id := s.ID
-			s, err = r.d.Mission.SnapshotStatus(r.ctx, r.report.deploy)
+			s, err = status(r.ctx, r.report.deploy)
 			if s.ID == 0 {
 				s.ID = id
 			}
@@ -395,6 +484,34 @@ func first(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// build builds the app's image at the commit and pushes it to Houston's
+// registry. Returns why it couldn't.
+func (r *run) build() string {
+	build := r.p.Compose.Services[r.p.AppService].Build
+	context, dockerfile := ".", "Dockerfile"
+	if build != nil && build.Context != "" {
+		context = build.Context
+	}
+	if build != nil && build.Dockerfile != "" {
+		dockerfile = build.Dockerfile
+	}
+	if !filepath.IsAbs(context) {
+		context = filepath.Join(r.dir, context)
+	}
+	if !filepath.IsAbs(dockerfile) {
+		dockerfile = filepath.Join(context, dockerfile)
+	}
+	// Kamal only deploys images labelled service=<name> (its own builder
+	// adds the label; Houston builds the image itself).
+	if msg := r.docker("the image didn't build", "build", "--target", "production", "--label", "service="+r.p.Name, "-t", r.image, "-f", dockerfile, context); msg != "" {
+		return msg
+	}
+	if msg := r.docker("couldn't push the image to Houston's registry", "push", r.image); msg != "" {
+		return msg
+	}
+	return ""
 }
 
 // secrets fetches every value, resolves the composites, and prepares what
@@ -546,6 +663,11 @@ func (r *run) fail(msg string) int {
 	if r.ctx.Err() != nil {
 		return r.stop() // the failure is the run being stopped
 	}
+	return r.noGo(msg)
+}
+
+// noGo finishes the run NO-GO with msg, whatever the context.
+func (r *run) noGo(msg string) int {
 	r.report.logf("NO-GO: %s\n", msg)
 	r.report.finish("no_go", msg)
 	fmt.Fprintf(r.o.Stderr, "houston deploy: %s\n", msg)
@@ -610,6 +732,7 @@ type reporter struct {
 	deploy     mission.Deploy
 	out        io.Writer
 	fenceAfter time.Duration
+	retryEvery time.Duration // between tries of a report that must get through
 	cancel     context.CancelCauseFunc
 
 	mu     sync.Mutex // buf, lastOK, closed
@@ -665,13 +788,14 @@ func (r *reporter) heartbeat(every time.Duration) func() {
 
 // send attaches the log written since the last report, in chunks. A chunk
 // that doesn't get through goes back in the buffer for the next report.
-func (r *reporter) send(p mission.Progress) {
+// It says whether p got through.
+func (r *reporter) send(p mission.Progress) bool {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return
+		return false
 	}
 	log := r.buf.String()
 	r.buf.Reset()
@@ -680,14 +804,22 @@ func (r *reporter) send(p mission.Progress) {
 	for len(log) > chunkSize {
 		if !r.post(mission.Progress{Log: log[:chunkSize]}) {
 			r.requeue(log)
-			return
+			return false
 		}
 		log = log[chunkSize:]
 	}
 	p.Log = log
 	if !r.post(p) {
 		r.requeue(log)
+		return false
 	}
+	return true
+}
+
+func (r *reporter) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }
 
 func (r *reporter) post(p mission.Progress) bool {

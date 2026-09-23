@@ -30,6 +30,8 @@ ssh:
   keys_only: true
   keys:
     - /ssh/id_ed25519
+labels:
+  houston.generation: "2"
 env:
   clear:
     PHX_HOST: phoenixapp.com

@@ -52,6 +52,13 @@ class ProjectSync
     raise Refused, clash_message || "another project claimed one of #{@payload["name"]}'s container names; try again"
   end
 
+  # The payload's required variables that project has no value for, without
+  # storing the payload (a restore's check).
+  def missing_secrets(project)
+    have = project.secrets.select { |s| s.value.present? }.map(&:key)
+    @payload["variables"].select { |v| v["required"] == true }.map { |v| v["name"] } - have
+  end
+
   # Host-by-host: <name>.<base> needs its own record. Returns the DNS mode.
   def point_dns!
     return "wildcard" unless @installation.dns_mode == "per_host"

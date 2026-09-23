@@ -32,13 +32,14 @@ class BackupRun < ApplicationRecord
   # A manual one already queued is returned as it is (a double click).
   # scheduled_for: the local date a scheduled backup is for; that day's run
   # (whatever its status) is returned instead of a second one.
-  # deploy_number: a pre-deploy snapshot (kind deploy), one per deploy.
+  # deploy_number: a pre-deploy snapshot (kind deploy), one per deploy, or,
+  # with reason restore, a restore's safety snapshot, one per restore.
   def self.request!(project, reason: "manual", scheduled_for: nil, deploy_number: nil)
     raise Refused, NOTHING_DEPLOYED unless project.running_deploy
     location = project.backup_location
     raise Refused, "no backup storage yet (finish setup's storage step)" unless location
 
-    same = if deploy_number then { reason: "deploy", deploy_number: }
+    same = if deploy_number then { operation: "backup", reason:, deploy_number: }
     elsif scheduled_for then { scheduled_for: }
     else { status: "queued", reason: }
     end

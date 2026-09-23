@@ -97,4 +97,25 @@ class ApiClaimsTest < ActionDispatch::IntegrationTest
     assert_equal "queued", Deploy.sole.status
     assert_equal 0, Runner.count
   end
+
+  test "a claimed restore says what it builds" do
+    project = make_linked_project("garage")
+    project.update!(data_generation: 2, app_service: "app", services: %w[app db cache],
+                    volumes: [ { "name" => "storage", "path" => "/storage" } ], databases: [ { "service" => "db", "image" => "postgres:17" } ])
+    project.deploys.create!(number: 1, sha: "a" * 40, ref: "refs/restore/33333333", status: "queued", kind: "restore", token_digest: "",
+                            heartbeat_at: Time.current, generation: 3)
+    claim
+    assert_equal [ "restore", 3, 2, "refs/restore/33333333" ], json["deploy"].values_at("kind", "generation", "previous_generation", "ref")
+    # The serving generation's accessories, as Mission Control knows them
+    # (the restore's own compose.yml may not have them).
+    assert_equal %w[garage-cache-g2 garage-db-g2], json["deploy"]["previous_accessories"]
+    # What of it a snapshot holds, so what its cleanup may remove.
+    assert_equal [ "garage.g2_storage" ], json["deploy"]["previous_volumes"]
+    assert_equal [ "garage-db-g2" ], json["deploy"]["previous_databases"]
+
+    Deploy.queue!(project, sha: "b" * 40, ref: "refs/heads/main")
+    Deploy.in_flight.update_all(status: "go")
+    claim
+    assert_equal [ "deploy", 2, nil, nil ], json["deploy"].values_at("kind", "generation", "previous_generation", "previous_accessories")
+  end
 end

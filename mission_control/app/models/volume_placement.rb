@@ -6,13 +6,15 @@ class VolumePlacement
   class Refused < StandardError; end
 
   # generation: whose volumes to make (a restore makes the next one's).
-  def initialize(project, generation: project.data_generation)
+  # volumes: which ([{ "name", "path" }]); a restore's are its own commit's.
+  def initialize(project, generation: project.data_generation, volumes: project.volumes)
     @project = project
     @generation = Generation.new(project, generation)
+    @volumes = volumes
   end
 
   def place!
-    @project.volumes.each do |v|
+    @volumes.each do |v|
       volume = @project.project_volumes.create_or_find_by!(name: v["name"]) # the unique index settles two syncs at once
       docker_name = @generation.volume(volume.name)
       want = options(volume)

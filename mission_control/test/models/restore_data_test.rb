@@ -18,7 +18,9 @@ class RestoreDataTest < ActiveSupport::TestCase
   setup do
     @project = make_backup_project # generation 1, deploy #1 of SHA serving
     @restore, _token, = Deploy.start!(@project, sha: SHA, ref: "refs/heads/main")
-    @restore.update!(kind: "restore", source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas), generation: 2)
+    # What the restore's check sync kept: the snapshot's own compose.yml.
+    @restore.update!(kind: "restore", source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas), generation: 2,
+                     sync_payload: { "volumes" => [ { "name" => "storage", "path" => "/rails/storage" } ] })
     @run = BackupRun.request_restore!(@restore)
     @token = BackupRun.claim!(@run)
   end
@@ -148,5 +150,25 @@ class RestoreDataTest < ActiveSupport::TestCase
       assert_match message, @run.error, name
       assert_equal [ "volume", "rm", "-f", STAGING ], fake.calls.last.args, name
     end
+  end
+
+  # The snapshot's commit had a volume the serving one renamed: its
+  # compose.yml (kept with the restore) decides, not the project's.
+  test "the restore's own volumes, not the serving version's" do
+    @restore.update!(sync_payload: { "volumes" => [ { "name" => "media", "path" => "/media" } ] })
+    fake = restore_docker(manifest(volumes: [ { name: "media", path: "/media" } ], sqlite: []))
+    restore(fake)
+    assert_equal "go", @run.status, @run.error
+    assert(fake.calls.any? { |c| c.args == [ "volume", "create", "equip.g2_media" ] }, "generation 2's media volume made")
+    assert(fake.calls.none? { |c| c.args.include?("equip.g2_storage") }, "the serving version's volume isn't the restore's")
+  end
+
+  test "a restore whose compose.yml wasn't checked is refused" do
+    @restore.update!(sync_payload: nil)
+    fake = restore_docker
+    restore(fake)
+    assert_equal "no_go", @run.status
+    assert_match "the restore's compose.yml wasn't checked", @run.error
+    assert_empty fake.calls.select { |c| c.args.include?(RestoreData::FILL) || c.args[0..1] == %w[volume create] }
   end
 end

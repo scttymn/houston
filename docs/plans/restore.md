@@ -327,7 +327,7 @@ Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secr
 ## Batch 5: Asking for a restore
 
 ### Design (short)
-- **`Deploy.request_restore!(project, snapshot:, location:, confirm:)`** creates a queued deploy of kind `restore`: its SHA is the snapshot's commit, `ref` `restore:<short id>`, `generation` g+1, `source_snapshot_id` and `source_location`. It's refused (`Deploy::RestoreRefused`, nothing created) when:
+- **`Deploy.request_restore!(project, snapshot:, location:, confirm:)`** creates a queued deploy of kind `restore`: its SHA is the snapshot's commit, `ref` `refs/restore/<short id>` (a valid git ref: the runner update-refs it), `generation` g+1, `source_snapshot_id` and `source_location`. It's refused (`Deploy::RestoreRefused`, nothing created) when:
   - `confirm` isn't the project's name
   - there's no linked repo ("link the repo first")
   - a deploy or restore is queued or in flight ("wait for #n")
@@ -362,7 +362,7 @@ Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secr
 
 ### Done (Batch 5)
 - **Red:** Mission Control had 3 failures and 6 errors in the new tests. **Green:** Mission Control 257 runs and the Go suite. rubocop and gofmt are clean.
-- **History:** a restore shows by its ref (`restore:<short id>`) in the deploy history and `houston deploys`, and as "Restore #n" on its page. No separate field was needed.
+- **History:** a restore shows by its ref (`refs/restore/<short id>`) in the deploy history and `houston deploys`, and as "Restore #n" on its page. No separate field was needed.
 - **Mutations, each caught:**
   - no confirm check
   - the commit not checked
@@ -372,6 +372,130 @@ Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secr
   - backups during a restore
   - FETCH_HEAD not compared
 - **scotty-review (cold pass):** one finding, fixed. Two restore requests at once could both pass the "anything queued?" check; the one-queued-per-project index then refused the second insert as a 500. It's a refusal with a reason now (the index itself is covered by `DeployTest`).
+
+## Batch 6: The runner's restore
+
+### Design (short)
+- **The claim** carries `kind`, `generation` (g+1, what the restore builds) and `previous_generation` (g, the serving one: only Mission Control knows it). The runner checks the checkout: `git rev-parse HEAD` must be the job's full SHA, for every deploy, or it's NO-GO before anything runs.
+- **`houston deploy` with a claimed restore** (`internal/deploy`, sharing sync, secrets, the Kamal config, images and Kamal):
+  1. **Prepare:** a **check-only** sync (`restore: true`): Mission Control validates the snapshot's compose.yml and HOLDs on its required variables without values, but stores nothing, points no DNS and places nothing (the project keeps describing what serves). Then the Kamal config and secrets for **generation g+1** (the claim's).
+  2. **Image:** `docker pull 127.0.0.1:5000/<name>:<sha>`, or build and push it if the registry lost it.
+  3. **Accessories:** `kamal accessory boot all` boots g+1's accessories (new names, empty); g's are untouched, since they're not in this config.
+  4. **Restore data:** `POST /api/deploys/:id/restore_data`, polled to the end (Batch 4).
+  5. **Safety snapshot:** `POST /api/deploys/:id/snapshot`, reason `restore`, of the serving generation g, taken as late as possible.
+  6. **Switch:** `kamal deploy --skip-push --version <sha>` with g+1's config. Traffic moves only after the health check; no release or post_deploy hook (the data already matches the code).
+  7. **Clean up g:** the runner reports the step `Clean up`, and Mission Control makes g+1 the project's generation in the same write. It's retried until the fence. Only once it's confirmed does the runner sync for real (the restored compose.yml, its DNS) and then remove g:
+     - g's accessory containers, as Mission Control knows them (the claim's `previous_accessories`, from the config that served; the restored commit may not have them)
+     - the stopped containers still holding g's volumes (Kamal keeps old app versions, which would pin them)
+     - g's volumes, listed from Docker by their prefix (`<name>_` or `<name>.g<g>_`, which no other project's or generation's names begin with)
+     If `Clean up` isn't confirmed, g is kept and the log says so. A failed removal is a warning; the restore stands.
+  8. **Report GO**, retried the same way. (GO also makes g+1 the project's generation, in case the `Clean up` report was lost.)
+  - **What serves is the truth.** Every sync (deploy or restore) sends the generation of the app a runner sees running (the `houston.generation` label; none is 1). If a restore of that generation exists and the project is behind it, Mission Control catches up, in one conditional `UPDATE`, only ever forward. A restore that switched but never said so (the runner died, Mission Control was away past the fence) is caught up by the next sync, before its deploy chooses a generation.
+  - **The serving generation is the project's generation.** It moves only at the switch (or the catch-up), so backups and safety snapshots read `data_generation`.
+  - **Why the flip is before the cleanup, not at GO:** a report can't follow GO (a finished deploy refuses them), and removing g before Mission Control knows g+1 serves would let the next deploy boot g again, empty.
+  - **A failure in steps 1–6:** g+1's containers and volumes are removed; g is never touched, and the restore is NO-GO. The old version keeps serving.
+  - **Unless g+1's app is running.** Kamal stops a new version that fails its health check, so one still running after `kamal deploy` failed took traffic: the switch happened. Then Mission Control is told (`Clean up`), g is kept, and it's NO-GO with a message saying the restored version serves. To tell, app containers from generation 2 on carry the label `houston.generation=<g>` (deploy.yml's top-level `labels:`; generation 1's deploy.yml is unchanged). A later restore into a g+1 whose app is running is refused before anything is touched.
+  - **A taken-over restore** is someone else's: g+1 is left alone. A 409 from the snapshot or data endpoints means that too (their refusals, such as no storage, are 422).
+  - **Stopped** (deadline, lost touch): Kamal's container is removed first (cancelling kills only the docker CLI), then g+1.
+  - **The claim's generations are checked:** previous ≥ 1 and below the new one, or NO-GO with nothing touched.
+  - Its deadline is 4 hours (the data engine's is 3), shown in the log's first line.
+- **Mission Control:**
+  - `Deploy#report!` on a restore, with the step `Clean up` or GO, sets `projects.data_generation` to its generation, in the same transaction, only ever forward (one conditional `UPDATE`, no stale read).
+  - The claim computes a restore's generation as the project's + 1; `previous_generation` is that − 1 (generations go up one restore at a time).
+  - The claim payload's new fields.
+  - A restore's snapshot request is reason `restore`: one per restore (a unique index), and still of the serving generation.
+  - The deploy page lists a restore's steps: `Prepare Image Accessories Restore\ data Safety\ snapshot Switch Clean\ up`.
+
+### AC ↔ test map (Batch 6)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | A restore's run, in order: sync, pull, accessories (g+1's config), restore data (polled), the safety snapshot (polled), `kamal deploy`, GO, then g removed (containers, volumes); no tests, no hooks, no build when the pull works | `internal/deploy` `TestRestore` | Contract |
+| 2 | The pull failing → build and push | `TestRestoreRebuildsAPrunedImage` | Crash & repair |
+| 3 | Restore data NO-GO, the safety snapshot failing, `kamal deploy` failing: NO-GO, g+1 removed, g never touched, no switch (for the first two) | `TestRestoreFailures` | Crash & repair, Atomicity |
+| 4 | The runner's checkout must be the job's SHA (a mismatch → NO-GO, nothing run) | `internal/runner` `TestCheckoutIsTheJobsCommit` | Contract |
+| 5 | `Clean up` (or GO) on a restore makes its generation the project's; earlier steps and NO-GO don't; a plain deploy never does; only ever forward | `models/deploy_restore_test.rb` | Atomicity, Crash & repair |
+| 5a | g is removed only once `Clean up` is confirmed | `TestRestoreKeepsTheOldGenerationUnlessTheSwitchIsConfirmed` | Crash & repair |
+| 5b | `kamal deploy` failing with g+1's app running: nothing removed; a restore into a running g+1: refused, nothing touched; a claim whose generations don't add up: refused | `TestRestoreSwitchFailsAfterTheRestoredAppStarted`, `TestRestoreRefusesWhileTheNextGenerationsAppRuns`, `TestRestoreRefusesABadClaim` | Preconditions |
+| 5c | A generation's resources: accessory containers and named volumes, never bind mounts; the label only from generation 2 | `internal/kamal` `TestResources` | Contract |
+| 6 | The claim carries kind, generation and previous generation; a restore's snapshot is reason restore, one per restore | `integration/api_claims_test.rb`, `integration/api_snapshots_test.rb` | Contract, At-least-once |
+| 7 | The deploy page shows a restore's steps | `controllers/deploy_pages_test.rb` | Contract |
+
+### Review round 2: what serves, and what's kept (design)
+The second cold pass found two wrong assumptions in the first round's fixes. Each point below replaces the matching one above.
+- **What serves is what kamal-proxy routes to**, not what runs. A restore killed mid-switch can leave g+1's app running while the proxy still routes to g. The runner reads `kamal-proxy list` (inside the `kamal-proxy` container) for the service `<name>-web`, takes its target container, and reads that container's `houston.generation` label (none: generation 1).
+  - After `kamal deploy` fails, the switch happened only if the proxy routes to g+1.
+  - The guard at the start refuses a restore only if the proxy routes to g+1. A g+1 app that merely runs is a leftover, and the restore replaces it.
+  - `dropNext` keeps g+1 only if the proxy routes to it. Otherwise it removes every container holding g+1's volumes, running ones included.
+  - Every sync's `serving_generation` is the proxy's.
+- **Cleanup removes only what a snapshot holds.** Backups hold the app's volumes and Postgres dumps, nothing else. So removing g takes:
+  - g's accessory containers (the claim's `previous_accessories`)
+  - g's app volumes (the claim's `previous_volumes`)
+  - the volumes g's Postgres containers mount (the claim's `previous_databases`, inspected before they're removed)
+  Any other g volume (a MinIO bucket, say) is **kept and logged**. A restore whose commit has a stateful accessory that isn't Postgres logs that the volume starts empty in g+1 (Houston doesn't back it up). Before removal, each volume is emptied through a helper container, so a volume placed on a storage location (NFS, a bind) frees its directory there, not just the Docker object.
+- **The restored compose.yml is stored with the restore and applied at the flip, by Mission Control.**
+  - The check sync carries the restore's deploy id and token (`X-Houston-Deploy-Token`). Mission Control stores the validated payload on the deploy (`deploys.sync_payload`) only if that restore owns it and is in flight.
+  - At `Clean up` (or a catch-up to that restore's generation), Mission Control applies it in the same transaction as the flip (the project's config and container names), then points DNS after the commit (best effort, logged).
+  - The runner no longer syncs after the switch. That closes the post-switch sync without ownership, and the window where Mission Control described B while A served.
+  - `RestoreData` places g+1's volumes and checks the manifest against the stored payload's volumes (A's), so a restore across a volume rename works.
+- **The running deploy** is the latest GO deploy, or the latest restore whose generation is the project's, whichever is newer. A restore that switched but never got GO still labels backups with its commit.
+
+- **Review round 3 (the third pass) sharpened these:**
+  - **Which restore serves** is matched on the generation *and the commit* of the container kamal-proxy routes to (its name, `<name>-web-<sha>`). Failed restores reuse g+1's number, so the generation alone can pick the wrong one. The matched restore is marked `switched_at` (so is one that reports `Clean up` or GO), and the running deploy is the latest GO deploy or switched restore.
+  - **A killed switch is settled**, not just read. kamal-proxy's own deploy outlives Kamal and may still switch once g+1 passes its health check. So g+1's app is stopped and the proxy read again; if it switched in between, the app is started again and the switch counts.
+  - **g goes only after a GO safety snapshot.** A volume something still runs on is kept (emptying it would go around `docker volume rm`'s in-use check). A full sync is refused while a restore of the project is queued or in flight, so what its snapshot and cleanup read can't change under it.
+  - **Applying a kept compose.yml never fails a report or a sync.** It's validated, applied in a savepoint, and a refusal (a name another project took) is logged. The flip stands, and the next deploy's sync applies its own.
+
+### AC ↔ test map (review round 2)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| R1 | Serving comes from the proxy's target: a running but unrouted g+1 isn't serving (it's removed on failure, and it doesn't block a restore); a routed one is | `internal/deploy` `TestServingIsWhatTheProxyRoutesTo`, `TestRestoreSwitchKilledBeforeTheProxySwitched`, `TestRestoreSwitchFailsAfterTheRestoredAppStarted` | Concurrency, Crash & repair |
+| R2 | Removing g takes only the snapshot's data (app volumes, Postgres mounts), empties each first, and keeps and logs the rest | `TestRestore`, `TestRestoreKeepsWhatNoSnapshotHolds` | Atomicity, Signals |
+| R3 | The check sync stores the payload only for an owned, in-flight restore; the flip applies it in the same transaction; a catch-up applies it; `RestoreData` uses its volumes | `integration/api_sync_test.rb`, `models/deploy_restore_test.rb`, `models/restore_data_test.rb` | Authz, Atomicity, Contract |
+| R4 | The running deploy is a switched restore that never got GO | `models/deploy_restore_test.rb` | Contract |
+| R5 | The runner sends no sync after the switch | `TestRestore` (one sync) | Authz |
+
+### Done (Batch 6)
+- **Red:** Go failed to build (the new tests); Mission Control had 5 failures and 1 error. **Green:** the Go suite; Mission Control 267 runs. gofmt and rubocop are clean. The migration runs both ways.
+- **Kamal 2.12, read in its source:** top-level `labels:` reach the app's containers (`role.rb` `custom_labels`), and a new version that fails to boot is stopped (`boot.rb` `stop_new_version`). That's what "running means it took traffic" rests on.
+- **The restore ref** is `refs/restore/<short id>`: a valid git ref, since the runner `update-ref`s it (`restore:<id>` isn't one).
+- **Mutations, each caught (37 over two rounds):**
+  - the old generation removed without a confirmed switch, or after a failed one
+  - g+1 dropped with its app running; no guard for a running g+1 at the start; equal generations accepted
+  - the deploy rule applied to a restore; the restore built at the serving generation; a pruned image not rebuilt; a failure keeping g+1; the cleanup removing the new generation
+  - the deploy deadline for a restore; a restore run as a deploy; the checkout SHA unchecked
+  - bind mounts counted as volumes; the generation label on generation 1
+  - no flip at `Clean up`, or at GO; ordinary deploys flipping; flipping backwards; the claim keeping the serving generation; `previous_generation` for deploys
+  - the safety snapshot as a deploy's; the snapshot finding the restore's data run; a restore showing a deploy's steps
+  - a failed switch never counted as switched; no sync after the flip; the restore's sync storing, or skipping its HOLD; the serving generation not sent; a blank label not read as generation 1
+  - volumes not filtered by prefix; stopped holders kept; a 409 not a takeover (client or `await`); Kamal not removed first; `Clean up` not retried; the old generation's accessories from the restored commit
+  - catching up to any generation, backwards, without the in-memory generation, or not in a deploy's sync; `serving_generation` as the running deploy's; the snapshot refusal as a 409
+  - Two needed better tests first. "Ordinary deploys flip" survived a deploy with nothing to flip to, and "backwards" survived a case with no restore to go back to.
+- **scotty-review (cold pass), first round:** request changes. Three HIGH, all where Mission Control's record and what serves could part, and all fixed test-first:
+  - A switch Mission Control never heard of (Kamal failing after the switch, Mission Control away, the runner dying) left the next deploy to switch back to the old data. Now: a running g+1 means switched; `Clean up` and GO are retried to the fence; every sync reports what serves, and Mission Control catches up.
+  - After a flip whose GO was lost, backups read the removed generation (`running_deploy`'s). The serving generation is now the project's.
+  - The restore's sync stored the old commit's compose.yml before anything else ran, and a failed restore kept it: backups of the wrong shape, dropped domains' DNS deleted, and g's newer resources orphaned. It only checks now; the real sync comes after the switch; g's resources come from Mission Control and Docker.
+  - MEDIUM: g's app volumes never went (Kamal's stopped old versions held them). LOW: Kamal kept running while g+1 was removed; a 409 wasn't a takeover; misleading "remove by hand" for volumes never made; stale comments. All fixed.
+- **scotty-review, second round:** request changes. The first round's fixes rested on two wrong assumptions, now replaced (see "Review round 2" above):
+  - "Running is serving." A switch killed midway leaves g+1 running while kamal-proxy still routes to g. The fix would then have flipped Mission Control to g+1, and the next push would have served g+1's data, losing every write made to g since the safety snapshot. Serving now comes from kamal-proxy's routing.
+  - "Everything of g is in a snapshot." Cleanup removed every g volume by prefix, including a MinIO bucket no backup holds. Now only the snapshot's data (app volumes, Postgres) is removed. The rest is kept and logged, and each removed volume is emptied first so its storage location's directory is freed.
+  - MEDIUM: a switched restore without GO left backups labelled with the old commit. The running deploy now counts it.
+  - MEDIUM, a regression from round one: a restore across a volume rename was refused. The restore's compose.yml is kept with it and used by `RestoreData`.
+  - LOW: the post-switch sync had no ownership, and a failed one left Mission Control describing the old version. Mission Control now applies the kept compose.yml itself, in the flip's transaction.
+- **Found by the real run (restore-e2e.sh, first try), red first:** `Client.Claim` copied four fields of the claimed deploy, so every restore reached the runner as a plain deploy. The deploy rule then refused `refs/restore/…`, with nothing touched and the old version serving throughout (25 of 25 requests answered 200). The unit tests had built the claimed deploy by hand. The claim now embeds the whole deploy, and `TestClaimCarriesARestore` parses a real payload.
+- **Mutations, round 3 (each caught; two needed better tests first):**
+  - the claim dropping a restore's fields; the check sync without its token, or not tied to its restore
+  - serving read from any row, with ANSI kept, a blank label not read as 1, or a proxy error treated as known
+  - the start guard ignoring the proxy; a routed g+1 not counted as switched; "can't say" dropping g+1; `dropNext` ignoring the proxy; g+1's running holders kept
+  - g removing volumes no backup holds, or not Postgres's; volumes not emptied; no warning, or Postgres warned
+  - the check stored without ownership, after the restore ended, for another project, for a plain deploy, or with `restore_deploy` kept
+  - the flip not adopting, adopting on every GO; the catch-up not adopting; the running deploy ignoring switched restores; `RestoreData` using the serving volumes; the claim without previous volumes or databases
+  - Survivors fixed first: the check sync's token had no client test, and the fake Docker ignored `status=` filters.
+- **scotty-review, third round:** nearly ready; one MEDIUM, three LOW, all fixed test-first (see "Review round 3" above): the wrong restore caught up to when a failed one shared its generation; a killed switch racing the proxy's own deploy; cleanup not tied to the safety snapshot, emptying a volume still in use, and a hand sync changing the config mid-restore; a compose.yml that can't be applied wedging every later sync.
+- **Mutations, round 4 (each caught):** the commit not read, not trimmed, or not sent; g+1's app not stopped, not started again, or the proxy not read again; g removed without a GO safety snapshot; an in-use volume emptied; the catch-up ignoring the commit, preferring the newest over the kept one, or not marking it switched; the flip not marking it switched; the running deploy by generation; an adopt failure raising; a sync during a restore. The `adopt:` switch survived because applying had become safe everywhere, so it was cut, not tested around.
+- **scotty-review, fourth round (the round-3 fixes):** every round-3 finding closed. One MEDIUM from the fixes themselves: the full-sync guard refused a hand `houston deploy` behind a restore whose runner had died, the documented way to take one over. It now refuses only a queued restore or a live one (heartbeat within `STALE_AFTER`). One LOW: if kamal-proxy couldn't be read after g+1's app was stopped, the app stayed stopped. It's started again now. Both were fixed test-first, and both mutations were caught. The reviewer's rounds converged (three HIGH, then two, then none), so there was no fifth round for this two-line delta.
+- **The real run (restore-e2e.sh), second try, on round-3 code:** restore #3 went GO. All 208 requests during it answered 200, and the last came from the snapshot's commit. Postgres and SQLite on NFS said "one" again, and generation 2's data volume was on vm-nfs. Generation 1's Postgres, volumes and NFS directory were gone, and the safety snapshot was listed. Restore #4 (its snapshot gone) went NO-GO at its data in about 30 s, removing generation 3. Two failures were my script's: its helper kept only the last line of a multi-line log and error.
+- **A promise from Batch 3, kept late:** generation g+1's container names (`equip-db-g2`, …) are claimed when the restore is asked for, before any exists. A project owning one refuses the restore with its name. The real sync after the switch keeps them and releases g's. It was found while writing these notes, not by a test, so both mutations (not refused, not claimed) were run and caught.
+- **Known, deferred:** `Docker.Output` takes no context, so a hung Docker daemon during cleanup keeps a restore in flight past its deadline (the heartbeat still beats). It needs a context on every Docker call, runner-wide, which is its own change. A long restore's data progress is on its backup run, not in the deploy log. There's no cancelling a restore.
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.

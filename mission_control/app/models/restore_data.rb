@@ -48,7 +48,8 @@ class RestoreData < DataRun
       serving = @project.serving_generation.number
       raise Failed, "refusing to restore into generation #{serving}: generation #{serving} is the one serving" if @target.number == serving
 
-      VolumePlacement.new(@project, generation: @target.number).place!
+      raise Failed, "the restore's compose.yml wasn't checked (its runner is older than this Mission Control)" unless volumes
+      VolumePlacement.new(@project, generation: @target.number, volumes:).place!
       prepare
       ran = docker(*@location.restic_args("restore", @run.source_snapshot_id, "--target", "/restore", name: container(:restic), mounts: [ "#{staging}:/restore" ]),
                    env: @location.restic_env)
@@ -63,6 +64,10 @@ class RestoreData < DataRun
     rescue VolumePlacement::Refused => e
       raise Failed, "couldn't make generation #{@target.number}'s volumes: #{e.message}"
     end
+
+    # The restore's own compose.yml's volumes, as its check sync kept them:
+    # the snapshot's commit may name them differently from what serves.
+    def volumes = @restore.sync_payload&.fetch("volumes", nil)
 
     # The snapshot's manifest, checked before anything is touched.
     def read_manifest
@@ -88,8 +93,8 @@ class RestoreData < DataRun
       if (climbs = manifest["sqlite"].find { |s| !s["path"].is_a?(String) || s["path"].start_with?("/") || s["path"].split("/").include?("..") })
         raise Failed, "the SQLite path #{climbs["path"].inspect} leaves its volume"
       end
-      volumes = @project.volumes.map { |v| v["name"] }
-      if (unknown = manifest["volumes"].map { |v| v["name"] }.find { |v| !volumes.include?(v) })
+      names = volumes.map { |v| v["name"] }
+      if (unknown = manifest["volumes"].map { |v| v["name"] }.find { |v| !names.include?(v) })
         raise Failed, "#{@project.name} has no volume #{unknown} (the snapshot's compose.yml differs)"
       end
       manifest

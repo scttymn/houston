@@ -25,10 +25,25 @@ class Api::RunnerJobsController < Api::BaseController
   end
 
   private
+    # For a restore, the serving generation as the config that serves has it
+    # (a restore's check sync stores nothing on the project): its accessory
+    # containers, and what of it a snapshot holds (app volumes, Postgres), all
+    # the runner removes after the switch.
+    def previous(deploy)
+      return { previous_accessories: nil, previous_volumes: nil, previous_databases: nil } unless deploy.restore?
+      project = deploy.project
+      serving = Generation.new(project, deploy.previous_generation)
+      { previous_accessories: project.accessories.sort.map { |service| serving.container(service) },
+        previous_volumes: project.volumes.map { |v| serving.volume(v["name"]) },
+        previous_databases: project.databases.map { |d| serving.container(d["service"]) } }
+    end
+
     def job(deploy, token, took_over)
       project = deploy.project
       {
-        deploy: { id: deploy.id, number: deploy.number, token:, sha: deploy.sha, ref: deploy.ref, took_over: },
+        deploy: { id: deploy.id, number: deploy.number, token:, sha: deploy.sha, ref: deploy.ref, took_over:,
+                  kind: deploy.kind, generation: deploy.generation, previous_generation: deploy.previous_generation,
+                  **previous(deploy) },
         project: { name: project.name, repo_url: project.repo_url, branch: project.branch, compose_path: project.compose_path,
                    deploy_key: project.deploy_key_private },
         known_hosts: GitRemote.known_hosts_for(project.repo_url)

@@ -26,6 +26,7 @@ class Api::DeploysController < Api::BaseController
 
     status, json, deploy, appended = Deploy.transaction { apply(progress) }
     DeployBroadcast.progress(deploy, appended:, changed: progress.except("log").any?) if status == :ok
+    point_adopted(deploy.adopted) if status == :ok && deploy.adopted
     render json:, status:
   end
 
@@ -42,6 +43,15 @@ class Api::DeploysController < Api::BaseController
       [ :ok, { number: deploy.number, status: deploy.status }, deploy, appended ]
     rescue ActiveRecord::RecordInvalid => e
       [ :unprocessable_entity, { error: e.record.errors.full_messages.to_sentence } ]
+    end
+
+    # A restore's compose.yml, applied at its switch: its DNS, after the
+    # commit. Best effort: the next deploy points it again.
+    def point_adopted(sync)
+      sync.point_dns!
+      sync.point_domains!
+    rescue ProjectSync::Refused, Cloudflare::Error => e
+      Rails.logger.warn("DNS for #{sync.project.name}'s restored compose.yml wasn't pointed: #{e.message}; the next deploy points it")
     end
 
     def invalid_progress(progress)

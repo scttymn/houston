@@ -62,4 +62,16 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     get project_deploy_path("equip", 2)
     assert_select ".deploy-steps [data-step=Test][data-state=skipped]", /SKIPPED/
   end
+
+  # A restore's own steps: no tests, no build (an image pulled back), no hooks.
+  test "a restore's page shows its steps" do
+    make_deploy(@project, 1, "in_flight", step: "Restore data").update!(runner: "houston-runner-1", kind: "restore", generation: 2)
+    get project_deploy_path("equip", 1)
+    assert_select ".deploy-steps li", 7
+    assert_select ".deploy-steps li:first-child[data-step=Prepare][data-state=done]", /00/
+    assert_select ".deploy-steps [data-step=Image][data-state=done] + [data-step=Accessories][data-state=done] + " \
+                  "[data-step='Restore data'][data-state=current] + [data-step='Safety snapshot'][data-state=pending] + " \
+                  "[data-step=Switch] + [data-step='Clean up']"
+    assert_select ".deploy-steps [data-step=Test]", 0
+  end
 end

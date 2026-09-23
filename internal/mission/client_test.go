@@ -247,3 +247,60 @@ func TestClientSnapshots(t *testing.T) {
 		t.Errorf("wrong token: %v", err)
 	}
 }
+
+// A 409 from a deploy's run (its snapshot, a restore's data) means the
+// deploy is no longer in flight: taken over, as a 409 on a report means.
+func TestDeployRunConflictIsTakenOver(t *testing.T) {
+	c := server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"restore #4 is no longer in flight"}`))
+	})
+	d := Deploy{ID: 9, Token: "t"}
+	for name, call := range map[string]func() (Snapshot, error){
+		"snapshot":     func() (Snapshot, error) { return c.Snapshot(context.Background(), d) },
+		"restore data": func() (Snapshot, error) { return c.RestoreData(context.Background(), d) },
+		"status":       func() (Snapshot, error) { return c.RestoreDataStatus(context.Background(), d) },
+	} {
+		if _, err := call(); !errors.Is(err, ErrTakenOver) || !strings.Contains(err.Error(), "no longer in flight") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A claimed restore comes through whole: found by the real run, where the
+// runner got a restore without its kind and ran it as a deploy.
+func TestClaimCarriesARestore(t *testing.T) {
+	c := server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		io.WriteString(w, `{"deploy":{"id":9,"number":3,"token":"tok","sha":"`+strings.Repeat("a", 40)+`","ref":"refs/restore/400d8788","took_over":null,
+			"kind":"restore","generation":2,"previous_generation":1,"previous_accessories":["spike-db"],
+			"previous_volumes":["spike_data"],"previous_databases":["spike-db"]},
+			"project":{"name":"spike"},"known_hosts":[]}`)
+	})
+	job, ok, err := c.Claim(context.Background(), "houston-runner-1", 0)
+	if err != nil || !ok {
+		t.Fatalf("Claim = %v, %v", ok, err)
+	}
+	want := Deploy{ID: 9, Number: 3, Token: "tok", Kind: "restore", Generation: 2, PreviousGeneration: 1,
+		PreviousAccessories: []string{"spike-db"}, PreviousVolumes: []string{"spike_data"}, PreviousDatabases: []string{"spike-db"}}
+	if !reflect.DeepEqual(job.Deploy, want) || job.Ref != "refs/restore/400d8788" || job.SHA != strings.Repeat("a", 40) {
+		t.Errorf("job = %+v", job)
+	}
+}
+
+// A restore's check sync proves it's the restore's (its token); a plain
+// sync carries no deploy token.
+func TestRestoreSyncCarriesItsToken(t *testing.T) {
+	var tokens []string
+	c := server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		tokens = append(tokens, r.Header.Get("X-Houston-Deploy-Token"))
+		if _, sent := body["DeployToken"]; sent {
+			t.Errorf("the token is in the body: %v", body)
+		}
+		io.WriteString(w, `{"project":"shop","host":"shop.svnmns.com","generation":1}`)
+	})
+	c.Sync(context.Background(), SyncRequest{Name: "shop", RestoreDeploy: 9, DeployToken: "tok"})
+	c.Sync(context.Background(), SyncRequest{Name: "shop"})
+	if !reflect.DeepEqual(tokens, []string{"tok", ""}) {
+		t.Errorf("tokens %q", tokens)
+	}
+}

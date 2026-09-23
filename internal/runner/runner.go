@@ -129,6 +129,12 @@ func (r *Runner) fetch(ctx context.Context, job mission.Job) (string, string) {
 			return "", fmt.Sprintf("couldn't fetch %s (git %s): %s", job.SHA[:7], args[0], firstLine(out, err))
 		}
 	}
+	// Exactly the claimed commit, whatever the fetch did: a restore's
+	// snapshot was taken at this SHA, and its data only fits this code.
+	head, err := r.Git.Run(ctx, dir, env, "rev-parse", "HEAD")
+	if head = strings.TrimSpace(head); err != nil || head != job.SHA {
+		return "", fmt.Sprintf("the checkout is at %q, not the claimed commit %s; nothing was run", firstLine(head, err), job.SHA)
+	}
 	return dir, ""
 }
 

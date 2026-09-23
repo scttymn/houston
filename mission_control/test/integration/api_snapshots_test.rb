@@ -54,9 +54,10 @@ class ApiSnapshotsTest < ActionDispatch::IntegrationTest
     post "/api/deploys/#{@deploy.id}/snapshot", headers: { "Authorization" => "Bearer #{personal}", "X-Houston-Deploy-Token" => @token }
     assert_response :unauthorized
 
+    # 409 is kept for "no longer in flight" (the runner stops: taken over).
     StorageLocation.update_all(acknowledged_at: nil)
     snapshot :post
-    assert_response :conflict
+    assert_response :unprocessable_entity
     assert_match "no backup storage yet", json["error"]
     StorageLocation.update_all(acknowledged_at: Time.current)
 
@@ -73,5 +74,28 @@ class ApiSnapshotsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal({ "status" => "skipped", "error" => "nothing deployed yet" }, json)
     assert_equal 0, BackupRun.count
+  end
+
+  # Just before the switch, a restore snapshots the version that's serving:
+  # the way back. One per restore, beside its data run.
+  test "a restore's safety snapshot" do
+    @deploy.update!(kind: "restore", generation: 2, source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas))
+    data = BackupRun.request_restore!(@deploy)
+    assert_enqueued_with(job: BackupJob, queue: "snapshots") { snapshot :post }
+    assert_response :accepted
+    run = BackupRun.find(json["id"])
+    assert_not_equal data.id, run.id
+    assert_equal [ "backup", "deploy", "restore", @deploy.number ], [ run.operation, run.kind, run.reason, run.deploy_number ]
+
+    assert_no_enqueued_jobs { snapshot :post }
+    assert_equal run.id, json["id"], "a retry gets the same run"
+    snapshot :get
+    assert_equal run.id, json["id"]
+
+    # It goes ahead while its restore is in flight; other backups wait.
+    assert_kind_of String, BackupRun.claim!(run)
+    assert_raises(ActiveRecord::RecordNotUnique) do
+      @project.backup_runs.create!(location: run.location, kind: "deploy", reason: "restore", deploy_number: @deploy.number, status: "queued", heartbeat_at: Time.current)
+    end
   end
 end

@@ -73,6 +73,23 @@ func (n Names) Accessory(service string) string {
 // Container is the accessory's container (and <SERVICE>_HOST): <project>-<accessory>.
 func (n Names) Container(service string) string { return n.Project + "-" + n.Accessory(service) }
 
+// Accessories are the project's accessory containers in a generation, sorted.
+func Accessories(p *project.Project, generation int) []string {
+	n := Names{Project: p.Name, Generation: generation}
+	var out []string
+	for name := range p.Compose.Services {
+		if name != p.AppService {
+			out = append(out, n.Container(name))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// VolumePrefix begins every named volume of the generation, and no other
+// project's or generation's: project names have no "_" and no ".".
+func (n Names) VolumePrefix() string { return n.Volume("") }
+
 var (
 	labelRE      = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	secretNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -90,6 +107,7 @@ type deployYAML struct {
 	Registry    registryConfig       `yaml:"registry"`
 	Builder     map[string]string    `yaml:"builder"`
 	SSH         sshConfig            `yaml:"ssh"`
+	Labels      map[string]string    `yaml:"labels,omitempty"`
 	Env         *env                 `yaml:"env,omitempty"`
 	Volumes     []string             `yaml:"volumes,omitempty"`
 	Accessories map[string]accessory `yaml:"accessories,omitempty"`
@@ -243,6 +261,9 @@ func (g *generator) config(t Target) deployYAML {
 		Registry: registryConfig{Server: registry, Username: registryUser, Password: []string{registryPassword}},
 		Builder:  map[string]string{"arch": t.Arch},
 		SSH:      sshConfig{User: "houston", KeysOnly: true, Keys: []string{sshKey}},
+	}
+	if g.names.Generation > 1 {
+		cfg.Labels = map[string]string{GenerationLabel: strconv.Itoa(g.names.Generation)}
 	}
 
 	for _, name := range sortedServices(p) {
@@ -670,6 +691,10 @@ func AppVolumes(p *project.Project, generation int) []string {
 	var ps problems
 	return newGenerator(p, generation, &ps).volumes(p.Compose.Services[p.AppService])
 }
+
+// GenerationLabel is on the app's containers from generation 2 on: which
+// data generation they use (a restore checks it after a failed switch).
+const GenerationLabel = "houston.generation"
 
 // ConfigLabel is the label on each accessory holding its config's hash.
 const ConfigLabel = "houston.config"

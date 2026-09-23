@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_020000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -47,6 +47,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.index ["project_id", "created_at"], name: "index_backup_runs_on_project_id_and_created_at"
     t.index ["project_id", "deploy_number"], name: "index_backup_runs_one_per_deploy", unique: true, where: "reason = 'deploy'"
     t.index ["project_id", "deploy_number"], name: "index_backup_runs_one_restore_per_deploy", unique: true, where: "operation = 'restore'"
+    t.index ["project_id", "deploy_number"], name: "index_backup_runs_one_safety_snapshot_per_restore", unique: true, where: "operation = 'backup' AND reason = 'restore'"
     t.index ["project_id", "scheduled_for"], name: "index_backup_runs_one_scheduled_per_day", unique: true, where: "scheduled_for IS NOT NULL"
     t.index ["project_id"], name: "index_backup_runs_on_project_id"
     t.index ["project_id"], name: "index_backup_runs_one_queued_manual", unique: true, where: "status = 'queued' AND reason = 'manual'"
@@ -70,6 +71,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
     t.string "source_snapshot_id"
     t.string "status", default: "in_flight", null: false
     t.string "step"
+    t.datetime "switched_at"
+    t.json "sync_payload"
     t.string "token_digest", null: false
     t.datetime "updated_at", null: false
     t.index ["project_id", "number"], name: "index_deploys_on_project_id_and_number", unique: true

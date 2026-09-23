@@ -24,7 +24,9 @@ module ApiHelpers
     }.merge(changes)
   end
 
-  def sync(payload = equip_payload, headers: api_headers)
+  # token: a restore's, for its check sync.
+  def sync(payload = equip_payload, headers: api_headers, token: nil)
+    headers = headers.merge("X-Houston-Deploy-Token" => token) if token
     post "/api/projects/sync", params: payload.is_a?(String) ? payload : payload.to_json, headers:
   end
 

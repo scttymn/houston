@@ -59,6 +59,7 @@ type gitCall struct {
 
 type fakeGit struct {
 	calls  []gitCall
+	head   string // what rev-parse HEAD answers; default: the job's SHA
 	failOn string
 	onCall func(gitCall)
 }
@@ -74,6 +75,12 @@ func (g *fakeGit) Run(ctx context.Context, dir string, env []string, args ...str
 	}
 	if args[0] == "init" {
 		os.MkdirAll(filepath.Join(dir, ".git"), 0o755)
+	}
+	if args[0] == "rev-parse" {
+		if g.head != "" {
+			return g.head + "\n", nil
+		}
+		return sha + "\n", nil
 	}
 	return "", nil
 }
@@ -127,6 +134,7 @@ func TestRunnerFetchesTheClaimedCommit(t *testing.T) {
 		{"checkout", "--force", "--detach", sha},
 		{"clean", "-ffdxq"},
 		{"update-ref", "refs/heads/main", sha},
+		{"rev-parse", "HEAD"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("git calls =\n%v\nwant\n%v", got, want)
@@ -165,7 +173,7 @@ func TestRunnerHandsTheDeployOver(t *testing.T) {
 		t.Fatalf("deploy called %d times", len(*deploys))
 	}
 	o := (*deploys)[0]
-	if o.Claimed == nil || *o.Claimed != job().Deploy || !o.RunTests || o.Ref != "refs/heads/main" ||
+	if o.Claimed == nil || !reflect.DeepEqual(*o.Claimed, job().Deploy) || !o.RunTests || o.Ref != "refs/heads/main" ||
 		o.File != filepath.Join(r.Workspace, "garage", "deploy", "compose.yml") {
 		t.Errorf("deploy options = %+v", o)
 	}
@@ -181,6 +189,22 @@ func TestRunnerReportsAFailedFetch(t *testing.T) {
 	}
 	last := m.reports[len(m.reports)-1]
 	if last.Status != "no_go" || !strings.Contains(last.Error, "couldn't find remote ref") {
+		t.Errorf("report = %+v", last)
+	}
+}
+
+// A restore's data only fits its snapshot's code: the checkout must be the
+// job's exact commit, for every deploy, or nothing runs.
+func TestCheckoutIsTheJobsCommit(t *testing.T) {
+	r, m, g, deploys := setup(t)
+	m.jobs = []mission.Job{job()}
+	g.head = "fedcba9876543210fedcba9876543210fedcba98"
+	r.RunOnce(context.Background())
+	if len(*deploys) != 0 {
+		t.Error("deployed a checkout that isn't the claimed commit")
+	}
+	last := m.reports[len(m.reports)-1]
+	if last.Status != "no_go" || !strings.Contains(last.Error, "not the claimed commit "+sha) {
 		t.Errorf("report = %+v", last)
 	}
 }

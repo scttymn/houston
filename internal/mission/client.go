@@ -97,6 +97,17 @@ type SyncRequest struct {
 	Backups    *Backups   `json:"backups,omitempty"`
 	// MaintenancePage is the project's own maintenance page, if it has one.
 	MaintenancePage string `json:"maintenance_page,omitempty"`
+	// RestoreDeploy: this is that restore's check of its snapshot's
+	// compose.yml (DeployToken proves the restore is the caller's). It's kept
+	// with the restore and applied at its switch; nothing is stored now.
+	RestoreDeploy int    `json:"restore_deploy,omitempty"`
+	DeployToken   string `json:"-"`
+	// ServingGeneration is the data generation of the app kamal-proxy
+	// routes to, as a runner read it (0: none, or it can't say). Mission
+	// Control catches up to it after a restore that switched but never said so.
+	ServingGeneration int `json:"serving_generation,omitempty"`
+	// ServingSHA is that app's commit: with the generation, which restore it is.
+	ServingSHA string `json:"serving_sha,omitempty"`
 }
 
 // Backups are x-houston.backups: when to back up, and what to keep.
@@ -139,7 +150,11 @@ type DomainState struct {
 // *HoldError.
 func (c *Client) Sync(ctx context.Context, req SyncRequest) (SyncResult, error) {
 	var res SyncResult
-	status, body, err := c.do(ctx, http.MethodPost, "/api/projects/sync", nil, req)
+	var headers map[string]string
+	if req.RestoreDeploy != 0 {
+		headers = map[string]string{"X-Houston-Deploy-Token": req.DeployToken}
+	}
+	status, body, err := c.do(ctx, http.MethodPost, "/api/projects/sync", headers, req)
 	if err != nil {
 		return res, err
 	}
@@ -179,7 +194,22 @@ type Deploy struct {
 	Number   int    `json:"number"`
 	Token    string `json:"token"`
 	TookOver int    `json:"took_over"` // the silent deploy this one replaced, or 0
+	// A claimed restore: kind "restore", the data generation it builds, and
+	// the one serving now (removed after the switch).
+	Kind               string `json:"kind"`
+	Generation         int    `json:"generation"`
+	PreviousGeneration int    `json:"previous_generation"`
+	// The serving generation's accessory containers, from the config that
+	// serves: what a restore removes after its switch.
+	PreviousAccessories []string `json:"previous_accessories"`
+	// What of that generation a snapshot holds, so all its cleanup removes:
+	// its app volumes, and its Postgres containers (their volumes).
+	PreviousVolumes   []string `json:"previous_volumes"`
+	PreviousDatabases []string `json:"previous_databases"`
 }
+
+// Restore reports whether the deploy is a restore.
+func (d Deploy) Restore() bool { return d.Kind == "restore" }
 
 // StartDeploy starts the project's next deploy. Another in flight is a
 // *BusyError.
@@ -294,11 +324,30 @@ func (c *Client) SnapshotStatus(ctx context.Context, d Deploy) (Snapshot, error)
 	return c.snapshot(ctx, http.MethodGet, d)
 }
 
+// RestoreData asks for a restore's data to be put back (a retry gets the same run).
+func (c *Client) RestoreData(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.deployRun(ctx, http.MethodPost, d, "restore_data")
+}
+
+// RestoreDataStatus is a restore's data run as it stands.
+func (c *Client) RestoreDataStatus(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.deployRun(ctx, http.MethodGet, d, "restore_data")
+}
+
 func (c *Client) snapshot(ctx context.Context, method string, d Deploy) (Snapshot, error) {
+	return c.deployRun(ctx, method, d, "snapshot")
+}
+
+// deployRun is one of a deploy's runs in Mission Control (its snapshot, a
+// restore's data): what reports progress the same way.
+func (c *Client) deployRun(ctx context.Context, method string, d Deploy, what string) (Snapshot, error) {
 	var s Snapshot
-	status, body, err := c.do(ctx, method, "/api/deploys/"+strconv.Itoa(d.ID)+"/snapshot", map[string]string{"X-Houston-Deploy-Token": d.Token}, nil)
+	status, body, err := c.do(ctx, method, "/api/deploys/"+strconv.Itoa(d.ID)+"/"+what, map[string]string{"X-Houston-Deploy-Token": d.Token}, nil)
 	if err != nil {
 		return s, err
+	}
+	if status == http.StatusConflict {
+		return s, fmt.Errorf("%w: %s", ErrTakenOver, message(body)) // no longer in flight
 	}
 	if status != http.StatusOK && status != http.StatusAccepted {
 		return s, errors.New(message(body))
@@ -339,14 +388,12 @@ func (c *Client) Claim(ctx context.Context, runner string, wait int) (Job, bool,
 	if err := expect(status, body, http.StatusOK); err != nil {
 		return Job{}, false, err
 	}
+	// The deploy's own fields, whole (a restore's included), plus its commit.
 	var raw struct {
 		Deploy struct {
-			ID       int    `json:"id"`
-			Number   int    `json:"number"`
-			Token    string `json:"token"`
-			SHA      string `json:"sha"`
-			Ref      string `json:"ref"`
-			TookOver int    `json:"took_over"`
+			Deploy
+			SHA string `json:"sha"`
+			Ref string `json:"ref"`
 		} `json:"deploy"`
 		Project    JobProject `json:"project"`
 		KnownHosts []string   `json:"known_hosts"`
@@ -354,8 +401,5 @@ func (c *Client) Claim(ctx context.Context, runner string, wait int) (Job, bool,
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return Job{}, false, err
 	}
-	return Job{
-		Deploy: Deploy{ID: raw.Deploy.ID, Number: raw.Deploy.Number, Token: raw.Deploy.Token, TookOver: raw.Deploy.TookOver},
-		SHA:    raw.Deploy.SHA, Ref: raw.Deploy.Ref, Project: raw.Project, KnownHosts: raw.KnownHosts,
-	}, true, nil
+	return Job{Deploy: raw.Deploy.Deploy, SHA: raw.Deploy.SHA, Ref: raw.Deploy.Ref, Project: raw.Project, KnownHosts: raw.KnownHosts}, true, nil
 }

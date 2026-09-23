@@ -59,6 +59,15 @@ type fakeDocker struct {
 	calls    []dockerCall
 	outputs  [][]string
 	labels   map[string]string // container → its houston.config label
+	proxy    string            // kamal-proxy list (see proxyList)
+	proxyErr bool              // kamal-proxy can't be asked
+	mounts   map[string]string // container → the volumes it mounts
+	held     map[string]string // docker ps -aq --filter volume=: containers holding it
+	up       map[string]bool   // which of those run
+	names    map[string]string // container ID → its name
+	webs     string            // docker ps -q: a generation's web containers
+	onOutput func(args []string)
+	volumes  []string // docker volume ls
 	exit     func(what string) int
 	onStream func(what string, args []string)
 	// block, when it says so, holds a call until its context ends.
@@ -81,11 +90,59 @@ func (f *fakeDocker) Output(args ...string) ([]byte, error) {
 	f.outputs = append(f.outputs, args)
 	switch args[0] {
 	case "inspect":
-		return []byte(f.labels[args[len(args)-1]] + "\n"), nil
+		id := args[len(args)-1]
+		switch {
+		case strings.Contains(args[2], ".Mounts"):
+			return []byte(f.mounts[id] + "\n"), nil
+		case strings.Contains(args[2], ".Name"): // label|/name
+			return []byte(f.labels[id] + "|/" + f.names[id] + "\n"), nil
+		}
+		return []byte(f.labels[id] + "\n"), nil
+	case "exec": // kamal-proxy list
+		if f.proxyErr {
+			return nil, errors.New("exit status 1")
+		}
+		return []byte(f.proxy), nil
 	case "rm":
+		for vol, ids := range f.held { // gone from whatever it held
+			f.held[vol] = strings.Join(slices.DeleteFunc(strings.Fields(ids), func(id string) bool { return slices.Contains(args, id) }), "\n")
+		}
 		return nil, nil
+	case "run":
+		return nil, nil
+	case "stop", "start":
+		if f.onOutput != nil {
+			f.onOutput(args)
+		}
+		return nil, nil
+	case "volume":
+		if args[1] == "ls" {
+			return []byte(strings.Join(f.volumes, "\n")), nil
+		}
+		return nil, nil
+	case "ps":
+		if args[1] == "-q" { // a generation's web containers
+			return []byte(f.webs), nil
+		}
+		// docker ps -aq --filter volume=<v> [--filter status=exited …]
+		held := strings.Fields(f.held[strings.TrimPrefix(args[3], "volume=")])
+		if slices.Contains(args, "status=exited") {
+			held = slices.DeleteFunc(held, func(id string) bool { return f.up[id] })
+		}
+		return []byte(strings.Join(held, "\n")), nil
 	}
 	return nil, errors.New("unexpected docker " + strings.Join(args, " "))
+}
+
+// proxyList is kamal-proxy list routing service to target, colored as the
+// real one is even without a terminal.
+func proxyList(service, target string) string {
+	c := func(s string) string { return "\x1b[m" + s + "\x1b[0m    " }
+	header := "\x1b[3;94mService\x1b[0m    \x1b[3;94mHost\x1b[0m    \x1b[3;94mPath\x1b[0m    \x1b[3;94mTarget\x1b[0m    \x1b[3;94mState\x1b[0m    \x1b[3;94mTLS\x1b[0m\n"
+	if service == "" {
+		return header
+	}
+	return header + "\x1b[1;34m" + service + "\x1b[0m    " + c("shop.svnmns.com,www.shop.com") + c("/") + c(target+":80") + c("running") + c("no") + "\n"
 }
 
 func (f *fakeDocker) Stream(ctx context.Context, dir string, env []string, out io.Writer, args ...string) (int, error) {
@@ -203,18 +260,24 @@ type fakeMission struct {
 	snapshotErr  error
 	snapshotPoll []mission.Snapshot
 	onSnapshot   func() // called when the snapshot is asked for
-	generation   int    // what sync reports
-	syncErr      error
-	secrets      map[string]string
-	startErr     error
-	deploy       mission.Deploy
-	reports      []mission.Progress
-	reportErr    func(p mission.Progress) error
-	domains      map[string]mission.DomainState
+	// A restore's data: what the POST answers, then each GET in turn.
+	restoreData     mission.Snapshot
+	restoreDataErr  error
+	restoreDataPoll []mission.Snapshot
+	generation      int // what sync reports
+	syncs           []mission.SyncRequest
+	syncErr         error
+	secrets         map[string]string
+	startErr        error
+	deploy          mission.Deploy
+	reports         []mission.Progress
+	reportErr       func(p mission.Progress) error
+	domains         map[string]mission.DomainState
 }
 
 func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error) {
 	m.calls = append(m.calls, "sync")
+	m.syncs = append(m.syncs, req)
 	if m.syncErr != nil {
 		return mission.SyncResult{}, m.syncErr
 	}
@@ -240,6 +303,27 @@ func (m *fakeMission) Snapshot(ctx context.Context, d mission.Deploy) (mission.S
 		return mission.Snapshot{Status: "skipped", Error: "nothing deployed yet"}, nil
 	}
 	return m.snapshot, nil
+}
+
+func (m *fakeMission) RestoreData(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "restore data")
+	if m.restoreDataErr != nil {
+		return mission.Snapshot{}, m.restoreDataErr
+	}
+	return m.restoreData, nil
+}
+
+func (m *fakeMission) RestoreDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "restore data?")
+	s := m.restoreDataPoll[0]
+	if len(m.restoreDataPoll) > 1 {
+		m.restoreDataPoll = m.restoreDataPoll[1:]
+	}
+	return s, nil
 }
 
 func (m *fakeMission) SnapshotStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {

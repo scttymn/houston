@@ -41,14 +41,24 @@ class Deploy < ApplicationRecord
 
   # houston deploy's steps (internal/deploy), after houston runner's Test (step 00).
   STEPS = %w[Test Secrets Build Snapshot Accessories Release Deploy Post-deploy].freeze
+  # A restore's (internal/deploy/restore.go). The runner reports Clean up
+  # once Kamal has switched traffic to the restore's generation, and removes
+  # the old one only after Mission Control has taken it.
+  SWITCHED = "Clean up".freeze
+  RESTORE_STEPS = [ "Prepare", "Image", "Accessories", "Restore data", "Safety snapshot", "Switch", SWITCHED ].freeze
   def short_sha = sha.first(7)
+  def steps = restore? ? RESTORE_STEPS : STEPS
+
+  # The generation serving while a restore builds its own; nil for a deploy.
+  # Generations go up one restore at a time.
+  def previous_generation = restore? ? generation - 1 : nil
 
   # Each step as :done, :current, :failed, :pending, or :skipped (a hand
   # houston deploy runs no tests).
   def step_states
-    return STEPS.index_with(:pending) if status == "queued"
-    at = STEPS.index(step) || (runner ? 0 : 1)
-    STEPS.each_with_index.to_h do |name, i|
+    return steps.index_with(:pending) if status == "queued"
+    at = steps.index(step) || (runner || restore? ? 0 : 1)
+    steps.each_with_index.to_h do |name, i|
       state = if name == "Test" && runner.nil? then :skipped
       elsif status == "go" || i < at then :done
       elsif i > at then :pending
@@ -115,9 +125,17 @@ class Deploy < ApplicationRecord
     commit = GitRemote.commit(project, found.sha)
     raise RestoreRefused, "commit #{found.sha.first(7)} isn't in #{project.repo_url} any more (was history rewritten, or the repo relinked?): #{commit.error}" unless commit.ok
 
+    # The new generation's container names, claimed before any exists (the
+    # sync after its switch keeps them and lets the old generation's go).
+    names = project.host_names(generation: project.data_generation + 1)
+    if (taken = ProjectHost.includes(:project).where(name: names).where.not(project_id: project.id).first)
+      raise RestoreRefused, "the container name #{taken.name} belongs to project #{taken.project.name}; rename a service or that project first"
+    end
+
     transaction do
+      (names - project.hosts.pluck(:name)).each { |name| project.hosts.create!(name:) }
       number = (project.deploys.maximum(:number) || 0) + 1
-      project.deploys.create!(number:, sha: found.sha, ref: "restore:#{found.short_id}", status: "queued", kind: "restore", token_digest: "",
+      project.deploys.create!(number:, sha: found.sha, ref: "refs/restore/#{found.short_id}", status: "queued", kind: "restore", token_digest: "",
                               heartbeat_at: Time.current, generation: project.data_generation + 1,
                               source_snapshot_id: found.id, source_location: location)
     end
@@ -145,8 +163,9 @@ class Deploy < ApplicationRecord
   # [deploy, token] or nil.
   def self.claim!(deploy, runner:)
     token = SecureRandom.urlsafe_base64(32)
-    claimed = where(id: deploy.id, status: "queued").update_all(status: "in_flight", runner:, token_digest: digest(token),
-                                                                 generation: deploy.project.data_generation,
+    # A restore builds the next generation; a deploy uses the project's.
+    generation = deploy.project.data_generation + (deploy.restore? ? 1 : 0)
+    claimed = where(id: deploy.id, status: "queued").update_all(status: "in_flight", runner:, token_digest: digest(token), generation:,
                                                                  heartbeat_at: Time.current, updated_at: Time.current)
     claimed == 1 ? [ deploy.reload, token ] : nil
   end
@@ -159,6 +178,26 @@ class Deploy < ApplicationRecord
 
   def owned_by?(token)
     token.present? && ActiveSupport::SecurityUtils.secure_compare(self.class.digest(token), token_digest)
+  end
+
+  # The ProjectSync the last report applied at the flip, for its DNS
+  # (pointed after the commit), or nil.
+  attr_reader :adopted
+
+  # Applies the compose.yml its check sync kept (the project's config and
+  # container names). Returns the ProjectSync, or nil without one. One that
+  # can't be applied (another project took one of its names) is logged, never
+  # raised: it's applied past the switch, and a failed report would leave
+  # the restore to go stale while it serves. The next deploy's sync applies
+  # its own.
+  def adopt!
+    sync = sync_payload && ProjectSync.new(sync_payload)
+    return unless sync&.valid?
+    transaction(requires_new: true) { sync.save! }
+    sync
+  rescue ProjectSync::Refused, ActiveRecord::RecordInvalid => e
+    Rails.logger.warn("restore ##{number} of #{project.name}: its compose.yml wasn't applied: #{e.message}")
+    nil
   end
 
   def in_flight? = status == "in_flight"
@@ -175,7 +214,18 @@ class Deploy < ApplicationRecord
       self.finished_at = Time.current
     end
     self.heartbeat_at = Time.current
-    save!
+    transaction do
+      save!
+      # Past the switch (or GO, should that report have been lost), the
+      # restore's generation is the one serving: every deploy from now uses
+      # it, and its compose.yml describes the project. Only ever forward, in
+      # one statement: no stale read of the project.
+      if restore? && (step == SWITCHED || status == "go")
+        update_columns(switched_at: Time.current) unless switched_at
+        flipped = Project.where(id: project_id, data_generation: ...generation).update_all(data_generation: generation, updated_at: Time.current)
+        @adopted = adopt! if flipped == 1
+      end
+    end
     append_log(log) if log.present?
   end
 

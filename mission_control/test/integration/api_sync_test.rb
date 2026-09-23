@@ -2,11 +2,19 @@ require "test_helper"
 require_relative "../support/api_helpers"
 require_relative "../support/cloudflare_stubs"
 require_relative "../support/fake_docker"
+require_relative "../support/project_helpers"
 
 class ApiSyncTest < ActionDispatch::IntegrationTest
   include ApiHelpers
   include CloudflareStubs
   include FakeDockerHelper
+  include ProjectHelpers
+
+  def restore_in_flight(project, generation: 2)
+    restore, token, = Deploy.start!(project, sha: "a" * 40, ref: "refs/restore/33333333")
+    restore.update!(kind: "restore", generation:)
+    [ restore, token ]
+  end
 
   test "sync creates the project" do
     sync(equip_payload(variables: [ { name: "RAILS_MASTER_KEY", required: false }, { name: "SENTRY_DSN", required: false } ]))
@@ -284,5 +292,119 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     sync(equip_payload(variables: []))
     assert_response :success
     assert_requested create
+  end
+
+  # A restore's sync (docs/plans/restore.md, Batch 6 review): the snapshot's
+  # compose.yml is checked and kept with the restore, which owns it (its
+  # token), never stored on the project until the restore has switched.
+  # Nothing is placed or pointed.
+  test "a restore's sync only checks, and keeps the payload with the restore" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ]))
+    project = Project.find_by!(name: "equip")
+    before = project.reload.attributes.except("updated_at")
+    restore, token = restore_in_flight(project)
+    old = equip_payload(variables: optional, services: %w[app], volumes: [ { name: "media", path: "/media" } ], restore_deploy: restore.id)
+
+    docker = FakeDocker.new { nil }
+    use_fake_docker(docker) { sync(old, token:) }
+    assert_response :success
+    assert_equal({ "project" => "equip", "host" => "equip.svnmns.com", "dns" => "wildcard", "domains" => {}, "generation" => 1 }, json)
+    assert_equal before, project.reload.attributes.except("updated_at")
+    assert_empty docker.calls, "nothing placed"
+    assert_equal [ { "name" => "media", "path" => "/media" } ], restore.reload.sync_payload["volumes"]
+    assert_equal %w[app], restore.sync_payload["services"]
+    assert_not restore.sync_payload.key?("restore_deploy")
+
+    # A variable the snapshot's code requires, with no value: HOLD, still nothing stored on the project.
+    sync(equip_payload(variables: [ { name: "OLD_KEY", required: true } ], restore_deploy: restore.id), token:)
+    assert_response :unprocessable_entity
+    assert_equal [ "OLD_KEY" ], json["missing"]
+    assert_equal before, project.reload.attributes.except("updated_at")
+
+    # Only the restore's owner, while it's in flight, for its own project.
+    { "another token" => [ old, "not-its-token", :forbidden ],
+      "another project" => [ old.merge(name: "nobody"), token, :unprocessable_entity ] }.each do |name, (payload, t, status)|
+      sync(payload, token: t)
+      assert_response status, name
+    end
+    ordinary, ordinary_token, = Deploy.start!(make_project("other"), sha: "c" * 40, ref: "refs/heads/main")
+    sync(equip_payload(name: "other", variables: optional, restore_deploy: ordinary.id), token: ordinary_token)
+    assert_response :unprocessable_entity
+    restore.update!(status: "no_go", finished_at: Time.current)
+    sync(old, token:)
+    assert_response :conflict
+    assert_equal before, project.reload.attributes.except("updated_at")
+  end
+
+  # What serves is the truth: a restore that switched traffic but never got
+  # to say so is caught up by the next sync, deploy or restore. Which restore
+  # it was is what kamal-proxy routes to: its generation and its commit.
+  test "sync catches the generation up to the one serving" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional))
+    project = Project.find_by!(name: "equip")
+    a1, a2 = "a" * 40, "c" * 40
+    switched = project.deploys.create!(number: 1, sha: a1, ref: "refs/restore/33333333", status: "no_go", kind: "restore", token_digest: "",
+                                       heartbeat_at: Time.current, generation: 2, error: "abandoned",
+                                       sync_payload: equip_payload(variables: optional, volumes: [ { name: "media", path: "/media" } ]).as_json)
+
+    sync(equip_payload(variables: optional, serving_generation: 3, serving_sha: a1)) # no restore ever built 3
+    assert_equal [ 1, 1 ], [ json["generation"], project.reload.data_generation ]
+    sync(equip_payload(variables: optional, serving_generation: "2", serving_sha: a1))
+    sync(equip_payload(variables: optional, serving_generation: 2, serving_sha: "b" * 40)) # not that restore's commit
+    sync(equip_payload(variables: optional, serving_generation: 2))
+    assert_equal 1, project.reload.data_generation
+
+    # The operator asks again (a2) before anything caught up: a newer restore
+    # of the same generation, not the one serving. Its check sync catches up
+    # to the one kamal-proxy routes to, and applies that one's compose.yml.
+    checking, token = restore_in_flight(project, generation: 2)
+    checking.update!(sha: a2)
+    # And one of the same commit, asked for again, still queued: not it either.
+    project.deploys.create!(number: 3, sha: a1, ref: "refs/restore/33333333", status: "no_go", kind: "restore", token_digest: "",
+                            heartbeat_at: Time.current, generation: 2, error: "abandoned")
+    sync(equip_payload(variables: optional, serving_generation: 2, serving_sha: a1, restore_deploy: checking.id), token:)
+    assert_equal [ 2, 2 ], [ json["generation"], project.reload.data_generation ]
+    assert_equal [ { "name" => "media", "path" => "/media" } ], project.volumes
+    assert switched.reload.switched_at
+    assert_nil checking.reload.switched_at
+    assert_equal switched.number, project.running_deploy.number
+    checking.update!(status: "no_go", finished_at: Time.current)
+    sync(equip_payload(variables: optional, serving_generation: 1)) # never backwards
+    assert_equal [ 2, 2 ], [ json["generation"], project.reload.data_generation ]
+
+    # A deploy's sync catches up too, even to a restore whose compose.yml
+    # can't be applied (it's logged; the deploy's own replaces it), and its
+    # volumes are placed in the caught-up generation.
+    project.deploys.create!(number: 4, sha: "b" * 40, ref: "refs/restore/44444444", status: "no_go", kind: "restore", token_digest: "",
+                            heartbeat_at: Time.current, generation: 3, error: "abandoned", sync_payload: { "name" => "equip" })
+    placing = FakeDocker.new { |args| args[0..1] == %w[volume inspect] ? DockerCommand::Result.new(success: true, output: "null\n") : nil }
+    use_fake_docker(placing) { sync(equip_payload(variables: optional, volumes: [ { name: "storage", path: "/rails/storage" } ], serving_generation: 3, serving_sha: "b" * 40)) }
+    assert_response :success
+    assert_equal [ 3, 3 ], [ json["generation"], project.reload.data_generation ]
+    assert_includes placing.all_args, "equip.g3_storage"
+    # Generation 2 was a restore's too, but the project is past it: never back.
+    sync(equip_payload(variables: optional, serving_generation: 2, serving_sha: a1))
+    assert_equal [ 3, 3 ], [ json["generation"], project.reload.data_generation ]
+  end
+
+  # A restore queued or in flight owns the project's config until it's done:
+  # a hand houston deploy's sync would change what its snapshot and cleanup read.
+  test "a sync waits for a restore" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional))
+    project = Project.find_by!(name: "equip")
+    restore, = restore_in_flight(project)
+    sync(equip_payload(variables: optional, volumes: [ { name: "other", path: "/other" } ]))
+    assert_response :conflict
+    assert_match "restore ##{restore.number} is in flight", json["error"]
+    assert_equal [], project.reload.volumes
+
+    # One whose runner went silent doesn't: houston deploy by hand is how an
+    # admin takes it over (Deploy.start! abandons it), and it syncs first.
+    restore.update!(heartbeat_at: (Deploy::STALE_AFTER + 1.second).ago)
+    sync(equip_payload(variables: optional))
+    assert_response :success
   end
 end
