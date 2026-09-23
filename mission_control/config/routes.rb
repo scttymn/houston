@@ -21,5 +21,12 @@ Rails.application.routes.draw do
     patch "deploys/:id", to: "deploys#update"
   end
 
+  resources :projects, only: :show, param: :name do
+    resources :deploys, only: :show, param: :number
+    resources :secrets, only: %i[ update destroy ], param: :key do
+      post :generate, on: :member
+    end
+  end
+
   root "projects#index"
 end

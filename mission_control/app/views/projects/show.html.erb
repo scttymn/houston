@@ -1,0 +1,91 @@
+<% content_for :title, "#{@project.name} · Project" %>
+<main class="page board">
+  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= @project.name %></nav>
+  <div class="board__top">
+    <div class="board__title">
+      <h1 class="disp"><%= @project.name %></h1>
+      <div class="hosts">
+        <%= state_chip(@project.status) %>
+        <% ([ @project.host(@installation) ] + @project.domains).each do |host| %>
+          <%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <% if notice %>
+    <div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div>
+  <% end %>
+
+  <div class="board__body">
+    <div class="column">
+      <dl class="facts">
+        <dt class="mono">RUNNING SHA</dt><dd class="mono"><%= @running&.short_sha || "— (never deployed)" %></dd>
+        <dt class="mono">DEPLOY RULE</dt><dd><%= @project.deploy_rule_words %></dd>
+        <dt class="mono">SERVICES</dt><dd class="mono"><%= @project.accessories.presence&.join(" · ") || "none besides the app" %></dd>
+        <dt class="mono">HEALTH</dt><dd class="mono"><%= @project.health %> on port <%= @project.port %></dd>
+      </dl>
+
+      <section class="panel history">
+        <h2 class="disp panel__title">Deploy history <small class="mono eyebrow"><%= pluralize(@deploy_count, "deploy") %></small></h2>
+        <% if @deploys.empty? %>
+          <p class="panel__row panel__row--muted">No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span></p>
+        <% end %>
+        <ul class="rows">
+          <% @deploys.each do |deploy| %>
+            <li data-deploy="<%= deploy.number %>">
+              <span class="mono">#<%= deploy.number %></span>
+              <span class="mono"><%= deploy.short_sha %></span>
+              <span>
+                <%= deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %> · <%= l(deploy.created_at, format: :short) %>
+                <% if deploy.error.present? %><small><%= deploy.error %></small><% end %>
+              </span>
+              <%= state_chip(deploy.status) %>
+              <span class="mono"><%= deploy.status == "in_flight" ? mission_elapsed(deploy.duration) : duration_words(deploy.duration) %></span>
+              <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
+            </li>
+          <% end %>
+        </ul>
+        <% if @deploy_count > ProjectPage::PER_PAGE %>
+          <p class="panel__row pager">
+            <% if @page > 1 %><%= link_to "← Newer", project_path(@project.name, page: @page - 1) %><% end %>
+            <span class="mono">Page <%= @page %> of <%= (@deploy_count.to_f / ProjectPage::PER_PAGE).ceil %></span>
+            <% if @page * ProjectPage::PER_PAGE < @deploy_count %><%= link_to "Older →", project_path(@project.name, page: @page + 1) %><% end %>
+          </p>
+        <% end %>
+      </section>
+    </div>
+
+    <aside class="panel secrets">
+      <h2 class="disp panel__title">Secrets</h2>
+      <p class="panel__row panel__row--muted">Values are write-only: Houston never shows them again.</p>
+      <% required_missing = @missing %>
+      <% if required_missing.any? %>
+        <div class="notice notice--hold"><span class="mono">HOLD</span><span class="notice__text">The next deploy will stop until <%= required_missing.to_sentence %> <%= required_missing.one? ? "has" : "have" %> a value.</span></div>
+      <% end %>
+      <% if @variables.empty? %>
+        <p class="panel__row panel__row--muted">compose.yml references no variables.</p>
+      <% end %>
+      <% @variables.each do |variable| %>
+        <% key = variable["name"] %>
+        <% secret, error = @secrets[key], @secret_errors[key] %>
+        <% set = secret.present? && secret.value.present? %>
+        <div class="panel__row secret" data-secret="<%= key %>">
+          <span class="mono"><%= key %><% unless variable["required"] %> <small>optional</small><% end %></span>
+          <% if set %>
+            <span class="mono">•••••••• · set <%= l(secret.updated_at.to_date, format: :short) %></span>
+            <details class="secret__replace" <%= "open" if error %>>
+              <summary>Replace</summary>
+              <%= render "projects/secret_form", key:, label: "Replace" %>
+            </details>
+            <%= button_to "Remove", project_secret_path(@project.name, key), method: :delete, class: "button button--small" %>
+          <% else %>
+            <%= render "projects/secret_form", key:, label: "Save value" %>
+            <%= button_to "Generate", generate_project_secret_path(@project.name, key), class: "button button--small", title: "Save a random value nobody needs to know" %>
+          <% end %>
+          <% if error %><span class="field__error"><%= key %> <%= error %></span><% end %>
+        </div>
+      <% end %>
+    </aside>
+  </div>
+</main>

@@ -1,0 +1,46 @@
+<% content_for :title, "#{@project.name} · Deploy ##{@deploy.number}" %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<main class="page board">
+  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / Deploy #<%= @deploy.number %></nav>
+  <div class="board__top">
+    <div class="board__title">
+      <h1 class="disp">Deploy #<%= @deploy.number %></h1>
+      <div class="hosts">
+        <%= state_chip(@deploy.status) %>
+        <span class="mono"><%= @deploy.short_sha %> · <%= @deploy.ref %></span>
+      </div>
+    </div>
+    <div class="stat">
+      <span class="mono eyebrow"><%= @deploy.status == "in_flight" ? "MISSION ELAPSED" : "DURATION" %> · STARTED <%= @deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+      <span class="disp stat__value"><%= @deploy.status == "in_flight" ? mission_elapsed(@deploy.duration) : duration_words(@deploy.duration) %></span>
+    </div>
+  </div>
+
+  <% if @deploy.status == "in_flight" %>
+    <div class="notice notice--hold" data-controller="refresh" data-refresh-every-value="3000">
+      <span class="mono">IN FLIGHT</span>
+      <span class="notice__text">
+        <% if @running %><span class="mono"><%= @running.short_sha %></span> is still serving <%= @project.host %>.<% else %>Nothing is serving <%= @project.host %> yet.<% end %>
+        Traffic switches only after <span class="mono"><%= @project.health %></span> returns 200 on the new version.
+      </span>
+    </div>
+  <% elsif @deploy.status == "no_go" %>
+    <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= @deploy.error %></span></div>
+  <% end %>
+
+  <div class="board__body">
+    <ol class="panel deploy-steps">
+      <% @deploy.step_states.each_with_index do |(name, state), i| %>
+        <li data-step="<%= name %>" data-state="<%= state %>">
+          <span class="mono"><%= format("%02d", i + 1) %></span>
+          <span><%= name %></span>
+          <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED", pending: "—" }.fetch(state) %></span>
+        </li>
+      <% end %>
+    </ol>
+    <section class="panel log-panel">
+      <h2 class="disp panel__title"><%= @project.name %> · <%= @deploy.short_sha %></h2>
+      <pre class="mono log"><%= @deploy.log %></pre>
+    </section>
+  </div>
+</main>

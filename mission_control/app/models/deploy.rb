@@ -29,6 +29,32 @@ class Deploy < ApplicationRecord
   validates :error, length: { maximum: 1000 }
 
   scope :in_flight, -> { where(status: "in_flight") }
+  # Everything but the log, which can be megabytes: for lists.
+  scope :summary, -> { select(column_names - [ "log" ]) }
+
+  # houston deploy's steps, in order (internal/deploy).
+  STEPS = %w[Secrets Build Accessories Release Deploy Post-deploy].freeze
+  LABELS = { "in_flight" => "IN FLIGHT", "go" => "GO", "no_go" => "NO-GO" }.freeze
+
+  def label = LABELS.fetch(status)
+  def short_sha = sha.first(7)
+
+  # Each step as :done, :current, :failed or :pending.
+  def step_states
+    at = STEPS.index(step) || 0
+    STEPS.each_with_index.to_h do |name, i|
+      state = if status == "go" || i < at then :done
+      elsif i > at then :pending
+      elsif status == "no_go" then :failed
+      else :current
+      end
+      [ name, state ]
+    end
+  end
+
+  def duration
+    ((finished_at || Time.current) - created_at).to_i
+  end
 
   def self.digest(token) = OpenSSL::Digest::SHA256.hexdigest(token)
 

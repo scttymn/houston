@@ -1,8 +1,10 @@
 require "test_helper"
 require_relative "../support/cloudflare_stubs"
+require_relative "../support/project_helpers"
 
 class ProjectsControllerTest < ActionDispatch::IntegrationTest
   include CloudflareStubs
+  include ProjectHelpers
 
   setup do
     Installation.current.update!(cloudflare_account_id: ACCOUNT, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
@@ -145,5 +147,38 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
     assert_select ".preflight li[data-check=admin-route][data-state=go]", /You're using it now/
     assert_not_requested :get, "https://admin.svnmns.com/ping"
+  end
+
+  test "the flight board lists projects by their latest deploy" do
+    stub_tunnel
+    equip = make_project("equip", services: %w[app db], domains: %w[equipping.com])
+    make_deploy(equip, 1, "go", sha: "a" * 40)
+    make_deploy(equip, 2, "go", sha: "b" * 40)
+    ride = make_project("rideclub")
+    make_deploy(ride, 1, "go", sha: "c" * 40)
+    make_deploy(ride, 2, "in_flight", sha: "d" * 40, step: "Build")
+    valley = make_project("valley")
+    make_deploy(valley, 1, "go", sha: "e" * 40)
+    make_deploy(valley, 2, "no_go", sha: "f" * 40, error: "release hook failed (exit 3); the old version keeps serving")
+    make_project("fresh")
+
+    get root_path
+
+    assert_response :success
+    assert_select ".stat", /PROJECTS\s*4/
+    assert_select ".stat", /IN FLIGHT\s*1/
+    assert_select ".stat", /NO-GO\s*1/
+    { "equip" => [ "GO", "bbbbbbb" ], "rideclub" => [ "IN FLIGHT", "ccccccc" ], "valley" => [ "NO-GO", "eeeeeee" ], "fresh" => [ "STANDBY", "—" ] }.each do |name, (state, sha)|
+      assert_select "[data-project=#{name}]", 1 do |row|
+        assert_match state, row.text, name
+        assert_match sha, row.text, name
+      end
+    end
+    assert_select "[data-project=equip]", /db/
+    assert_select "[data-project=equip] a[href='https://equip.svnmns.com']"
+    assert_select "[data-project=equip] a[href='https://equipping.com']"
+    assert_select "[data-project=valley]", /release hook failed/
+    assert_select "[data-project=equip] a[href='/projects/equip']"
+    assert_select "h2", { text: /Nothing on the pad yet/i, count: 0 }
   end
 end

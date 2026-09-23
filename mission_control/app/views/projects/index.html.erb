@@ -10,9 +10,11 @@
       <h1 class="disp">Projects</h1>
     </div>
     <div class="stats">
-      <div class="stat"><span class="mono eyebrow">PROJECTS</span> <span class="disp stat__value">0</span></div>
-      <div class="stat"><span class="mono eyebrow">IN FLIGHT</span> <span class="disp stat__value stat__value--none">0</span></div>
-      <div class="stat"><span class="mono eyebrow">NO-GO</span> <span class="disp stat__value stat__value--none">0</span></div>
+      <div class="stat"><span class="mono eyebrow">PROJECTS</span> <span class="disp stat__value"><%= @projects.size %></span></div>
+      <% in_flight = @projects.count { |p| p.status == :in_flight } %>
+      <% no_go = @projects.count { |p| p.status == :no_go } %>
+      <div class="stat"><span class="mono eyebrow">IN FLIGHT</span> <span class="disp stat__value <%= "stat__value--none" if in_flight.zero? %>"><%= in_flight %></span></div>
+      <div class="stat"><span class="mono eyebrow">NO-GO</span> <span class="disp stat__value <%= "stat__value--none" if no_go.zero? %>"><%= no_go %></span></div>
       <div class="stat"><span class="mono eyebrow">NEXT BACKUP</span> <span class="disp stat__value stat__value--none">—</span></div>
     </div>
   </div>
@@ -38,71 +40,116 @@
     <% end %>
   <% end %>
 
-  <div class="board__body">
-    <section class="panel empty">
-      <div class="empty__head">
-        <%= render "projects/launch_pad" %>
-        <div>
-          <h2 class="disp">Nothing on the pad yet</h2>
-          <p>The server is ready. Bring your first project over one of two ways.</p>
-        </div>
-      </div>
-      <div class="empty__paths">
-        <div class="path">
-          <span class="mono eyebrow eyebrow--signal">A · REPO HAS AN X-HOUSTON BLOCK</span>
-          <p>Link the repo. Houston reads its compose.yml, takes secrets, and gives you a webhook so pushes deploy.</p>
-          <span class="button button--primary is-disabled" aria-disabled="true">Add project</span>
-          <span class="field__hint">Coming soon.</span>
-        </div>
-        <div class="path" data-controller="clipboard">
-          <span class="mono eyebrow eyebrow--signal">B · NOT SET UP FOR HOUSTON YET</span>
-          <p>In the repo on your laptop, let Houston write the config, then push it.</p>
-          <div class="commands">
-            <button type="button" class="commands__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
-            <pre class="mono" data-clipboard-target="source">houston init
-git add .
-git commit -m "Add Houston"
-git push</pre>
-          </div>
-          <p class="field__hint">Then come back and use option A.</p>
-        </div>
-      </div>
+  <% if @projects.any? %>
+    <section class="panel">
+      <table class="flight">
+        <thead>
+          <tr class="mono eyebrow"><th>STATUS</th><th>PROJECT</th><th>RUNNING SHA</th><th>DOMAINS</th><th>LAST DEPLOY</th></tr>
+        </thead>
+        <tbody>
+          <% @projects.each do |project| %>
+            <% latest, running = project.latest_deploy, project.running_deploy %>
+            <tr data-project="<%= project.name %>">
+              <td><%= state_chip(project.status) %></td>
+              <td>
+                <%= link_to project.name, project_path(project.name), class: "flight__name" %>
+                <small class="mono"><%= project.accessories.presence&.join(" · ") || "no services" %></small>
+              </td>
+              <td class="mono">
+                <%= running&.short_sha || "—" %>
+                <small><%= project.status == :in_flight ? "→ #{latest.short_sha}" : project.deploy_rule_words.downcase %></small>
+              </td>
+              <td class="flight__domains">
+                <% ([ project.host(@installation) ] + project.domains).each do |host| %>
+                  <%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
+                <% end %>
+              </td>
+              <td>
+                <% if latest.nil? %>
+                  <span>Never deployed</span><small>Run houston deploy on the server</small>
+                <% elsif latest.status == "in_flight" %>
+                  <%= link_to "Deploying · #{mission_elapsed(latest.duration)}", project_deploy_path(project.name, latest.number) %>
+                  <small><%= latest.step.presence || "starting" %></small>
+                <% elsif latest.status == "no_go" %>
+                  <%= link_to "Failed #{time_ago_in_words(latest.finished_at)} ago", project_deploy_path(project.name, latest.number) %>
+                  <small><%= latest.short_sha %> · <%= latest.error %></small>
+                <% else %>
+                  <%= link_to "#{time_ago_in_words(latest.finished_at)} ago · #{duration_words(latest.duration)}", project_deploy_path(project.name, latest.number) %>
+                  <small><%= latest.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></small>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
     </section>
-
-    <aside class="panel preflight">
-      <h2 class="disp panel__title">Pre-flight check</h2>
-      <ul>
-        <li><span class="mono state state--go">GO</span><span><span>Admin login</span><small>Signed in on this browser</small></span></li>
-        <li>
-          <% state, detail = case @tunnel.state
-             when :go then [ "GO", "#{@tunnel.connections} #{"connection".pluralize(@tunnel.connections)} to Cloudflare" ]
-             when :hold then [ "HOLD", "cloudflared isn't connected yet" ]
-             else [ "?", "Can't check: #{@tunnel.reason}" ]
-             end %>
-          <span class="mono state state--<%= state.downcase.delete("?").presence || "unknown" %>"><%= state %></span>
-          <span><span>Tunnel houston-<%= base.split(".").first %></span><small><%= detail %></small></span>
-        </li>
-        <% if @admin_route %>
-          <% label, detail = case @admin_route.state
-             when :go then [ "GO", @on_lan ? "Reaches this Mission Control through Cloudflare" : "You're using it now" ]
-             when :hold then [ "HOLD", "Switching over, which can take a few minutes. Last check: #{@admin_route.reason}" ]
-             else [ "NO-GO", @admin_route.reason.upcase_first ]
-             end %>
-          <li data-check="admin-route" data-state="<%= @admin_route.state %>">
-            <span class="mono state state--<%= @admin_route.state %>"><%= label %></span>
-            <span><span>Route to admin.<%= base %></span><small><%= detail %></small></span>
+  <% else %>
+  <div class="board__body">
+      <section class="panel empty">
+        <div class="empty__head">
+          <%= render "projects/launch_pad" %>
+          <div>
+            <h2 class="disp">Nothing on the pad yet</h2>
+            <p>The server is ready. Bring your first project over one of two ways.</p>
+          </div>
+        </div>
+        <div class="empty__paths">
+          <div class="path">
+            <span class="mono eyebrow eyebrow--signal">A · REPO HAS AN X-HOUSTON BLOCK</span>
+            <p>Link the repo. Houston reads its compose.yml, takes secrets, and gives you a webhook so pushes deploy.</p>
+            <span class="button button--primary is-disabled" aria-disabled="true">Add project</span>
+            <span class="field__hint">Coming soon.</span>
+          </div>
+          <div class="path" data-controller="clipboard">
+            <span class="mono eyebrow eyebrow--signal">B · NOT SET UP FOR HOUSTON YET</span>
+            <p>In the repo on your laptop, let Houston write the config, then push it.</p>
+            <div class="commands">
+              <button type="button" class="commands__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+              <pre class="mono" data-clipboard-target="source">houston init
+  git add .
+  git commit -m "Add Houston"
+  git push</pre>
+            </div>
+            <p class="field__hint">Then come back and use option A.</p>
+          </div>
+        </div>
+      </section>
+  
+      <aside class="panel preflight">
+        <h2 class="disp panel__title">Pre-flight check</h2>
+        <ul>
+          <li><span class="mono state state--go">GO</span><span><span>Admin login</span><small>Signed in on this browser</small></span></li>
+          <li>
+            <% state, detail = case @tunnel.state
+               when :go then [ "GO", "#{@tunnel.connections} #{"connection".pluralize(@tunnel.connections)} to Cloudflare" ]
+               when :hold then [ "HOLD", "cloudflared isn't connected yet" ]
+               else [ "?", "Can't check: #{@tunnel.reason}" ]
+               end %>
+            <span class="mono state state--<%= state.downcase.delete("?").presence || "unknown" %>"><%= state %></span>
+            <span><span>Tunnel houston-<%= base.split(".").first %></span><small><%= detail %></small></span>
           </li>
-        <% end %>
-        <% if @installation.dns_mode == "per_host" %>
-          <li><span class="mono state state--go">GO</span><span><span>admin.<%= base %> and hooks.<%= base %></span><small>Sharing the domain: another server has *.<%= base %>, so each app gets its own record when it's first deployed</small></span></li>
-        <% else %>
-          <li><span class="mono state state--go">GO</span><span><span>*.<%= base %></span><small>New apps get a subdomain automatically</small></span></li>
-        <% end %>
-        <% if @storage %>
-          <li><span class="mono state state--go">GO</span><span><span>Backup storage <%= @storage.name %></span><small>Default · password saved</small></span></li>
-        <% end %>
-        <li><span class="mono state state--hold">OPTIONAL</span><span><span>Cloudflare Access on admin.<%= base %></span><small>Adds a second login in front of Mission Control</small></span></li>
-      </ul>
-    </aside>
-  </div>
+          <% if @admin_route %>
+            <% label, detail = case @admin_route.state
+               when :go then [ "GO", @on_lan ? "Reaches this Mission Control through Cloudflare" : "You're using it now" ]
+               when :hold then [ "HOLD", "Switching over, which can take a few minutes. Last check: #{@admin_route.reason}" ]
+               else [ "NO-GO", @admin_route.reason.upcase_first ]
+               end %>
+            <li data-check="admin-route" data-state="<%= @admin_route.state %>">
+              <span class="mono state state--<%= @admin_route.state %>"><%= label %></span>
+              <span><span>Route to admin.<%= base %></span><small><%= detail %></small></span>
+            </li>
+          <% end %>
+          <% if @installation.dns_mode == "per_host" %>
+            <li><span class="mono state state--go">GO</span><span><span>admin.<%= base %> and hooks.<%= base %></span><small>Sharing the domain: another server has *.<%= base %>, so each app gets its own record when it's first deployed</small></span></li>
+          <% else %>
+            <li><span class="mono state state--go">GO</span><span><span>*.<%= base %></span><small>New apps get a subdomain automatically</small></span></li>
+          <% end %>
+          <% if @storage %>
+            <li><span class="mono state state--go">GO</span><span><span>Backup storage <%= @storage.name %></span><small>Default · password saved</small></span></li>
+          <% end %>
+          <li><span class="mono state state--hold">OPTIONAL</span><span><span>Cloudflare Access on admin.<%= base %></span><small>Adds a second login in front of Mission Control</small></span></li>
+        </ul>
+      </aside>
+    </div>
+  <% end %>
 </main>

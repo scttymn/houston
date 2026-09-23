@@ -463,6 +463,16 @@ From the design's Main (flight board), ProjectDetail and DeployLog boards. Snaps
 | 6 | Deploy page: steps, status, log; in flight → refresher; finished → none; an unknown number → 404 | `controllers/deploy_pages_test.rb` `test "a deploy's page"` | Contract |
 | 7 | A log containing `<script>` is escaped | `test "the log is text, not HTML"` | Contract (hostile input) |
 
+### Done (Batch 7)
+- **Red:** the 7 rows failed (routes, views and controllers missing). **Green:** 93 runs, 0 failures. Rubocop is clean on the 13 touched Ruby files.
+- **Found on the way:**
+  - A failed save of a new secret left the unsaved record in the association's cache, so the page took it for a set secret. The page now reads secrets fresh from the database, so only saved values count.
+  - The design's Replace action was missing from my first secrets view. It's now a disclosure with an empty field.
+  - My `.steps` class collided with the setup header's step indicator, which centered it. It's renamed `.deploy-steps`.
+- **Mutations, each caught:** a secret's value rendered (2 failures); any key settable (1); board status ignoring the latest deploy (1).
+- **Visual check:** the three pages were rendered with sample data by a throwaway test (deleted afterwards) and viewed at 1440 px: the flight board's rows, the project page with HOLD / Save / Generate / Replace / Remove, and the deploy page with its steps and log. A real browser session needs a sign-in, which I don't do with a password.
+- Lists read deploys through `Deploy.summary`, which leaves out the log (up to 4 MiB each).
+
 ### Open questions
 None blocking Batch 1. Recorded for Batch 2:
 - **What "localhost only" means for the runner's secrets route.** Mission Control runs in a container, so its callers show up as Docker addresses, and cloudflared sits on the same network as the runners.

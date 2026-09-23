@@ -9,6 +9,7 @@ class Secret < ApplicationRecord
   UNCARRIABLE = /[\\\x00-\x1f\x7f]/
 
   validates :key, format: { with: /\A[A-Za-z_][A-Za-z0-9_]*\z/, message: "must be letters, digits and _, not starting with a digit" }
+  validates :value, presence: { message: "needs a value" }
   validate :value_can_reach_the_container
 
   private

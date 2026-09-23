@@ -26,4 +26,22 @@ class Project < ApplicationRecord
   def variable?(key)
     variables.any? { |v| v["name"] == key }
   end
+
+  def accessories = services - [ app_service ]
+
+  def latest_deploy = deploys.summary.order(number: :desc).first
+  def running_deploy = deploys.summary.where(status: "go").order(number: :desc).first
+
+  # :in_flight, :no_go or :go from the latest deploy; :standby before any.
+  def status
+    latest_deploy&.status&.to_sym || :standby
+  end
+
+  def deploy_rule_words
+    if deploy_rule["on"] == "tag"
+      "Tags matching #{deploy_rule["tags"].presence || "v*"}"
+    else
+      "Every commit to #{deploy_rule["branch"].presence || "main"}"
+    end
+  end
 end
