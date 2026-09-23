@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigAndHeaders(t *testing.T) {
@@ -118,6 +119,51 @@ func TestReading(t *testing.T) {
 		t.Errorf("Deploy = %+v, %v", d, err)
 	}
 	if _, err := c.Project(ctx, "nope"); err == nil || !strings.Contains(err.Error(), "no project nope") {
+		t.Errorf("unknown project: %v", err)
+	}
+}
+
+func TestBackupsClient(t *testing.T) {
+	var posted string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/projects/equip/snapshots":
+			io.WriteString(w, `{"snapshots":[{"id":"`+strings.Repeat("3", 64)+`","short_id":"33333333","time":"2026-09-22T12:31:00Z","kind":"deploy","reason":"deploy","deploy":7,"sha":"`+strings.Repeat("a", 40)+`","bytes":5}]}`)
+		case "POST /api/v1/projects/equip/backups":
+			posted = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusAccepted)
+			io.WriteString(w, `{"id":12,"status":"queued","kind":"auto","reason":"manual"}`)
+		case "GET /api/v1/projects/equip/backups/12":
+			io.WriteString(w, `{"id":12,"status":"go","snapshot_id":"`+strings.Repeat("5", 64)+`","bytes":410000000,"error":"1 file couldn't be read: /data/x"}`)
+		case "POST /api/v1/projects/fresh/backups":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			io.WriteString(w, `{"error":"nothing deployed yet"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no project nope"}`)
+		}
+	}))
+	defer s.Close()
+	c := New(Config{URL: s.URL, Token: "hou_x"})
+	ctx := context.Background()
+
+	snapshots, err := c.Snapshots(ctx, "equip")
+	if err != nil || len(snapshots) != 1 || snapshots[0].ShortID != "33333333" || snapshots[0].Deploy != 7 || snapshots[0].Bytes != 5 ||
+		!snapshots[0].Time.Equal(time.Date(2026, 9, 22, 12, 31, 0, 0, time.UTC)) {
+		t.Errorf("Snapshots = %+v, %v", snapshots, err)
+	}
+	b, err := c.BackupNow(ctx, "equip")
+	if err != nil || b.ID != 12 || b.Status != "queued" || posted != "Bearer hou_x" {
+		t.Errorf("BackupNow = %+v, %v (auth %q)", b, err, posted)
+	}
+	b, err = c.Backup(ctx, "equip", "12")
+	if err != nil || b.Status != "go" || b.Bytes != 410000000 || !strings.HasPrefix(b.SnapshotID, "5555") || b.Error == "" {
+		t.Errorf("Backup = %+v, %v", b, err)
+	}
+	if _, err := c.BackupNow(ctx, "fresh"); err == nil || err.Error() != "nothing deployed yet" {
+		t.Errorf("refused: %v", err)
+	}
+	if _, err := c.Snapshots(ctx, "nope"); err == nil || !strings.Contains(err.Error(), "no project nope") {
 		t.Errorf("unknown project: %v", err)
 	}
 }

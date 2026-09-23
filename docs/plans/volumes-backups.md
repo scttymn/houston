@@ -232,3 +232,41 @@ Every deployed project's data is backed up to restic, as snapshots of code and d
   - snapshots not cached
   - keep rules unchecked
 - **scotty-review (cold pass):** one LOW finding, fixed: `Snapshots.list` capped at 1000 in restic's order (oldest first) before sorting, which would drop the newest. It now sorts, then caps, with a test. No new public API without a production caller, and no inert state. Prune failures are recorded on the location and logged (shown in Settings in Batch 7).
+
+## Batch 3: The API and the CLI
+
+### Design (short)
+- **`/api/v1`** (personal tokens, through the tunnel):
+  - `GET /projects/:name/snapshots` → `{snapshots: [{id, short_id, time, kind, reason, deploy, sha, bytes}]}`, newest first (`Snapshots.for`, cached). restic failing → 502 with its words. No backup storage → 409.
+  - `POST /projects/:name/backups` → 202 with the run (Back up now; a queued one is returned as is). Refused → 422 with the reason.
+  - `GET /projects/:name/backups/:id` (or `latest`) → the run. Another project's run → 404.
+  - **The run's view:** `{id, status, kind, reason, deploy, sha, snapshot_id, bytes, error, queued_at, started_at, finished_at}`. A stale running run reads as `no_go` with "Mission Control stopped during the backup", as the page shows it.
+  - `GET /projects/:name` gains `last_backup` (that view, or null).
+- **CLI** (remote-only, like `status` and `deploys`: no `--server` flag, and `--project` or the compose file's name):
+  - `houston snapshots [--json]`: one line each, newest first, as `time (UTC)  kind  note  sha  size  short id`.
+  - `houston backup [--follow]`: "Queued a backup of <name> (run N)."
+    - With `--follow`, it polls every 2 s until finished.
+    - GO → "GO: <name> backed up: snapshot <short>, <size>" (plus the warning, if any), exit 0. Skipped → "Nothing to back up: …", exit 0. NO-GO → the error, exit 1.
+    - Refused → the reason, exit 1.
+  - `houston status --project <name>`: a `backup` line with GO (time, short id, size), NO-GO (the error), "running", or "none yet".
+
+### AC ↔ test map (Batch 3)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Snapshots over the API: the shape, newest first; restic failing → 502 with its words; no storage → 409; unknown project → 404; the runner token → 401 | `integration/api_v1_backups_test.rb` `test "snapshots over the API"` | Contract, Authz |
+| 2 | Back up now over the API: 202 and queued; again → the same run; nothing deployed → 422 with the reason; `backups/:id` and `latest`; another project's run → 404; a stale running run reads NO-GO | `test "backing up over the API"` | Contract, Preconditions |
+| 3 | `GET /projects/:name` has `last_backup` (null before any) | `test "the project shows its last backup"` | Contract |
+| 4 | The client's `Snapshots`, `BackupNow`, `Backup` hit the right paths, decode, and pass API errors through | `internal/server` `TestBackupsClient` | Contract |
+| 5 | `houston snapshots`: the lines, newest first; `--json` is the API's; an API error → exit 1 with it | `internal/cli` `TestSnapshots` | Contract |
+| 6 | `houston backup`: queued → exit 0; `--follow` through running to GO → exit 0 with the snapshot and size; to NO-GO → exit 1 with the error; to skipped → exit 0; refused → exit 1 with the reason | `TestBackup` | Contract, Signals |
+| 7 | `houston status --project`: the backup line (GO, NO-GO, none yet) | `TestStatusShowsTheLastBackup` | Contract |
+
+### Done (Batch 3)
+- **Red:** the Go client didn't compile, and the CLI tests failed.
+  - **The Rails API tests weren't run red before their code.** I wrote both before running either. Mutations stand in for that: a stale run reading as running, another project's run by id, restic failing unhandled, no `last_backup`, and create answering 200. Each was caught.
+- **Green:** Mission Control 184 runs and the Go suite. rubocop and gofmt are clean.
+- **Go mutations, each caught:** follow stopping at "running"; sizes in 1000s; NO-GO exiting 0.
+- `postJSON` takes any 2xx now: Back up now answers 202 Accepted.
+- **The CLI is remote-only, as `status` and `deploys` are:** `houston snapshots` and `houston backup`, with no `--server` flag. A NO-GO result is printed on stdout, like `deploys show`.
+- **scotty-review (cold pass):** no findings to fix.
+  - **Noted:** like `deploys show --follow`, `backup --follow` waits on a run stuck in "queued" for as long as it stays there. That happens only if the job worker itself is down; Ctrl-C ends it. A running run that goes silent reads as NO-GO after 2 minutes.

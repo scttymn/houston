@@ -224,6 +224,50 @@ type Project struct {
 	Branch          string          `json:"branch"`
 	WebhookVerified bool            `json:"webhook_verified"`
 	Secrets         []SecretSummary `json:"secrets"`
+	LastBackup      *Backup         `json:"last_backup"`
+}
+
+// Snapshot is one restic snapshot of a project (code and data together).
+type Snapshot struct {
+	ID      string    `json:"id"`
+	ShortID string    `json:"short_id"`
+	Time    time.Time `json:"time"`
+	Kind    string    `json:"kind"`   // auto, deploy
+	Reason  string    `json:"reason"` // schedule, manual, deploy, restore
+	Deploy  int       `json:"deploy"`
+	SHA     string    `json:"sha"`
+	Bytes   int64     `json:"bytes"`
+}
+
+// Backup is one backup run.
+type Backup struct {
+	ID         int        `json:"id"`
+	Status     string     `json:"status"` // queued, running, go, no_go, skipped
+	Kind       string     `json:"kind"`
+	Reason     string     `json:"reason"`
+	SnapshotID string     `json:"snapshot_id"`
+	Bytes      int64      `json:"bytes"`
+	Error      string     `json:"error"`
+	FinishedAt *time.Time `json:"finished_at"`
+}
+
+func (cl *Client) Snapshots(ctx context.Context, project string) ([]Snapshot, error) {
+	var body struct {
+		Snapshots []Snapshot `json:"snapshots"`
+	}
+	return body.Snapshots, cl.getJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/snapshots", &body)
+}
+
+// BackupNow queues a backup (or returns the one already queued).
+func (cl *Client) BackupNow(ctx context.Context, project string) (Backup, error) {
+	var b Backup
+	return b, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/backups", nil, &b)
+}
+
+// Backup is one backup run by id, or "latest".
+func (cl *Client) Backup(ctx context.Context, project, id string) (Backup, error) {
+	var b Backup
+	return b, cl.getJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/backups/"+url.PathEscape(id), &b)
 }
 
 func (cl *Client) Projects(ctx context.Context) ([]Project, error) {
@@ -380,7 +424,7 @@ func (cl *Client) postJSON(ctx context.Context, path string, payload, into any) 
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK {
+	if status < 200 || status > 299 {
 		return fmt.Errorf("%s", message(body))
 	}
 	return json.Unmarshal(body, into)

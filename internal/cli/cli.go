@@ -198,6 +198,19 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	webhook.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
 	webhook.Flags().BoolVar(&webhookRotate, "rotate", false, "make a new secret (then paste it into the git host)")
 	root.AddCommand(link, webhook)
+
+	var snapshotsJSON, backupFollow bool
+	snapshots := command("snapshots", "A project's snapshots on the server (code and data together), newest first", func() int {
+		return runSnapshots(file, projectFlag, snapshotsJSON, stdout, stderr)
+	})
+	snapshots.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	snapshots.Flags().BoolVar(&snapshotsJSON, "json", false, "print the API's JSON")
+	backup := command("backup", "Back a project up now, on the server", func() int {
+		return runBackup(file, projectFlag, backupFollow, stdout, stderr)
+	})
+	backup.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	backup.Flags().BoolVar(&backupFollow, "follow", false, "wait for the result; exit 0 on GO (or nothing to back up), 1 on NO-GO")
+	root.AddCommand(snapshots, backup)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)
