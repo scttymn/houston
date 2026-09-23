@@ -6,6 +6,9 @@ Builds on build step 5 (docs/plans/volumes-backups.md): each snapshot holds the 
 
 ## Your direction (this replaces the spec's maintenance-page restore)
 "Default is zero-downtime. Add the ability to show a maintenance page for apps that need to prevent user access so data is not lost. If we choose to display a maintenance page and a deploy/rollback fails, then maintenance page continues to show until admin turns it off."
+Then: "We could simply think of a maintenance page as an out of band option for deploys. It can be displayed at any time but most appropriately during a deploy."
+
+So the maintenance page is **an out-of-band switch the admin turns on and off**. Houston never turns it on or off by itself: not when a deploy or restore starts, succeeds or fails. It stays up until an admin turns it off, whatever happens in between.
 
 ## Goal
 
@@ -14,7 +17,7 @@ Roll a project back to a snapshot, code and data together, **with no downtime by
 - The old code starts on it, passes its health check, and only then does traffic switch.
 - If anything fails before the switch, the current version is still serving on untouched data, the same rule deploys already follow.
 
-A project can instead show a **maintenance page** during deploys and restores, so nobody writes data that the restore would throw away. If the operation fails, the page stays up until an admin turns it off.
+An admin can put up a **maintenance page** at any time, usually around a deploy or restore, so nobody writes data a restore would throw away. Houston leaves it exactly as the admin set it.
 
 ## Scope
 
@@ -39,14 +42,10 @@ A project can instead show a **maintenance page** during deploys and restores, s
   8. **Clean up:** generation g's accessories and volumes are removed (a failure here is a warning; the restore stands)
   - **A failure in steps 1–6** removes whatever generation g+1 got. Generation g keeps serving, untouched, and the restore is NO-GO.
   - **Writes made to the live app while the restore runs:** the ones after the safety snapshot and before the switch (seconds) are lost. That's what the maintenance option is for.
-- **With the maintenance page:**
-  - `on` comes first, before step 1, and the safety snapshot is taken right after it. With nothing writing, nothing is lost.
-  - On GO the page comes down.
-  - On NO-GO it **stays up** until an admin turns it off (page, API, CLI). The project shows MAINTENANCE on the flight board, with why and since when.
-- **The maintenance page for deploys:** a project setting, "Show a maintenance page during deploys and restores" (off by default).
-  - A deploy with it on shows the page before the pre-deploy snapshot and takes it down on GO. On NO-GO it stays up.
-  - A restore's confirm page (and `houston restore --maintenance / --no-maintenance`) defaults to the setting and can override it for that restore.
-- **Manual maintenance:** turn the page on or off at any time (a planned migration, an incident): the project page, `PUT /api/v1/projects/:name/maintenance`, and `houston maintenance on|off`.
+- **The maintenance page** (out of band, the admin's switch):
+  - On or off at any time: the project page, `PUT /api/v1/projects/:name/maintenance`, `houston maintenance on|off`. The project shows MAINTENANCE on the flight board, with who turned it on and since when.
+  - **A deploy or restore never changes it.** If kamal-proxy drops the maintenance state when a new version is deployed (the spike checks), the runner puts it back right after the switch.
+  - A restore takes its safety snapshot just before the switch either way. With the page up, nothing was written after it; without it, only the seconds between snapshot and switch.
 
 ## Batches
 
@@ -58,17 +57,16 @@ A project can instead show a **maintenance page** during deploys and restores, s
    - generation 1 behaves exactly as today (the step 3–5 suites unchanged, plus tests at generation 2)
 3. **The data engine:** Mission Control's `RestoreData` into a given generation (volumes, SQLite, Postgres into the new generation's Postgres once it's ready), from the runner's request, with the manifest checked before anything is touched.
 4. **Asking for a restore:**
-   - the restore kind on deploys, and its snapshot and maintenance choice
-   - the Restore button on each snapshot and the confirm page (the design's, with the maintenance checkbox), `/api/v1`, and `houston restore <snapshot> --confirm <name> [--maintenance | --no-maintenance] [--follow]`
+   - the restore kind on deploys, and its snapshot
+   - the Restore button on each snapshot and the confirm page (the design's, noting whether the maintenance page is up), `/api/v1`, and `houston restore <snapshot> --confirm <name> [--follow]`
    - the preconditions: a linked repo, the snapshot in a location the project's backups used (the snapshot list reads all of them now), nothing queued or in flight
    - while a restore is queued or in flight: pushes don't queue deploys (the next check does), and backups wait (except its safety snapshot)
-5. **The runner's restore:** the steps above in Go, the generation switch, cleanup, every failure path, the maintenance rules, and the deploy page's restore steps.
-6. **The maintenance page during deploys:** the project setting, and the deploy flow (on before the pre-deploy snapshot, off on GO, left up on NO-GO).
-7. **The real run:** on OrbStack, restore the spike (Postgres, an NFS volume, SQLite) and equip, each with and without the maintenance page. It checks:
+5. **The runner's restore:** the steps above in Go, the generation switch, cleanup, every failure path, keeping the maintenance page as it was, and the deploy page's restore steps.
+6. **The real run:** on OrbStack, restore the spike (Postgres, an NFS volume, SQLite) and equip, with and without the maintenance page up. It checks:
    - the zero-downtime restore (every request through it answered by one version or the other)
    - the data rolled back
    - a failed restore leaving the current version serving
-   - a failed restore with maintenance leaving the page up until turned off
+   - the maintenance page staying up through a restore, a deploy, and a failed one, until it's turned off
    - restoring the safety snapshot to go back
    - a restore whose image was pruned
 
@@ -77,6 +75,7 @@ A project can instead show a **maintenance page** during deploys and restores, s
 ### Spike first (spec §14): `install/test/restore-spike.sh`
 On an OrbStack machine with Houston installed and the spike fixture deployed twice (two SHAs):
 - **Maintenance:**
+  - **Whether `kamal deploy` of another version clears kamal-proxy's maintenance state.** If it does, the runner re-applies it after the switch, since a deploy or restore never changes it.
   - Exactly what `kamal app maintenance` and `kamal app live` run against kamal-proxy (so Mission Control can do the same with `docker exec kamal-proxy …`), and the service name kamal-proxy knows the app by.
   - What a request gets in maintenance (status, body), including after `kamal deploy` of the other SHA while in maintenance.
   - That `live` brings it back.
@@ -93,39 +92,35 @@ The notes go into this file before Batch 1's code.
 ### Design (short)
 - **`projects`:**
   - `maintenance_since` (datetime, null = off)
-  - `maintenance_reason` (string: "turned on by admin", "restore #12 failed: …", "deploy #9 failed: …")
-  - `maintenance_during_changes` (bool, default false; used by Batches 5–6, but settable now)
+  - `maintenance_by` (which admin or API token turned it on)
 - **`Maintenance`** (Mission Control):
-  - `on!(project, reason:)` runs the kamal-proxy command the spike pins, through `DockerCommand`, then records `since` and `reason`.
+  - `on!(project, by:)` runs the kamal-proxy command the spike pins, through `DockerCommand`, then records `since` and `by`.
   - `off!(project)` runs the resume command, then clears them.
   - A failed command → an error, nothing recorded.
-  - "on" when already on keeps the first `since` and updates the reason.
+  - "on" when already on runs the command again (cheap, and it repairs a proxy that lost the state) and keeps the first `since`.
   - Refused before the app was ever deployed (kamal-proxy doesn't know it): "nothing deployed yet".
 - **The page:**
-  - a MAINTENANCE banner (since, why, "Turn it off")
+  - a MAINTENANCE banner (since, by whom, "Turn it off")
   - "Show maintenance page" (turning it on asks for confirmation: users see the page at once)
-  - the setting checkbox "Show a maintenance page during deploys and restores"
 - **The flight board:** a MAINTENANCE chip on the project's row.
 - **API:**
-  - `PUT /api/v1/projects/:name/maintenance {on: true|false}` → `{on, since, reason, during_changes}`
-  - `PATCH /api/v1/projects/:name/maintenance {during_changes: bool}`
+  - `PUT /api/v1/projects/:name/maintenance {on: true|false}` → `{on, since, by}`
   - `GET /api/v1/projects/:name` includes `maintenance`
 - **CLI:**
   - `houston maintenance` shows the state; `houston maintenance on|off` sets it
-  - `houston maintenance --during-changes on|off` sets the setting
   - `houston status` shows a `maintenance` line when it's on
 
 ### AC ↔ test map (Batch 1)
 | # | Acceptance criterion | Test | Lens |
 |---|---|---|---|
-| 1 | `on!` runs the spike's kamal-proxy command for the project's service, then records since and reason; `off!` resumes and clears; a failed command → error, nothing recorded; on while on keeps since | `models/maintenance_test.rb` `test "turning the maintenance page on and off"` | Contract, Atomicity |
+| 1 | `on!` runs the spike's kamal-proxy command for the project's service, then records since and by; `off!` resumes and clears; a failed command → error, nothing recorded; on while on runs it again and keeps since | `models/maintenance_test.rb` `test "turning the maintenance page on and off"` | Contract, Atomicity |
 | 2 | Refused before anything was deployed; the command never runs | `test "nothing to put in maintenance"` | Preconditions |
-| 3 | The page: the banner (since, why), on (confirmed) and off, the setting saved; signed out → sign-in, nothing run | `controllers/project_maintenance_test.rb` | Authz, Contract |
+| 3 | The page: the banner (since, by), on (confirmed) and off; signed out → sign-in, nothing run | `controllers/project_maintenance_test.rb` | Authz, Contract |
 | 4 | The flight board's MAINTENANCE chip | `controllers/projects_controller_test.rb` `test "a project in maintenance"` | Signals |
-| 5 | API: on/off, the setting, the project view's `maintenance`; unknown project 404; the runner token 401; a failed command → 502 with its words | `integration/api_v1_maintenance_test.rb` | Authz, Contract |
-| 6 | CLI: `houston maintenance` shows; `on`/`off`; `--during-changes on`; errors → exit 1; `status` shows it | `internal/cli` `TestMaintenance` | Contract |
+| 5 | API: on/off, the project view's `maintenance` (by = the token's name); unknown project 404; the runner token 401; a failed command → 502 with its words | `integration/api_v1_maintenance_test.rb` | Authz, Contract |
+| 6 | CLI: `houston maintenance` shows; `on`/`off`; errors → exit 1; `status` shows it | `internal/cli` `TestMaintenance` | Contract |
 
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
 2. **A restore needs a linked repo:** the runner fetches the snapshot's commit to build or run it. A project that was only ever deployed by hand (`houston deploy` on the server) has to be linked first (`houston link`), and the Restore button says so. OK?
-3. **One setting for both** deploys and restores ("Show a maintenance page during deploys and restores"), with a per-restore override on the confirm page and the CLI. Or would you rather have two separate settings?
+3. ~~One setting or two~~. **Answered:** no setting. The maintenance page is the admin's out-of-band switch, and deploys and restores never change it.
