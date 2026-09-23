@@ -1,0 +1,16 @@
+name: railsapp
+services:
+  app:
+    build: { context: ., target: dev }
+    ports: ["3000:3000"]
+    environment:
+      RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}
+    volumes:
+      - .:/rails
+      - storage:/rails/storage
+volumes:
+  storage:
+x-houston:
+  health: /up
+  commands: { console: bin/rails console, test: bin/rails test }
+  hooks: { release: bin/rails db:migrate }

@@ -423,7 +423,7 @@ func checkVolumeMounts(model *types.Project, app string, ps *problems) {
 func serviceHosts(model *types.Project, ps *problems) map[string]string {
 	hosts := map[string]string{}
 	for _, name := range model.ServiceNames() {
-		v := hostVar(name)
+		v := HostVar(name)
 		if other, taken := hosts[v]; taken {
 			ps.add("services", "services `%s` and `%s` both map to %s; rename one", other, name, v)
 			continue
@@ -433,7 +433,8 @@ func serviceHosts(model *types.Project, ps *problems) map[string]string {
 	return hosts
 }
 
-func hostVar(service string) string {
+// HostVar is the variable that names service's host: DB_HOST for db, MY_CACHE_HOST for my-cache.
+func HostVar(service string) string {
 	return strings.ToUpper(strings.ReplaceAll(service, "-", "_")) + "_HOST"
 }
 

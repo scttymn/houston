@@ -1,0 +1,32 @@
+service: railsapp
+image: railsapp
+servers:
+  web:
+    hosts:
+      - 127.0.0.1
+proxy:
+  hosts:
+    - railsapp.svnmns.com
+  ssl: false
+  app_port: 3000
+  healthcheck:
+    path: /up
+  run:
+    publish: false
+registry:
+  server: 127.0.0.1:5000
+  username: houston
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+builder:
+  arch: amd64
+ssh:
+  user: houston
+  keys_only: true
+  keys:
+    - /ssh/id_ed25519
+env:
+  secret:
+    - RAILS_MASTER_KEY
+volumes:
+  - railsapp_storage:/rails/storage

@@ -1,0 +1,53 @@
+service: phoenixapp
+image: phoenixapp
+servers:
+  web:
+    hosts:
+      - 127.0.0.1
+    options:
+      cpus: "2"
+      memory: 2g
+proxy:
+  hosts:
+    - phoenixapp.svnmns.com
+    - phoenixapp.com
+    - www.phoenixapp.com
+  ssl: false
+  app_port: 4000
+  healthcheck:
+    path: /health
+  run:
+    publish: false
+registry:
+  server: 127.0.0.1:5000
+  username: houston
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+builder:
+  arch: amd64
+ssh:
+  user: houston
+  keys_only: true
+  keys:
+    - /ssh/id_ed25519
+env:
+  clear:
+    PHX_HOST: phoenixapp.com
+    REDIS_URL: redis://phoenixapp-cache:6379
+  secret:
+    - DATABASE_URL:APP__DATABASE_URL
+    - SECRET_KEY_BASE
+volumes:
+  - phoenixapp_media:/media
+accessories:
+  cache:
+    image: redis:7
+    host: 127.0.0.1
+  db:
+    image: postgres:17
+    host: 127.0.0.1
+    env:
+      secret:
+        - POSTGRES_PASSWORD
+    volumes:
+      - phoenixapp_pgdata:/var/lib/postgresql/data

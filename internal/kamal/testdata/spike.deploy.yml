@@ -1,0 +1,55 @@
+service: spike
+image: spike
+servers:
+  web:
+    hosts:
+      - 127.0.0.1
+    options:
+      cpus: "0.5"
+      memory: 256m
+proxy:
+  hosts:
+    - spike.houston.test
+    - spike-alias.houston.test
+  ssl: false
+  app_port: 80
+  healthcheck:
+    path: /up
+  run:
+    publish: false
+registry:
+  server: 127.0.0.1:5000
+  username: houston
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+builder:
+  arch: arm64
+ssh:
+  user: houston
+  keys_only: true
+  keys:
+    - /ssh/id_ed25519
+env:
+  clear:
+    DB_HOST: spike-db
+    DOLLAR: cost $5
+    ERB: <%%= 1 + 1 %>
+    PLAIN: "a: b - c # {x} café"
+  secret:
+    - DATABASE_URL:APP__DATABASE_URL
+    - HOSTILE
+volumes:
+  - spike_data:/data
+accessories:
+  db:
+    image: postgres:17
+    host: 127.0.0.1
+    env:
+      secret:
+        - POSTGRES_PASSWORD
+    volumes:
+      - spike_pgdata:/var/lib/postgresql/data
+    options:
+      health-cmd: pg_isready -U postgres
+      health-interval: 2s
+      health-retries: "30"
