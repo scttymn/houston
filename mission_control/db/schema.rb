@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_000000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -32,11 +32,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
     t.string "kind", null: false
     t.integer "location_id", null: false
     t.text "log"
+    t.string "operation", default: "backup", null: false
     t.integer "project_id", null: false
     t.string "reason", null: false
     t.date "scheduled_for"
     t.string "sha"
     t.string "snapshot_id"
+    t.string "source_snapshot_id"
     t.datetime "started_at"
     t.string "status", default: "queued", null: false
     t.string "token_digest", default: "", null: false
@@ -44,6 +46,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
     t.index ["location_id"], name: "index_backup_runs_on_location_id"
     t.index ["project_id", "created_at"], name: "index_backup_runs_on_project_id_and_created_at"
     t.index ["project_id", "deploy_number"], name: "index_backup_runs_one_per_deploy", unique: true, where: "reason = 'deploy'"
+    t.index ["project_id", "deploy_number"], name: "index_backup_runs_one_restore_per_deploy", unique: true, where: "operation = 'restore'"
     t.index ["project_id", "scheduled_for"], name: "index_backup_runs_one_scheduled_per_day", unique: true, where: "scheduled_for IS NOT NULL"
     t.index ["project_id"], name: "index_backup_runs_on_project_id"
     t.index ["project_id"], name: "index_backup_runs_one_queued_manual", unique: true, where: "status = 'queued' AND reason = 'manual'"
@@ -56,12 +59,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
     t.datetime "finished_at"
     t.integer "generation", default: 1, null: false
     t.datetime "heartbeat_at", null: false
+    t.string "kind", default: "deploy", null: false
     t.text "log", default: "", null: false
     t.integer "number", null: false
     t.integer "project_id", null: false
     t.string "ref", null: false
     t.string "runner"
     t.string "sha", null: false
+    t.integer "source_location_id"
+    t.string "source_snapshot_id"
     t.string "status", default: "in_flight", null: false
     t.string "step"
     t.string "token_digest", null: false
@@ -70,6 +76,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
     t.index ["project_id"], name: "index_deploys_on_project_id"
     t.index ["project_id"], name: "index_deploys_one_in_flight", unique: true, where: "status = 'in_flight'"
     t.index ["project_id"], name: "index_deploys_one_queued", unique: true, where: "status = 'queued'"
+    t.index ["source_location_id"], name: "index_deploys_on_source_location_id"
   end
 
   create_table "installations", force: :cascade do |t|
@@ -217,6 +224,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_240000) do
   add_foreign_key "backup_runs", "projects"
   add_foreign_key "backup_runs", "storage_locations", column: "location_id"
   add_foreign_key "deploys", "projects", on_delete: :cascade
+  add_foreign_key "deploys", "storage_locations", column: "source_location_id"
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
   add_foreign_key "project_volumes", "projects"
   add_foreign_key "project_volumes", "storage_locations", column: "location_id"

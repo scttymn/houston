@@ -7,7 +7,9 @@ class BackupRun < ApplicationRecord
   NOTHING_DEPLOYED = "nothing deployed yet"
 
   STATUSES = %w[queued running go no_go skipped].freeze
-  KINDS = %w[auto deploy].freeze
+  KINDS = %w[auto deploy restore].freeze
+  # backup: a snapshot; restore: a restore deploy's data put back from one.
+  OPERATIONS = %w[backup restore].freeze
   REASONS = %w[schedule manual deploy restore].freeze
   # BackupJob beats every 15 s; after this long without a word, the run is
   # abandoned and the project's next backup may start.
@@ -20,6 +22,7 @@ class BackupRun < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
   validates :kind, inclusion: { in: KINDS }
   validates :reason, inclusion: { in: REASONS }
+  validates :operation, inclusion: { in: OPERATIONS }
 
   scope :running, -> { where(status: "running") }
 
@@ -48,6 +51,23 @@ class BackupRun < ApplicationRecord
     run
   rescue ActiveRecord::RecordNotUnique
     project.backup_runs.find_by!(same)
+  end
+
+  # Queues the data restore of a restore deploy: its snapshot, from its
+  # location, into the generation it builds. One per restore deploy; a retry
+  # gets the same run.
+  def self.request_restore!(deploy)
+    project = deploy.project
+    run = transaction do
+      project.backup_runs.find_by(operation: "restore", deploy_number: deploy.number) ||
+        project.backup_runs.create!(operation: "restore", kind: "restore", reason: "restore", deploy_number: deploy.number,
+                                    source_snapshot_id: deploy.source_snapshot_id, location: deploy.source_location,
+                                    status: "queued", heartbeat_at: Time.current)
+    end
+    BackupJob.perform_later(run) if run.previously_new_record?
+    run
+  rescue ActiveRecord::RecordNotUnique
+    project.backup_runs.find_by!(operation: "restore", deploy_number: deploy.number)
   end
 
   # Flips run from queued to running with a new token, only if it's still

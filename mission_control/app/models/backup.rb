@@ -4,28 +4,16 @@
 # volumes and the staging volume together. The staging volume and helper
 # containers are removed on every path. Secrets reach docker only through
 # its environment.
-class Backup
-  DEADLINE = 3.hours
-  class_attribute :heartbeat_every, default: 15.seconds
-
-  WRITE = 'mkdir -p "$(dirname "$1")" && cat > "$1"'
+class Backup < DataRun
   LIST_DATABASES = %q(psql -U "${POSTGRES_USER:-postgres}" -d postgres -Atc "select encode(convert_to(datname, 'UTF8'), 'hex') from pg_database where not datistemplate order by datname")
   PG_DUMP = 'pg_dump -U "${POSTGRES_USER:-postgres}" -Fc -d "$1"'
   PG_GLOBALS = 'pg_dumpall -U "${POSTGRES_USER:-postgres}" --globals-only'
   # restic reports files it couldn't read; a run lists this many.
   UNREADABLE_SHOWN = 20
 
-  class Failed < StandardError; end
-  class TimedOut < StandardError; end
-
   def initialize(run, token)
-    @run = run
-    @token = token
-    @project = run.project
+    super
     @serving = @project.serving_generation
-    @location = run.location
-    @warnings = []
-    @log = +""
   end
 
   def call
@@ -33,10 +21,9 @@ class Backup
       return finish("skipped", error: "nothing to back up (no named volumes, no Postgres)")
     end
 
-    @started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @sha = @project.running_deploy&.sha || "unknown"
     @run.begin!(@token, sha: @sha)
-    with_heartbeat { back_up }
+    run_steps("backup") { back_up }
   end
 
   private
@@ -51,24 +38,6 @@ class Backup
                 "sqlite" => sqlite.map { |s| s.slice("volume", "path") } }
       finish("go", error: @warnings.presence&.join("; "), snapshot_id:, bytes:, found:)
       Snapshots.forget_cache(@project, @location)
-    rescue Failed => e
-      finish("no_go", error: e.message)
-    rescue TimedOut
-      clean_up("rm", "-f", *containers)
-      finish("no_go", error: "took longer than #{DEADLINE.inspect}; stopped")
-    rescue StandardError => e
-      # A bug or a surprise: the run still finishes (the job then fails loudly).
-      finish("no_go", error: "Houston failed during the backup: #{e.class}: #{e.message}")
-      raise
-    ensure
-      clean_up("volume", "rm", "-f", staging)
-    end
-
-    def prepare
-      docker("rm", "-f", *containers)
-      docker("volume", "rm", "-f", staging)
-      created = docker("volume", "create", staging)
-      raise Failed, "couldn't create the staging volume: #{tail(created.output)}" unless created.success
     end
 
     def dump_postgres(service, image)
@@ -91,10 +60,6 @@ class Backup
       raise Failed, "pg_dumpall --globals-only of #{service} failed: #{tail(dumped.output)}" unless dumped.success
       { service:, image:, globals:, databases: }
     end
-
-    # A libpq connection string naming the database, so a name with "=" or
-    # a URI prefix can't be read as connection options.
-    def conninfo(name) = "dbname='#{name.b.gsub(/[\\']/) { "\\#{$&}" }}'"
 
     def copy_sqlite
       mounts = @project.volumes.flat_map { |v| [ "-v", "#{@serving.volume(v["name"])}:/data/#{v["name"]}" ] }
@@ -157,36 +122,6 @@ class Backup
       @warnings << "old snapshots weren't forgotten: #{tail(ran.output)}" unless ran.success
     end
 
-    def finish(status, **fields)
-      Rails.logger.warn("backup of #{@project.name}: run #{@run.id} was taken over; not finishing it") unless
-        @run.finish!(@token, status:, log: @log, **fields)
-    end
-
-    # Each command gets what's left of the deadline; a timeout (exit 124)
-    # stops the whole backup.
-    def docker(*args, env: {}, stdin: nil)
-      @log << "$ docker #{args.first(4).join(" ")} …\n"
-      result = DockerCommand.run(*args, env:, stdin:, timeout: remaining)
-      raise TimedOut if result.code == 124
-      result
-    end
-
-    # Cleanup runs even after the deadline, briefly, and never raises.
-    def clean_up(*args) = DockerCommand.run(*args, timeout: 60)
-
-    def pipe(from, to)
-      @log << "$ docker #{from.first(3).join(" ")} … | docker run … #{to.last}\n"
-      result = DockerCommand.pipe(from, to, timeout: remaining)
-      raise TimedOut if result.code == 124
-      result
-    end
-
-    def remaining
-      left = (DEADLINE - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @started)).to_i
-      raise TimedOut if left < 1
-      left
-    end
-
     # Helpers run as root: the staging volume is root's, and the app's volumes
     # belong to whoever the app runs as (Mission Control's image is uid 1000).
     def write_to(file) = [ "run", "--rm", "-i", "--name", container(:write), "--user", "0", "-v", "#{staging}:/out", "--entrypoint", "sh", tools, "-c", WRITE, "sh", "/out/#{file}" ]
@@ -195,20 +130,4 @@ class Backup
     def staging = "houston-backup.#{@project.name}"
     def container(role) = "houston-backup.#{@project.name}.#{role}"
     def containers = %i[sqlite restic write].map { |role| container(role) }
-    def tools = ENV.fetch("HOUSTON_TOOLS_IMAGE", "houston/mission-control:local")
-
-    def tail(output) = output.to_s.lines.reject { |l| l.start_with?('{"message_type":"status"') }.last(20).join.strip.truncate(2000)
-
-    # The run's heartbeat, from a thread, while the backup runs.
-    def with_heartbeat
-      beat = Thread.new do
-        loop do
-          sleep heartbeat_every
-          ActiveRecord::Base.connection_pool.with_connection { @run.heartbeat!(@token) }
-        end
-      end
-      yield
-    ensure
-      beat&.kill&.join
-    end
 end

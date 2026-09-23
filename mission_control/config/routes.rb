@@ -37,6 +37,8 @@ Rails.application.routes.draw do
     patch "deploys/:id", to: "deploys#update"
     post "deploys/:id/snapshot", to: "snapshots#create"
     get "deploys/:id/snapshot", to: "snapshots#show"
+    post "deploys/:id/restore_data", to: "restore_data#create"
+    get "deploys/:id/restore_data", to: "restore_data#show"
     post "runner/jobs/claim", to: "runner_jobs#claim"
 
     namespace :v1 do

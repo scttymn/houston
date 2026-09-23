@@ -267,6 +267,63 @@ Doing these by hand would mean rebuilding half of `houston deploy` (Kamal's secr
   - Rails: placement ignoring the generation; backups reading generation 1; claims ignoring the generation; sync not saying it.
 - **Not checked, and not needed:** whether `kamal deploy --skip-push` pulls a missing image by itself. Batch 6's runner pulls it explicitly before the switch.
 
+## Batch 4: The data engine
+
+### Design (short)
+- **`DataRun`,** a base class shared with `Backup`: the deadline (each command gets what's left of 3 hours; exit 124 stops the run), the heartbeat thread, cleanup that never raises, the guarded finish, and the output's tail. `Backup` becomes a `DataRun`; its tests pass unchanged.
+- **`deploys`** gains `kind` (`deploy` | `restore`), `source_snapshot_id` and `source_location_id` (what a restore reads). A restore's `generation` is the one it builds, g+1. Batch 5 fills these from the request; here they're set directly.
+- **`backup_runs`** gains `operation` (`backup` | `restore`) and `source_snapshot_id`, with one restore run per restore deploy (a unique index on the deploy number, operation restore). `BackupJob` runs `RestoreData` for a restore, on the `snapshots` queue (a runner waits on it). One running run per project still holds, so a restore never overlaps a backup of that project.
+- **Runner API** (the restore deploy's token, in flight, kind restore): `POST /api/deploys/:id/restore_data` → 202 with the run (a retry gets the same run); `GET` → the run.
+- **`RestoreData`** into generation g+1 (the runner has booted g+1's accessories first, Batch 6):
+  1. **Place** g+1's app volumes (`VolumePlacement` for that generation; idempotent).
+  2. **Clean up** leftovers (exact names `houston-restore.<name>.<role>`); recreate staging `houston-restore.<name>`.
+  3. `restic restore <snapshot> --target /restore` into staging, with the source location's repository and the cache.
+  4. **Read and check the manifest** (`/restore/out/houston.json`):
+     - its project is this one
+     - its `sha` is the restore's commit
+     - every file is in Houston's own form (`postgres/<service>/<n>.dump`, `postgres/<service>/globals.sql`, `sqlite/<n>.sqlite3`)
+     - every SQLite path is relative, with no `..`
+     - every volume is one the project has
+     Otherwise it's NO-GO, before any volume or database is touched.
+  5. **Each volume** (a root helper with g+1's volume at `/v`, staging read-only): empty it (`find /v -mindepth 1 -delete`), copy the snapshot's files (`cp -a`), then put each SQLite copy at its path and remove any `-wal`, `-shm` and `-journal`. Names and paths go as argv.
+  6. **Each Postgres service** (g+1's container):
+     - wait for `pg_isready` (up to 60 s)
+     - roles from `globals.sql` (psql without stop-on-error: roles that exist are fine)
+     - then each database: `dropdb --force --if-exists` and `createdb`, with `--maintenance-db=template1` and the name after `--`, then the dump piped into `pg_restore --no-owner --role=<user> -d "dbname='<escaped>'"`
+  7. Remove staging (always). GO with what was restored; NO-GO with the step and the tail.
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The commands in order: g+1's placement, cleanup, staging, restic restore (env-only secrets, cache, repo), the manifest read, per volume empty + copy + SQLite into place with -wal/-shm/-journal removed, pg_isready, roles, drop/create/pg_restore per database (the hostile name as argv and conninfo), staging removed; GO with what was restored | `models/restore_data_test.rb` `test "a restore, step by step"` | Contract |
+| 2 | A bad manifest (missing, not JSON, another project, another SHA, a file outside Houston's form, `..` in a SQLite path, an unknown volume) → NO-GO, and nothing emptied or dropped | `test "the manifest is checked before anything is touched"` | Contract (hostile input) |
+| 3 | restic failing, a copy failing, pg_restore failing → NO-GO naming the step; staging removed | `test "a failing step stops the restore and cleans up"` | Crash & repair, Signals |
+| 4 | The runner API: 202 and one run per restore deploy (a retry gets it); a wrong token 403, not in flight 409, not a restore 422, a personal token 401, through Cloudflare 404 | `integration/api_restore_data_test.rb` | Authz, At-least-once |
+| 5 | A second delivery → `restic restore` once; the job is on `snapshots` | `jobs/backup_job_test.rb` | At-least-once |
+| 6 | `Backup` unchanged as a `DataRun` (its suite green); the migrations: `operation` backup, `kind` deploy for every existing row | the existing suites, `models/deploy_test.rb` | Migrate |
+
+### Done (Batch 4)
+- **Red:** Mission Control had 7 errors in the new tests. **Green:** Mission Control 248 runs and the Go suite. The migration runs down and up. rubocop is clean.
+- **`DataRun`** now holds what `Backup` and `RestoreData` share. `Backup`'s suites passed unchanged after the move, including the heartbeat and unexpected-error tests.
+- **Found on the way:**
+  - **The superuser's password (design, before code):** restoring a snapshot's roles also restores the superuser's old password hash. If `POSTGRES_PASSWORD` was rotated since, the app couldn't connect after the switch. The restore sets it back to the container's own `POSTGRES_PASSWORD`, through psql's `:'pw'` quoting on stdin.
+  - **Never into the serving generation (from the review, red first):** pointed at the serving generation by a wrong deploy row, `RestoreData` went GO. It would have emptied the live volumes and dropped the live databases. It now refuses before anything, as defense in depth for Batch 6.
+  - A test assertion that could never fail (it concatenated the constant it checked) was fixed.
+- **A real smoke test** against `postgres:17` and a real shell, with the exact command strings:
+  - the database `we'ird=db` dropped and recreated, and restored from its dump (the row written after the dump is gone)
+  - the roles applied, and the superuser's hostile password (`it's"pw$x`) still logging in after the password step
+  - the fill script emptying the volume, copying the files, and putting the SQLite file at a path with a space, with its stale `-wal` removed
+  - (My first attempt at the smoke test was broken by zsh's 1-based arrays; the second ran it as a bash script.)
+- **Mutations, each caught:**
+  - another commit's snapshot accepted
+  - any staged file accepted
+  - SQLite paths allowed to climb
+  - restoring into the serving generation
+  - the password not kept
+  - restore data for a plain deploy
+  - the job always backing up
+- **For Batch 6:** the safety snapshot is reason `restore` (spec §9), so it needs its own one-per-restore guarantee. The existing unique index covers reason `deploy` only.
+
 ## Decisions (yours)
 1. ~~When a restore fails after the maintenance page is up~~. **Answered:** zero-downtime by default; a maintenance page is an option; after a failure with it, it stays up until an admin turns it off.
 2. **A restore uses the project's linked repo.** Answered: "Every app will have a linked repo, so I assume it would use the same repo." The runner fetches the snapshot's commit from it with the project's deploy key, as a deploy does. A project without a repo (only ever deployed by hand) can't be restored until it's linked, and the Restore button says so. That's an edge, not the normal path.

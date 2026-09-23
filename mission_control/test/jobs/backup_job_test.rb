@@ -75,4 +75,19 @@ class BackupJobTest < ActiveJob::TestCase
     workers = YAML.load(ERB.new(Rails.root.join("config/queue.yml").read).result, aliases: true).dig("production", "workers")
     assert_includes workers, { "queues" => [ "snapshots" ], "threads" => 2, "processes" => 1, "polling_interval" => 1 }
   end
+
+  test "a restore run's second delivery restores once" do
+    restore, = Deploy.start!(@project, sha: "a" * 40, ref: "refs/heads/main")
+    restore.update!(kind: "restore", source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas), generation: 2)
+    run = BackupRun.request_restore!(restore)
+    assert_equal "snapshots", BackupJob.new(run).queue_name
+    manifest = { version: 1, project: "equip", sha: "a" * 40, volumes: [], postgres: [], sqlite: [] }.to_json
+    fake = FakeDocker.new do |args|
+      next DockerCommand::Result.new(success: true, output: manifest) if args.last == "/restore/out/houston.json"
+      failure("no such volume\n") if args[0..2] == [ "volume", "inspect", "--format" ]
+    end
+    use_fake_docker(fake) { 2.times { BackupJob.perform_now(run) } }
+    assert_equal 1, fake.calls.count { |c| c.args.include?("restore") && c.args.include?(StorageLocation::RESTIC_IMAGE) }
+    assert_equal "go", run.reload.status
+  end
 end

@@ -52,4 +52,12 @@ class DeployTest < ActiveSupport::TestCase
     claimed, = Deploy.claim!(queued, runner: "houston-runner-1")
     assert_equal 4, claimed.generation, "a queued deploy takes the generation when it's claimed"
   end
+
+  test "every deploy is a deploy until a restore says otherwise" do
+    equip = Project.create!(name: "equip", app_service: "app", services: %w[app], health: "/up", port: 80)
+    deploy, = Deploy.start!(equip, sha: "a" * 40, ref: "refs/heads/main")
+    assert_equal "deploy", deploy.kind
+    assert_nil deploy.source_snapshot_id
+    assert_equal "backup", BackupRun.new.operation
+  end
 end

@@ -21,6 +21,11 @@ class Deploy < ApplicationRecord
   TRUNCATED = "\n[log truncated: Houston keeps the first 4 MiB of a deploy's log]\n".freeze
 
   belongs_to :project
+  # A restore reads its snapshot from here.
+  belongs_to :source_location, class_name: "StorageLocation", optional: true
+
+  KINDS = %w[deploy restore].freeze
+  validates :kind, inclusion: { in: KINDS }
 
   validates :sha, format: { with: /\A[0-9a-f]{40}\z/, message: "must be a full commit SHA (40 lowercase hex characters)" }
   validates :ref, presence: true, length: { maximum: 255 }
@@ -124,6 +129,7 @@ class Deploy < ApplicationRecord
   end
 
   def in_flight? = status == "in_flight"
+  def restore? = kind == "restore"
 
   # Applies one progress report. The caller has checked ownership inside the
   # same transaction. The log is appended in SQL, so a 4 MiB log isn't read
