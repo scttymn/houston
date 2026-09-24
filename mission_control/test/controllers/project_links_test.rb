@@ -236,6 +236,20 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # A draft started before drafts made webhook secrets gets one at its read,
+  # so step 04 never shows a blank secret that Save would then replace.
+  test "an older draft gets its webhook secret at the read" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      RepoLink.sole.update_columns(webhook_secret: nil)
+      read
+      shown = css_select(".link-webhook [data-webhook-secret]").first.text.strip
+      assert_operator shown.length, :>=, 43
+      post link_path
+      assert_equal shown, Project.find_by!(name: "garage").webhook_secret
+    end
+  end
+
   test "Deploy saves then deploys; a failed read still saves" do
     use_fake_git(FakeGit.new(&responder)) do
       check

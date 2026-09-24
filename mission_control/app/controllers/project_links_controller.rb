@@ -29,7 +29,8 @@ class ProjectLinksController < ApplicationController
     return render :new, status: :unprocessable_entity unless @link.valid?
 
     result = GitRemote.read(@link)
-    @link.update!(preview: result.inspection, preview_sha: result.sha)
+    # A draft from before drafts made webhook secrets gets one now (step 04 shows it).
+    @link.update!(preview: result.inspection, preview_sha: result.sha, webhook_secret: @link.webhook_secret.presence || SecureRandom.urlsafe_base64(32))
     @problems = result.problems
     render :new, status: result.ok ? :ok : :unprocessable_entity
   end
