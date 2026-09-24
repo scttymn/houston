@@ -26,7 +26,7 @@
       <% @snapshots.each do |snapshot| %>
         <div class="snapshots__row" data-snapshot="<%= snapshot.short_id %>">
           <span class="snapshots__when">
-            <span><%= l(snapshot.time, format: :short) %></span>
+            <span><%= l(snapshot.time.in_time_zone, format: :short) %></span>
             <small><%= { "manual" => "created by hand", "schedule" => "daily", "restore" => "before a restore" }.fetch(snapshot.reason) { snapshot.deploy ? "before deploy ##{snapshot.deploy}" : snapshot.reason } %></small>
           </span>
           <span class="mono"><%= snapshot.sha.to_s.first(7) %></span>

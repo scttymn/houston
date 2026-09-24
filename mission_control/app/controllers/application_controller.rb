@@ -10,7 +10,15 @@ class ApplicationController < ActionController::Base
   # a signed-in admin is taken to the next unfinished setup step.
   prepend_before_action :require_setup
 
+  # Every time shows in the zone chosen in Settings (backup schedules run in
+  # it too), read per request, so a change shows on the next page.
+  around_action :use_installation_time_zone
+
   private
+    def use_installation_time_zone(&)
+      Time.use_zone(Installation.current.zone, &)
+    end
+
     def require_setup
       return redirect_to(setup_path) unless User.exists?
       return if controller_name == "sessions"

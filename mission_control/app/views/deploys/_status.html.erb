@@ -11,10 +11,10 @@
     </div>
     <div class="deploy-head__clock">
       <% if deploy.status.in?(%w[queued in_flight]) %>
-        <span class="mono eyebrow">MISSION ELAPSED · STARTED <%= deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+        <span class="mono eyebrow">MISSION ELAPSED · STARTED <%= deploy.created_at.in_time_zone.strftime("%H:%M:%S %Z") %></span>
         <span class="disp deploy-head__elapsed"><%= mission_elapsed(deploy.duration) %></span>
       <% else %>
-        <span class="mono eyebrow">TOOK · STARTED <%= deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+        <span class="mono eyebrow">TOOK · STARTED <%= deploy.created_at.in_time_zone.strftime("%H:%M:%S %Z") %></span>
         <span class="disp deploy-head__elapsed"><%= duration_words(deploy.duration) %></span>
       <% end %>
     </div>

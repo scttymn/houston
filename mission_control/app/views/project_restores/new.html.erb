@@ -5,7 +5,7 @@
     <div class="mono restore__banner"><span>RESTORE · WHOLE PROJECT</span><span>CODE + DATA</span></div>
     <div class="restore__body">
       <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <%= link_to @project.name, project_path(@project.name) %> <span>/</span> <span class="crumbs__here">Restore</span></nav>
-      <h1 class="disp" id="restore-title">Roll <%= @project.name %> back to <%= l(@snapshot.time, format: :short) %>?</h1>
+      <h1 class="disp" id="restore-title">Roll <%= @project.name %> back to <%= l(@snapshot.time.in_time_zone, format: :short) %>?</h1>
 
       <div class="restore-compare">
         <span></span><span class="mono restore-compare__head">NOW</span><span></span><span class="mono restore-compare__head">AFTER RESTORE</span>
@@ -16,14 +16,14 @@
         <span class="mono restore-compare__label">DATA</span>
         <span>Live</span>
         <span class="restore-compare__arrow">→</span>
-        <span class="restore-compare__after"><%= l(@snapshot.time, format: :short) %> · <%= @snapshot.kind %> · <%= @snapshot.bytes ? number_to_human_size(@snapshot.bytes) : "—" %> <small class="mono">(<%= @snapshot.short_id %>, <%= @location.name %>)</small></span>
+        <span class="restore-compare__after"><%= l(@snapshot.time.in_time_zone, format: :short) %> · <%= @snapshot.kind %> · <%= @snapshot.bytes ? number_to_human_size(@snapshot.bytes) : "—" %> <small class="mono">(<%= @snapshot.short_id %>, <%= @location.name %>)</small></span>
       </div>
 
       <div class="restore-note">
         <span class="mono">NOTE</span>
         <span>
           <%= @project.name %> keeps serving while the snapshot is restored beside it; traffic switches only once the restored version passes its health check.
-          Anything written after <%= l(@snapshot.time, format: :short) %> is replaced; a safety snapshot is taken just before the switch.
+          Anything written after <%= l(@snapshot.time.in_time_zone, format: :short) %> is replaced; a safety snapshot is taken just before the switch.
           <% if @project.maintenance? %>
             The maintenance page is up, so nothing is being written meanwhile.
           <% else %>

@@ -15,7 +15,7 @@
           <span>RUNNERS <%= live %>/<%= expected %> <%= status_word(live >= expected) %></span>
         <% end %>
         <span>REGISTRY <%= status_word(SystemStatus.registry_up?) %></span>
-        <span class="status__clock"><%= Time.now.utc.strftime("%H:%M UTC") %></span>
+        <span class="status__clock"><%= Time.current.strftime("%H:%M %Z") %></span>
       </div>
     <% end %>
     <%= button_to "Sign out", session_path, method: :delete, class: "topbar__signout" %>

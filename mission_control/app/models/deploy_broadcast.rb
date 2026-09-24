@@ -3,6 +3,11 @@
 # after the report's transaction commits.
 module DeployBroadcast
   def self.progress(deploy, appended: nil, changed: true)
+    Time.use_zone(Installation.current.zone) { broadcast(deploy, appended:, changed:) }
+  end
+
+  # Rendered in the Settings zone, as the page itself is (ApplicationController).
+  def self.broadcast(deploy, appended:, changed:)
     if appended.present?
       Turbo::StreamsChannel.broadcast_append_to(deploy, target: "deploy_log", html: ERB::Util.html_escape(appended))
     end
