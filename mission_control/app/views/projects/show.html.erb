@@ -69,7 +69,7 @@
   </div>
 
   <%# Alphabetical, to scan; the sections below are in the same order. %>
-  <% sections = [ [ "Backup plan", "backup-plan" ] ] %>
+  <% sections = [] %>
   <% sections << [ "Connect pushes", "webhook" ] if @project.repo_url.present? %>
   <% sections << [ "Deploy history", "history" ] %>
   <% sections << [ "Maintenance page", "maintenance" ] unless @project.maintenance? %>
@@ -78,38 +78,6 @@
   <div class="project-layout">
     <%= render "shared/section_nav", label: "Project sections", items: sections %>
     <div class="project-sections">
-    <section class="panel backup-plan" id="backup-plan">
-      <div class="panel__head">
-        <h2 class="disp panel__title">Backup plan</h2>
-        <span class="panel__meta muted">Edit in compose.yml</span>
-      </div>
-      <dl class="plan">
-        <dt class="mono">SCHEDULE</dt><dd><%= BackupSchedule.new(@project, @installation.zone).words %>, plus Create Snapshot</dd>
-        <dt class="mono">STORAGE</dt>
-        <dd>
-          <%= form_with url: project_backup_target_path(@project.name), method: :patch, class: "inline-form" do |f| %>
-            <% default = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
-            <%= f.select :location, [ [ "#{default&.name || "none yet"} (default)", "" ] ] + StorageLocation.where.not(acknowledged_at: nil).where.not(id: default&.id).order(:name).map { |l| [ l.name, l.name ] },
-                         { selected: @project.chosen_backup_location&.acknowledged? ? @project.chosen_backup_location.name : "" }, "aria-label": "Backup storage" %>
-            <%= f.submit "Save", class: "button button--small" %>
-          <% end %>
-          <small class="muted">Backing up to <span class="mono"><%= @storage&.name || "none yet" %></span>. Earlier snapshots stay where they were written.</small>
-        </dd>
-        <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
-        <dt class="mono">VOLUMES</dt>
-        <dd class="plan__list"><% if @project.volumes.empty? %>none<% end %><% @project.volumes.each do |volume| %><span><span class="mono"><%= volume["name"] %></span> → <%= volume["path"] %></span><% end %></dd>
-        <dt class="mono">DATABASES</dt>
-        <dd class="plan__list">
-          <% @project.databases.each do |db| %><span><span class="mono"><%= db["service"] %></span> · pg_dump</span><% end %>
-          <% @last_good_backup&.found.to_h.fetch("sqlite", []).each do |file| %><span><span class="mono"><%= file["path"] %></span> · .backup</span><% end %>
-          <% if @project.databases.empty? && @last_good_backup&.found.to_h.fetch("sqlite", []).blank? %><span>none found yet</span><% end %>
-        </dd>
-        <% if @project.not_backed_up.any? %>
-          <dt class="mono">NOT BACKED UP</dt><dd class="muted"><span class="mono"><%= @project.not_backed_up.join(", ") %></span> · start empty after a restore</dd>
-        <% end %>
-      </dl>
-    </section>
-
     <% if @project.repo_url.present? %>
       <section class="panel webhook" id="webhook">
         <div class="panel__head"><h2 class="disp panel__title">Connect pushes</h2><span class="panel__meta muted">In the repo's webhook settings</span></div>
@@ -243,12 +211,12 @@
         <span class="panel__meta">
           <% if @storage %>
             <span class="mono eyebrow"><%= @storage.name %></span>
-            <%= button_to "Create Snapshot", project_backups_path(@project.name), class: "button button--primary button--small" %>
+            <%= button_to "Create", project_backups_path(@project.name), class: "button button--primary button--small", title: "Take a snapshot of #{@project.name} now: code and data" %>
           <% end %>
         </span>
       </div>
       <% if @storage %><%= render "projects/backup_run", run: @backup %><% end %>
-      <%= turbo_frame_tag "snapshots-list", src: project_snapshots_path(@project.name), loading: :lazy do %>
+      <%= turbo_frame_tag "snapshots-list", src: project_snapshots_path(@project.name, kind: params[:snapshots].presence_in(%w[deploy settings])), loading: :lazy do %>
         <p class="panel__row panel__row--muted">Reading the snapshots…</p>
       <% end %>
     </section>

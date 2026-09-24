@@ -1,8 +1,10 @@
 require "test_helper"
 require_relative "../support/project_helpers"
+require_relative "../support/fake_docker"
 
 class ProjectBackupsTest < ActionDispatch::IntegrationTest
   include ProjectHelpers
+  include FakeDockerHelper
   include ActiveJob::TestHelper
 
   setup do
@@ -14,7 +16,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
   test "create snapshot" do
     sign_in_as users(:one)
     get project_path("equip")
-    assert_select ".snapshots .panel__head form[action='/projects/equip/backups'] button", "Create Snapshot"
+    assert_select ".snapshots .panel__head form[action='/projects/equip/backups'] button", "Create"
 
     assert_enqueued_jobs(1, only: BackupJob) do
       post project_backups_path("equip")
@@ -75,18 +77,28 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
                                  found: { "databases" => [], "sqlite" => [ { "volume" => "storage", "path" => "production.sqlite3" } ] })
     @project.backup_runs.create!(location: storage_locations(:unas), kind: "auto", reason: "manual", status: "no_go", heartbeat_at: Time.current, found: {})
 
+    # The plan is Snapshots' Settings tab, not a section of its own.
     get project_path("equip")
     assert_select "turbo-frame#snapshots-list[src='/projects/equip/snapshots'][loading=lazy]"
-    assert_select ".backup-plan", /7 scheduled · 3 pre-deploy/
+    assert_select ".backup-plan", 0
+    assert_select ".section-nav a[href='#backup-plan']", 0
+
     Installation.current.update!(time_zone: "Europe/Berlin")
     @project.update!(backup_schedule: "daily 22:15")
-    get project_path("equip")
-    assert_select ".backup-plan", %r{Daily at 22:15 \(Europe/Berlin\)}
-    assert_select ".backup-plan", /unas-nfs/
-    assert_select ".backup-plan", %r{storage.*/rails/storage}m
-    assert_select ".backup-plan", /db.*pg_dump/m
-    assert_select ".backup-plan", /production\.sqlite3.*\.backup/m
-    assert_select ".backup-plan", /NOT BACKED UP.*cache/m
+    # Settings doesn't read the repository: it shows even when that's slow or failing.
+    fake = FakeDocker.new { raise "the Settings tab listed the repository" }
+    use_fake_docker(fake) { get project_snapshots_path("equip", kind: "settings") }
+    assert_response :success
+    assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", /Settings/
+    plan = "#snapshots-list .snapshot-settings"
+    assert_select plan, /Edit in compose\.yml/
+    assert_select plan, /7 scheduled · 3 pre-deploy/
+    assert_select plan, %r{Daily at 22:15 \(Europe/Berlin\)}
+    assert_select plan, /unas-nfs/
+    assert_select plan, %r{storage.*/rails/storage}m
+    assert_select plan, /db.*pg_dump/m
+    assert_select plan, /production\.sqlite3.*\.backup/m
+    assert_select plan, /NOT BACKED UP.*cache/m
   end
 
   test "choosing a project's backup target" do
@@ -94,13 +106,17 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     offsite = StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "sm" }, restic_password: "pw", verified_at: Time.current, acknowledged_at: Time.current)
     StorageLocation.create!(name: "later", kind: "b2", settings: { "bucket" => "sm2" }, restic_password: "pw", verified_at: Time.current)
 
-    get project_path("equip")
-    assert_select ".backup-plan select[name=location] option", 2 # the default, b2-offsite
+    get project_snapshots_path("equip", kind: "settings")
+    assert_select ".snapshot-settings select[name=location] option", 2 # the default, b2-offsite
+    assert_select ".snapshot-settings form[data-turbo-frame=_top]"
     patch project_backup_target_path("equip"), params: { location: "b2-offsite" }
-    assert_redirected_to project_path("equip")
+    # Back on the Settings tab, where the choice was made.
+    assert_redirected_to project_path("equip", snapshots: "settings", anchor: "snapshots")
     assert_equal offsite, @project.reload.backup_location
     follow_redirect!
-    assert_select ".backup-plan", /Backing up to b2-offsite\. Earlier snapshots stay where they were written/
+    assert_select "turbo-frame#snapshots-list[src='/projects/equip/snapshots?kind=settings']"
+    get project_snapshots_path("equip", kind: "settings")
+    assert_select ".snapshot-settings", /Backing up to b2-offsite\. Earlier snapshots stay where they were written/
     assert_equal offsite, BackupRun.request!(@project).location
 
     patch project_backup_target_path("equip"), params: { location: "later" }

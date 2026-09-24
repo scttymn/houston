@@ -1,4 +1,4 @@
-# Create Snapshot, from the project page.
+# Create, on the project page's Snapshots panel.
 class ProjectBackupsController < ApplicationController
   def create
     project = Project.find_by!(name: params[:project_name])

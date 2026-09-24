@@ -50,7 +50,7 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     assert_select ".host-chip[href='https://equipping.com'] .domain-state", "DNS OK"
     assert_select ".console-box", /RUNS\s+bin\/rails console/
     assert_select ".console-box .console-box__command", "houston console --server"
-    assert_select ".project-head form[action='/projects/equip/backups']", 0, "Create Snapshot lives in the Snapshots panel"
+    assert_select ".project-head form[action='/projects/equip/backups']", 0, "Create lives in the Snapshots panel"
   end
 
   test "no console box without commands.console" do
@@ -88,13 +88,12 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     links = css_select(".project-layout > nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
     ids = css_select(".project-sections > section").map { |s| s["id"] }
     # Alphabetical, to scan ("order navigation and sections alphabetically").
-    assert_equal %w[backup-plan webhook history maintenance secrets snapshots], ids
+    assert_equal %w[webhook history maintenance secrets snapshots], ids
     assert_equal ids.map { |id| "##{id}" }, links.map(&:last)
-    assert_equal [ "Backup plan", "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots" ], links.map(&:first)
-    assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create Snapshot"
+    assert_equal [ "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots" ], links.map(&:first)
+    assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create"
     assert_select "section#snapshots > turbo-frame#snapshots-list[loading=lazy]"
     assert_select "section#snapshots > .panel__head", /unas-nfs/i
-    assert_select "section#backup-plan", /Edit in compose\.yml/
 
     # Only the sections the page has: an unlinked project has no Connect pushes.
     get project_path("equip")

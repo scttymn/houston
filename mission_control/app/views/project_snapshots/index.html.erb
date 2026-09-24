@@ -1,19 +1,21 @@
-<%# The list inside the project page's Snapshots panel (its head is on the page). %>
+<%# The list inside the project page's Snapshots panel (its head is on the page), and its Settings tab. %>
 <%= turbo_frame_tag "snapshots-list" do %>
-    <% if !@location %>
-      <p class="panel__row panel__row--muted">No backup storage yet. Choose one under Backup plan, or set a default in Settings › Storage.</p>
+  <% if !@location %>
+    <p class="panel__row panel__row--muted">No backup storage yet. Set a default in Settings › Storage.</p>
+  <% else %>
+    <nav class="tabs" role="tablist" aria-label="Snapshots">
+      <% [ [ "auto", "Scheduled", @project.keep_auto ], [ "deploy", "Pre-deploy", @project.keep_deploy ], [ "settings", "Settings", nil ] ].each do |kind, label, keep| %>
+        <%= link_to project_snapshots_path(@project.name, kind: (kind unless kind == "auto")), role: "tab", "aria-selected": (@kind == kind).to_s, class: "tabs__tab" do %><%= label %><% if keep && @counts %> <span class="mono"><%= @counts.fetch(kind, 0) %> / <%= keep %></span><% end %><% end %>
+      <% end %>
+    </nav>
+    <% if @kind == "settings" %>
+      <%= render "project_snapshots/settings" %>
     <% elsif @error %>
       <p class="panel__row"><span class="field__error">Can't read snapshots: <%= @error %></span></p>
     <% else %>
-      <nav class="tabs" role="tablist" aria-label="Snapshot kind">
-        <% [ [ "auto", "Scheduled", @project.keep_auto, project_snapshots_path(@project.name) ],
-             [ "deploy", "Pre-deploy", @project.keep_deploy, project_snapshots_path(@project.name, kind: "deploy") ] ].each do |kind, label, keep, path| %>
-          <%= link_to path, role: "tab", "aria-selected": (@kind == kind).to_s, class: "tabs__tab" do %><%= label %> <span class="mono"><%= @counts.fetch(kind, 0) %> / <%= keep %></span><% end %>
-        <% end %>
-      </nav>
       <p class="snapshots__rule">
         <% if @kind == "auto" %>
-          <%= BackupSchedule.new(@project, Installation.current.zone).words %>, plus Create Snapshot. One per day is kept for <%= @project.keep_auto %> days · kept <%= @counts.fetch("auto", 0) %> / <%= @project.keep_auto %>.
+          <%= BackupSchedule.new(@project, Installation.current.zone).words %>, plus any you create. One per day is kept for <%= @project.keep_auto %> days · kept <%= @counts.fetch("auto", 0) %> / <%= @project.keep_auto %>.
         <% else %>
           Taken right before every deploy and restore, of the version that was running. The last <%= @project.keep_deploy %> are kept · kept <%= @counts.fetch("deploy", 0) %> / <%= @project.keep_deploy %>.
         <% end %>
@@ -25,7 +27,7 @@
         <div class="snapshots__row" data-snapshot="<%= snapshot.short_id %>">
           <span class="snapshots__when">
             <span><%= l(snapshot.time, format: :short) %></span>
-            <small><%= { "manual" => "Create Snapshot", "schedule" => "daily", "restore" => "before a restore" }.fetch(snapshot.reason) { snapshot.deploy ? "before deploy ##{snapshot.deploy}" : snapshot.reason } %></small>
+            <small><%= { "manual" => "created by hand", "schedule" => "daily", "restore" => "before a restore" }.fetch(snapshot.reason) { snapshot.deploy ? "before deploy ##{snapshot.deploy}" : snapshot.reason } %></small>
           </span>
           <span class="mono"><%= snapshot.sha.to_s.first(7) %></span>
           <span class="mono muted"><%= snapshot.bytes ? number_to_human_size(snapshot.bytes) : "—" %></span>
@@ -34,4 +36,5 @@
       <% end %>
       <p class="panel__row panel__row--muted">Each snapshot holds code and data together.</p>
     <% end %>
+  <% end %>
 <% end %>

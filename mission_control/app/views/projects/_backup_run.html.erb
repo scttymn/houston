@@ -1,4 +1,4 @@
-<%# The project's latest backup run, under Create Snapshot. %>
+<%# The project's latest backup run, under Create in the Snapshots panel. %>
 <p class="backup-run" data-backup="<%= run&.status %>">
   <% case run&.stale? ? "stale" : run&.status %>
   <% when nil %>

@@ -163,6 +163,13 @@ This replaces Batch 1's two-row grid and Batch 3's three Settings pages.
 
 The menus and the sections share the order; the tests pin both.
 
+**The backup plan is Snapshots' Settings tab** ("Backup Plan is essentially snapshot settings. Let's add a settings tab to snapshots that contains the plan instead of having a separate section… instead of \"Create Snapshot\" just make it \"Create\""):
+- Snapshots has three tabs: Scheduled, Pre-deploy and Settings. Settings holds the schedule, the storage choice, what's kept, the volumes, the databases and what isn't backed up. It never reads the repository, so it shows even when listing snapshots is slow or failing.
+- Saving the storage choice comes back to the Settings tab (`?snapshots=settings#snapshots`).
+- The Backup plan section and its menu item are gone.
+- The button reads **Create**. Where the old name was quoted it now says "plus any you create", and a hand-made snapshot's note says "created by hand", in `houston snapshots` too.
+- Tests: `project_backups_test.rb` `test "the backup plan"` (the tab, and that it doesn't list) and `test "choosing a project's backup target"` (back to the tab); `project_snapshots_test.rb` (three tabs, "created by hand"); `backups_test.go`. Each failed before the change.
+
 ### Batch 4: done
 - **Red first:** the new project page and Settings tests failed with no `settings_path`, no menu and no section ids.
 - **Green:** the Mission Control suite passes, 299 runs with 0 failures, and rubocop is clean.

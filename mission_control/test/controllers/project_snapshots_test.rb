@@ -22,9 +22,9 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
       assert_response :success
       assert_select "turbo-frame#snapshots-list"
       assert_select "[data-snapshot]", 2
-      assert_match(/Create Snapshot.*385 MB/m, css_select("[data-snapshot]").first.text)
+      assert_match(/created by hand.*385 MB/m, css_select("[data-snapshot]").first.text)
       assert_select "#snapshots-list", %r{kept 2 / 14}
-      assert_select "#snapshots-list", %r{Daily at 03:00 \(UTC\), plus Create Snapshot}
+      assert_select "#snapshots-list", %r{Daily at 03:00 \(UTC\), plus any you create}
       assert_select "a[href=?]", "/projects/equip/snapshots?kind=deploy", text: /Pre-deploy/
 
       get project_snapshots_path("equip", kind: "deploy")
@@ -41,7 +41,8 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
     fake = listing(snapshot_json(id: "11111111", time: "2026-09-21T03:00:00Z"),
                    snapshot_json(id: "33333333", time: "2026-09-22T12:31:00Z", kind: "deploy", reason: "deploy", deploy: 7))
     use_fake_docker(fake) { get project_snapshots_path("equip") }
-    assert_select "#snapshots-list [role=tablist] a", 2
+    assert_select "#snapshots-list [role=tablist] a", 3
+    assert_select "#snapshots-list [role=tablist] a:last-child", "Settings"
     assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", /Scheduled\s*1 \/ 14/
     assert_select "#snapshots-list [role=tablist] a[aria-selected=false]", /Pre-deploy\s*1 \/ 10/
   end
