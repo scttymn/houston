@@ -6,6 +6,8 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
   test "new" do
     get new_session_path
     assert_response :success
+    assert_select ".topbar", 0, "signing in needs no top bar"
+    assert_select "form[action='#{session_path}']", 1
   end
 
   test "create with valid credentials" do

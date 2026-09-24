@@ -21,6 +21,8 @@
   <body>
     <% if content_for?(:setup_step) %>
       <%= render "shared/setup_header", step: content_for(:setup_step).to_i %>
+    <% elsif content_for?(:no_header) %>
+      <%# The sign-in page: nothing to navigate to yet. %>
     <% else %>
       <%= render "shared/header" %>
     <% end %>
