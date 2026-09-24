@@ -49,6 +49,9 @@ class StorageLocation < ApplicationRecord
     end
   end
 
+  # How a choice of location reads in a menu: "unas (NFS, 10.0.1.20:/volume1/houston)".
+  def choice_label = "#{name} (#{kind == "local" ? "local folder" : kind.upcase}, #{where_it_is})"
+
   def where_it_is
     case kind
     when "nfs" then "#{settings["server"]}:#{settings["export"]}"

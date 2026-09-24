@@ -41,7 +41,7 @@
         <% @link.errors[:compose_path].each do |e| %><span class="field__error">The config path <%= e %></span><% end %>
         <%= f.submit "Read compose.yml", class: "button button--small" %>
       <% end %>
-      <p class="panel__row panel__row--muted">No x-houston block yet? Run <span class="mono">houston init</span> in the repo and push it first.</p>
+      <p class="panel__row panel__row--muted"><span>No x-houston block yet? Run <span class="mono">houston init</span> in the repo and push it first.</span></p>
       <% if @problems %>
         <div class="panel__row problems"><span class="mono check__state--nogo">NO-GO</span><pre class="mono"><%= @problems %></pre></div>
       <% end %>
@@ -72,21 +72,26 @@
 
   <% if @save_error %><p class="field__error"><%= @save_error %></p><% end %>
   <% if @link %>
-    <%= form_with url: link_path, class: "link-save" do |f| %>
+    <%= form_with url: link_path, class: "link-finish" do |f| %>
       <% volumes = @link.found? ? @link.preview.dig("sync", "volumes").to_a : [] %>
       <% if volumes.any? %>
-        <fieldset class="link-volumes">
-          <legend class="mono eyebrow">VOLUMES · where each one lives</legend>
+        <section class="panel link-step">
+          <h2 class="disp panel__title"><span class="mono">03</span> Where the data lives</h2>
           <% live = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?) %>
           <% volumes.each do |volume| %>
-            <label><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span>
-              <%= select_tag "locations[#{volume["name"]}]", options_for_select([ [ "Local disk", "" ] ] + live.map { |l| [ l.name, l.name ] }) %>
-            </label>
+            <div class="panel__row link-volume" data-volume="<%= volume["name"] %>">
+              <label for="locations_<%= volume["name"] %>"><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span></label>
+              <%= select_tag "locations[#{volume["name"]}]", options_for_select([ [ "Local disk (this server)", "" ] ] + live.map { |l| [ l.choice_label, l.name ] }), class: "mono" %>
+            </div>
           <% end %>
-        </fieldset>
+          <% backups = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
+          <p class="panel__row panel__row--muted"><span>Local disk is the server's own disk, and right for databases. Backups go to <span class="mono"><%= backups&.name || "the default storage" %></span> either way.</span></p>
+        </section>
       <% end %>
-      <%= link_to "Cancel", root_path %>
-      <%= f.button "Save", class: "button button--primary", disabled: !found %>
+      <div class="link-save">
+        <%= link_to "Cancel", root_path %>
+        <%= f.button "Save", class: "button button--primary", disabled: !found %>
+      </div>
     <% end %>
   <% end %>
 </main>

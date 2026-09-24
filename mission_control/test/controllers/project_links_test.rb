@@ -29,6 +29,13 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
   # Check access and Read compose.yml answer with the page itself (200), which
   # Turbo drops after a form post (it wants a redirect), so a browser showed
   # nothing. These forms submit as plain HTML instead.
+  test "the houston init hint is one sentence, not three rows" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      assert_select ".panel__row--muted > span", /No x-houston block yet\? Run houston init in the repo and push it first\./
+    end
+  end
+
   test "the forms that answer in place submit without Turbo" do
     use_fake_git(FakeGit.new(&responder)) do
       get link_path
@@ -170,6 +177,11 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       check
       read
       assert_select "select[name='locations[storage]'] option", 2
+      # Step 03, a panel like the others; each choice says where it is.
+      assert_select ".link-step .panel__title", /03 Where the data lives/i
+      assert_select ".link-step [data-volume=storage] select option", text: "Local disk (this server)"
+      assert_select ".link-step [data-volume=storage] select option[value=unas-nfs]", text: "unas-nfs (NFS, #{storage_locations(:unas).where_it_is})"
+      assert_select ".link-step .panel__row--muted", /backups go to/i
       post link_path, params: { locations: { storage: "unas-nfs" } }
       assert_redirected_to project_path("garage")
     end

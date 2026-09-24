@@ -102,12 +102,12 @@
         <% sqlite_volumes = @last_good_backup&.found.to_h.fetch("sqlite", []).map { |f| f["volume"] } %>
         <% @project.volume_rows.each do |volume, row| %>
           <div class="panel__row" data-volume="<%= volume["name"] %>">
-            <span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span>
+            <span><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span></span>
             <% if row&.placed_at %>
               <span><%= row.where_words %> · <small>moving a volume is a later feature</small></span>
             <% else %>
               <%= form_with url: project_volume_path(@project.name, volume["name"]), method: :patch, class: "secret__form" do |f| %>
-                <%= f.select :location, [ [ "Local disk", "" ] ] + @live_locations.map { |l| [ l.name, l.name ] }, selected: row&.location&.name.to_s %>
+                <%= f.select :location, [ [ "Local disk (this server)", "" ] ] + @live_locations.map { |l| [ l.choice_label, l.name ] }, selected: row&.location&.name.to_s %>
                 <%= f.submit "Save", class: "button button--small" %>
               <% end %>
             <% end %>

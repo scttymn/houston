@@ -269,7 +269,9 @@ h1.disp { margin: 0; font-size: 56px; line-height: 0.95; }
 .link-step .panel__row input[type=text] { height: 40px; padding: 0 10px; border: 1px solid var(--ink); background: var(--white); }
 .deploy-key { margin: 0; padding: 10px 12px; background: var(--ink); color: var(--on-dark); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .problems pre { margin: 0; white-space: pre-wrap; color: var(--nogo-fg); font-size: 13px; }
+.link-finish { display: flex; flex-direction: column; gap: 24px; }
 .link-save { display: flex; justify-content: flex-end; align-items: center; gap: 16px; flex-wrap: wrap; }
+.link-step select { height: 40px; padding: 0 10px; border: 1px solid var(--ink); background: var(--white); color: var(--ink); max-width: 100%; }
 .webhook .mono { overflow-wrap: anywhere; }
 .column--side { flex: 0 0 min(420px, 100%); }
 .column--side .secrets { width: auto; }
