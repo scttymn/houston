@@ -23,7 +23,7 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 Pick a release from [Releases](https://github.com/scttymn/houston/releases) and install it:
 
 ```sh
-curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.1.0 sh
+curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.2.0 sh
 ```
 
 The installer:
@@ -37,14 +37,14 @@ The installer:
 It ends with a URL and a one-time **setup code**:
 
 ```
-Houston v0.1.0 is running.
+Houston v0.2.0 is running.
 Finish setup at  http://<server address>:3000
 Setup code       XXXX-XXXX
 ```
 
 **To update,** run it again with the new version. Rerunning the installer also repairs, and it keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
 
-The flight board's header and `houston status` say which version is running.
+The flight board's header and `houston status` say which version is running. When a newer release is out, the flight board says so, with its release notes and the update command to copy, and `houston status` adds "(v0.2.1 available)". Mission Control checks GitHub every 6 hours; nothing updates by itself.
 
 **From a checkout** (working on Houston): `sudo HOUSTON_SOURCE=/path/to/houston sh install/install.sh` builds everything there, instead of pulling a release. The flight board then says `SOURCE <commit>`. Set one of `HOUSTON_VERSION` and `HOUSTON_SOURCE`, not both.
 
@@ -68,7 +68,7 @@ Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of
 Download it from the same release as the server (`darwin` or `linux`, `arm64` or `amd64`):
 
 ```sh
-curl -fsSLo ~/.local/bin/houston https://github.com/scttymn/houston/releases/download/v0.1.0/houston-darwin-arm64
+curl -fsSLo ~/.local/bin/houston https://github.com/scttymn/houston/releases/download/v0.2.0/houston-darwin-arm64
 chmod +x ~/.local/bin/houston && ln -sf houston ~/.local/bin/hou
 houston --version
 ```
@@ -172,7 +172,23 @@ houston deploy --server --follow --project app
   6. the `post_deploy` hook
 - **What's running:** `houston status`, `houston deploys --project app`, `houston logs --server`, `houston console --server`.
 - **By hand on the server:** as the `houston` user, `houston deploy` in a clean checkout.
-- **Status words:** GO, IN FLIGHT, NO-GO (the previous version still serves), HOLD (something blocks the next deploy, such as a secret with no value).
+- **Status words:** GO, QUEUED, IN FLIGHT, NO-GO (the previous version still serves), HOLD (something blocks the next deploy, such as a secret with no value), STANDBY (linked, never deployed).
+
+## Custom domains
+
+Every app is served at `<name>.<base>`. To serve it on its own domain too, list it in the compose file:
+
+```yaml
+x-houston:
+  domains: [example.com, www.example.com]
+```
+
+On the next deploy, Houston points each one at its tunnel with a proxied CNAME (an apex works through Cloudflare's CNAME flattening), commented `managed-by:houston project:<name>`. For that:
+- **The domain's zone must be in the same Cloudflare account.**
+- **Houston's Cloudflare token needs Zone › DNS › Edit on that zone,** not only on the base domain. With a token scoped to the base domain alone, Houston can see the zone but not change it, and the domain shows CAN'T CHECK.
+- **An existing record for the name** (the old host's) is never overwritten: the domain shows NO-GO until you delete that record in Cloudflare, then deploy again. So you choose the moment it switches.
+
+`houston status --project app` shows each domain's state: DNS OK, DNS PENDING (the nameservers aren't on Cloudflare yet), ZONE NOT IN CLOUDFLARE YET, or NO-GO with the reason. Redirecting `www` to the apex is up to the app.
 
 ## Backups and restore
 
