@@ -1,0 +1,14 @@
+# Houston
+
+> A small self-hosted deploy orchestrator. An app is one Docker Compose file with an `x-houston` block. One CLI (`houston`) works locally and against the server. A web admin, Mission Control, handles Cloudflare (a tunnel, DNS), secrets, push-to-deploy, backups, zero-downtime restores and maintenance pages. It knows no frameworks: anything that builds a Docker image deploys the same way. MIT licensed.
+
+## Docs
+- [Setting up an app with Houston, for agents](https://github.com/scttymn/houston/blob/main/docs/agents.md): the order of work, the checks at each step, where to stop for the human, and pitfalls from real migrations
+- [README](https://github.com/scttymn/houston/blob/main/README.md): installing the server and the CLI, setting up a project, day to day, backups and restores
+- [AGENTS.md](https://github.com/scttymn/houston/blob/main/AGENTS.md): for agents working on Houston's own code (building, testing, conventions)
+
+## Releases
+- [Releases](https://github.com/scttymn/houston/releases): the CLI for macOS and Linux (arm64, amd64), `install.sh` and `SHA256SUMS`. Images: `ghcr.io/scttymn/houston-mission-control`, `ghcr.io/scttymn/houston-runner`
+
+## Optional
+- [Plans](https://github.com/scttymn/houston/tree/main/docs/plans): how each feature was built and tested, with what was found

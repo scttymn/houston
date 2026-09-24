@@ -6,6 +6,7 @@ A small self-hosted deploy orchestrator. Each project is one Docker Compose file
 
 Houston ties proven tools together rather than reinventing them: Docker runs everything, Compose describes the app, Kamal deploys it, restic backs it up, and a Cloudflare Tunnel is the only way in. It knows no frameworks. A static site, Rails, Phoenix or anything else that builds a Docker image works the same way.
 
+- [`docs/agents.md`](docs/agents.md): for an AI agent setting up an app with Houston (the steps, the checks, and where to stop for you). Agents working on Houston itself read [`AGENTS.md`](AGENTS.md).
 - [`docs/plans/`](docs/plans): how each part was built, with what was tested and found.
 - [Releases](https://github.com/scttymn/houston/releases): the CLI for macOS and Linux, and the installer. Mission Control's and the runner's images are on ghcr.io.
 
