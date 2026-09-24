@@ -38,8 +38,8 @@ A server installs or updates with `HOUSTON_VERSION=v0.1.0`, building nothing. Th
   - An unknown version stops before anything changes: "v9.9.9 isn't a Houston release".
 - **The version is shown:**
   - **The flight board's eyebrow:** "FLIGHT BOARD · SVNMNS.COM · V0.1.0" (or "· SOURCE 4c4f80a").
-  - **CLI-first:** `houston status` (outside a project) prints the server's version, from a `version` field in the API's status answer.
-  - The runners use the host's CLI, as today. The installer checks that the CLI's version matches `HOUSTON_VERSION`.
+  - **CLI-first:** `houston status` (outside a project) prints the server's version first, from a `version` field in `/api/v1/me`.
+  - The runners use the host's CLI, as today. The installer checks the CLI against the release's `SHA256SUMS`, which is stronger than comparing version strings.
 - **Updating the server then looks like:**
   1. Tag and push (you, or me when you ask).
   2. The workflow goes green.
@@ -50,8 +50,8 @@ A server installs or updates with `HOUSTON_VERSION=v0.1.0`, building nothing. Th
 |---|---|---|---|
 | 1 | Mission Control knows its version: `HOUSTON_VERSION` if set, else `source <sha>` from the image, else `dev` | `test/models/houston_version_test.rb` `test "the version is the release, the source commit, or dev"` | Contract |
 | 2 | The flight board shows it in its eyebrow | `projects_controller_test.rb` `test "the flight board shows the version"` | Contract |
-| 3 | The status API returns it, and `houston status` prints it | `api/v1` status test `test "status says the version"`; Go `internal/cli` `TestStatusPrintsServerVersion` | Contract |
-| 4 | The installer refuses both or neither of `HOUSTON_VERSION`/`HOUSTON_SOURCE`, and an unknown version, before changing anything | `install/test/install-refusals.sh` (extended) | Preconditions |
+| 3 | `/api/v1/me` returns it, and `houston status` prints it first | `api_v1_auth_test.rb` `test "a personal token reaches the remote API"`; Go `TestStatusPrintsServerVersion` | Contract |
+| 4 | The installer refuses both or neither of `HOUSTON_VERSION`/`HOUSTON_SOURCE`, a malformed version and an unknown one, before changing anything | `install/test/install-version.sh` (refusals) | Preconditions |
 | 5 | With `HOUSTON_VERSION`, the installer pulls the tagged images and installs the Release's CLI, checked against `SHA256SUMS`, with the token when given and without it when not | `install/test/install-version.sh` (a fake Release and registry) | Contract, Authz |
 | 6 | A checksum mismatch stops the install, and the old CLI stays | same | Crash & repair |
 | 7 | The workflow runs the tests before publishing; failing tests publish nothing | the workflow's `needs:`, and the first real run | Whole batch |
