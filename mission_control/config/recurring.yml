@@ -16,6 +16,9 @@ production:
   prune_backups:
     class: PruneJob
     schedule: every day at 4:30am UTC
+  check_latest_release:
+    class: LatestReleaseJob
+    schedule: every 6 hours
   schedule_backups:
     class: BackupScheduleJob
     schedule: every minute

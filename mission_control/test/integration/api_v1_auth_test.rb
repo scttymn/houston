@@ -12,7 +12,7 @@ class ApiV1AuthTest < ActionDispatch::IntegrationTest
     travel_to(Time.utc(2026, 9, 23, 12)) do
       me(headers: { "Cf-Ray" => "8a1b2c3d-MCI", "Cf-Connecting-Ip" => "203.0.113.9" })
       assert_response :success
-      assert_equal({ "token" => "laptop", "server" => "svnmns.com", "version" => HoustonVersion.current }, json)
+      assert_equal({ "token" => "laptop", "server" => "svnmns.com", "version" => HoustonVersion.current, "latest" => nil }, json)
     end
     assert_equal Time.utc(2026, 9, 23, 12), @record.reload.last_used_at
 
@@ -20,6 +20,15 @@ class ApiV1AuthTest < ActionDispatch::IntegrationTest
     assert_equal Time.utc(2026, 9, 23, 12), @record.reload.last_used_at, "not rewritten within a minute"
     travel_to(Time.utc(2026, 9, 23, 12, 2)) { me }
     assert_equal Time.utc(2026, 9, 23, 12, 2), @record.reload.last_used_at
+  end
+
+  test "me says when a newer release is out" do
+    ENV["HOUSTON_VERSION"] = "v0.1.0"
+    Installation.current.update!(latest_release: "v0.1.1", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.1.1")
+    me
+    assert_equal [ "v0.1.0", "v0.1.1" ], json.values_at("version", "latest")
+  ensure
+    ENV.delete("HOUSTON_VERSION")
   end
 
   test "the remote API takes only personal tokens" do

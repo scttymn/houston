@@ -80,6 +80,16 @@ func TestStatusPrintsServerVersion(t *testing.T) {
 	if code != 0 || first != "Houston v0.1.0 at svnmns.com" || !strings.Contains(out, "garage") {
 		t.Errorf("status: exit %d\n%s%s", code, out, errOut)
 	}
+
+	// A newer release (docs/plans/update-available.md): said on the same line.
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/me":       respond(`{"token":"laptop","server":"svnmns.com","version":"v0.1.0","latest":"v0.1.1"}`),
+		"/api/v1/projects": respond(`{"projects":[]}`),
+	})
+	_, out, _ = run(&fakeDocker{}, "status")
+	if first, _, _ := strings.Cut(out, "\n"); first != "Houston v0.1.0 at svnmns.com (v0.1.1 available)" {
+		t.Errorf("status with a newer release:\n%s", out)
+	}
 }
 
 func TestDeploysFollow(t *testing.T) {

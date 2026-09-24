@@ -69,7 +69,11 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		// Which Houston answered, first. A server too old to say is skipped;
 		// the projects request reports any real problem.
 		if me, err := client.Me(ctx); err == nil && me.Version != "" {
-			fmt.Fprintf(stdout, "Houston %s at %s\n", me.Version, me.Server)
+			line := fmt.Sprintf("Houston %s at %s", me.Version, me.Server)
+			if me.Latest != "" {
+				line += fmt.Sprintf(" (%s available)", me.Latest)
+			}
+			fmt.Fprintln(stdout, line)
 		}
 		projects, err := client.Projects(ctx)
 		if err != nil {

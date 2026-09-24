@@ -47,6 +47,18 @@
     <% end %>
   <% end %>
 
+  <% if (newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release)) %>
+    <div class="notice notice--hold update-notice" data-controller="clipboard">
+      <span class="mono">UPDATE</span>
+      <span class="notice__text"><%= newer %> is out. This server runs <%= HoustonVersion.current %>. On the server:</span>
+      <%= link_to "Release notes ↗", @installation.latest_release_url, target: "_blank", rel: "noopener noreferrer" %>
+      <div class="update-notice__run">
+        <code class="mono update-notice__command" data-clipboard-target="source"><%= LatestRelease.update_command(newer) %></code>
+        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+      </div>
+    </div>
+  <% end %>
+
   <% if @projects.any? %>
     <section class="panel flight">
       <div class="mono flight-head"><span>STATUS</span><span>PROJECT</span><span>RUNNING SHA</span><span>DOMAINS</span><span>LAST DEPLOY</span><span>LAST BACKUP</span></div>

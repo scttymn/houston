@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_053555) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_220734) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -90,6 +90,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_053555) do
     t.string "cloudflare_zone_id"
     t.datetime "created_at", null: false
     t.string "dns_mode"
+    t.string "latest_release"
+    t.datetime "latest_release_checked_at"
+    t.string "latest_release_url"
     t.string "time_zone", default: "UTC", null: false
     t.string "tunnel_id"
     t.text "tunnel_token"

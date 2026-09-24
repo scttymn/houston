@@ -209,6 +209,25 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     ENV.delete("HOUSTON_VERSION")
   end
 
+  test "the flight board says when an update is out" do
+    stub_tunnel
+    ENV["HOUSTON_VERSION"] = "v0.1.0"
+    Installation.current.update!(latest_release: "v0.1.1", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.1.1")
+    get root_path
+    assert_select ".update-notice" do
+      assert_select ".notice__text", /v0\.1\.1 is out\. This server runs v0\.1\.0\./
+      assert_select "a[href='https://github.com/scttymn/houston/releases/tag/v0.1.1']", /release notes/i
+      assert_select "[data-clipboard-target=source]", "curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.1.1 sh"
+      assert_select "button[data-action='clipboard#copy']", "Copy"
+    end
+
+    ENV["HOUSTON_VERSION"] = "v0.1.1"
+    get root_path
+    assert_select ".update-notice", 0, "current"
+  ensure
+    ENV.delete("HOUSTON_VERSION")
+  end
+
   test "the flight board listens for changes" do
     stub_tunnel
     make_deploy(make_project("equip"), 1, "go")

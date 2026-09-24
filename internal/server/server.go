@@ -114,6 +114,7 @@ type Me struct {
 	Token   string `json:"token"`
 	Server  string `json:"server"`
 	Version string `json:"version"` // the Houston release it runs, "source <sha>" or "dev"
+	Latest  string `json:"latest"`  // a newer release, when one is out
 }
 
 func (cl *Client) Me(ctx context.Context) (Me, error) {
