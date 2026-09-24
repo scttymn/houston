@@ -13,7 +13,7 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
     assert_equal OpenSSL::Digest::SHA256.hexdigest(token), record.token_digest
     assert_not_includes ApiToken.connection.select_values("SELECT token_digest FROM api_tokens").join, token
 
-    get settings_tokens_path
+    get settings_path
     assert_select "[data-token=laptop]", /laptop/
     assert_not_includes response.body, token
 
@@ -27,7 +27,7 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
   # Create answers with the page itself (200), which Turbo drops after a form
   # post, so a browser never showed the new token. It submits as plain HTML.
   test "the create form submits without Turbo, so the token shows" do
-    get settings_tokens_path
+    get settings_path
     assert_select "form[action='#{settings_tokens_path}'][data-turbo='false']"
   end
 
@@ -38,7 +38,7 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
 
     delete settings_token_path(ApiToken.find_by!(name: "agent"))
-    assert_redirected_to settings_tokens_path
+    assert_redirected_to settings_path(anchor: "tokens")
     assert_equal 0, ApiToken.count
     get "/api/v1/me", headers: { "Authorization" => "Bearer #{token}" }
     assert_response :unauthorized
@@ -46,7 +46,7 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
 
   test "tokens need the admin" do
     sign_out
-    get settings_tokens_path
+    get settings_path
     assert_redirected_to new_session_path
     post settings_tokens_path, params: { name: "sneaky" }
     assert_redirected_to new_session_path

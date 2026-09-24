@@ -1,0 +1,102 @@
+<% content_for :title, "Settings · Mission Control" %>
+<% base = @installation.base_domain %>
+<%# One page, as the design's Settings: the menu on the left, the sections in one column. %>
+<main class="settings">
+  <%= render "settings/nav" %>
+  <div class="settings__body">
+    <% if notice %><div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div><% end %>
+    <% if alert %><div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= alert %></span></div><% end %>
+    <section class="settings-section" id="cloudflare">
+      <div class="panel__head"><h2 class="disp panel__title">Cloudflare</h2></div>
+      <div class="settings-facts">
+        <div><span class="mono facts-strip__label">BASE DOMAIN</span>
+          <span><%= base.presence || "not set yet" %></span></div>
+        <div><span class="mono facts-strip__label">DNS</span>
+          <span><%= @installation.dns_mode == "per_host" ? "Host by host" : "Wildcard *.#{base}" %></span></div>
+        <% tunnel = SystemStatus.tunnel(@installation) %>
+        <div><span class="mono facts-strip__label">TUNNEL</span>
+          <span><%= status_word(tunnel.go?) %><% if tunnel.connections.positive? %> <span class="mono muted">· <%= tunnel.connections %> CONN</span><% end %></span></div>
+      </div>
+      <div class="ingress">
+        <span class="mono facts-strip__label">INGRESS RULES</span>
+        <div><span class="mono">admin.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control</span></div>
+        <div><span class="mono">hooks.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control, webhook paths only (keep it outside Cloudflare Access)</span></div>
+        <div><span class="mono">everything else</span><span class="rule__arrow">→</span><span>Your apps, matched by hostname</span></div>
+      </div>
+      <p class="panel__row panel__row--muted">Houston only touches DNS records commented <span class="mono">managed-by:houston</span>.</p>
+    </section>
+
+    <section class="settings-section" id="time-zone">
+      <div class="panel__head"><h2 class="disp panel__title">Time zone</h2></div>
+      <p class="panel__row">Backup schedules run in it: <span class="mono">daily 03:00</span> means 03:00 here.</p>
+      <%= form_with url: settings_general_path, method: :patch, class: "panel__row inline-form" do |f| %>
+        <%= f.select :time_zone, TZInfo::Timezone.all_identifiers, { selected: @installation.time_zone }, class: "mono", "aria-label": "Time zone" %>
+        <%= f.submit "Save", class: "button button--small" %>
+      <% end %>
+      <% if @error %><p class="panel__row"><span class="field__error"><%= @error %></span></p><% end %>
+    </section>
+    <section class="settings-section" id="storage">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Storage locations</h2>
+        <%= link_to "Add storage location", new_settings_storage_location_path, class: "button button--primary button--small" %>
+      </div>
+      <div class="mono storage-head"><span>NAME</span><span>TYPE</span><span>LOCATION</span><span>HOLDS</span><span>USED BY</span><span>LAST WRITE</span><span></span></div>
+      <ul class="rows storage-rows">
+        <% @locations.each do |location| %>
+          <% used = location.projects_using %>
+          <% last = location.last_write %>
+          <li data-location="<%= location.name %>" class="storage-row">
+            <span class="mono"><%= location.name %><% if location.default? %> <small class="mono badge">DEFAULT</small><% end %></span>
+            <span class="mono"><%= location.kind %></span>
+            <span class="mono"><%= location.where_it_is %></span>
+            <span><%= location.holds_words %></span>
+            <span><%= used.zero? ? "not used yet" : pluralize(used, "project") %></span>
+            <span><%= last ? l(last, format: :short) : "—" %></span>
+            <span>
+              <% if !location.acknowledged? %>
+                <%= link_to "Save its password", settings_storage_location_path(location.name) %>
+              <% elsif !location.default? %>
+                <%= button_to "Make default", default_settings_storage_location_path(location.name), class: "button button--small" %>
+              <% end %>
+            </span>
+            <% if location.prune_error.present? %><small class="field__error">Last prune failed: <%= location.prune_error %></small><% end %>
+          </li>
+        <% end %>
+      </ul>
+      <p class="panel__row panel__row--muted">Where backups go, and where live volumes can live. Each location has its own restic password, shown once when it's added.</p>
+    </section>
+
+  <section class="settings-section" id="tokens">
+    <div class="panel__head"><h2 class="disp panel__title">API tokens</h2></div>
+  <% if @new_token %>
+    <div class="new-token-box" data-controller="clipboard">
+      <div class="panel__head"><h2 class="disp panel__title">Token "<%= @created_name %>"</h2><span class="mono panel__meta eyebrow eyebrow--signal">SHOWN ONCE</span></div>
+      <p class="panel__row">Copy it now: Houston shows it only this once.</p>
+      <pre class="mono deploy-key new-token" data-clipboard-target="source"><%= @new_token %></pre>
+      <p class="panel__row">
+        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+        <span class="mono">houston login https://admin.<%= Installation.current.base_domain %></span>, then paste it. Agents can set <span class="mono">HOUSTON_SERVER</span> and <span class="mono">HOUSTON_API_TOKEN</span> instead.
+      </p>
+    </div>
+  <% end %>
+
+    <p class="panel__row panel__row--muted">For the houston CLI with <span class="mono">--server</span>, and for agents. A token can see and change projects and write secrets; it can never read a secret's value.</p>
+    <% if @tokens.empty? %><p class="panel__row panel__row--muted">No tokens yet.</p><% end %>
+    <ul class="rows">
+      <% @tokens.each do |token| %>
+        <li data-token="<%= token.name %>" class="token-row">
+          <span class="mono"><%= token.name %></span>
+          <span>created <%= l(token.created_at.to_date, format: :short) %></span>
+          <span><%= token.last_used_at ? "last used #{time_ago_in_words(token.last_used_at)} ago" : "never used" %></span>
+          <%= button_to "Revoke", settings_token_path(token), method: :delete, class: "button button--small" %>
+        </li>
+      <% end %>
+    </ul>
+    <%= form_with url: settings_tokens_path, class: "panel__row inline-form token-new", data: { turbo: false } do |f| %>
+      <%= f.text_field :name, placeholder: "Name, e.g. laptop or ci-agent", class: "mono", maxlength: 50, "aria-label": "Token name" %>
+      <%= f.submit "New CLI token", class: "button button--primary button--small" %>
+      <% if @token_error %><span class="field__error"><%= @token_error %></span><% end %>
+    <% end %>
+  </section>
+  </div>
+</main>

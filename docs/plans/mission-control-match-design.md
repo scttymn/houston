@@ -138,6 +138,31 @@ Each screen was rendered from the tests with realistic data, served with the rea
 - **Green:** the Mission Control suite passes, 297 runs with 0 failures. Rubocop is clean on the whole app, and every Go package passes.
 - **Dead CSS removed:** `.hosts`, `.column`, `.column--side`, `.webhook__actions` and `.secret__form`.
 
+## Batch 4: one column, with a section menu (Settings and the project page)
+Your direction: "Let's move to a single column layout for settings and project detail with a menu on the left to jump to the individual sections. The multiple columns look terrible. For the project detail, put the menu and single column of tables under the header section."
+
+This replaces Batch 1's two-row grid and Batch 3's three Settings pages.
+- **Project page:** the header (the name and pill, host chips, console box) and the facts strip stay full width. Below them, a menu on the left links to each section: Deploy history, Snapshots, Secrets, Backup plan, then Connect pushes, Volumes and Maintenance when the project has them. The sections follow in one column.
+- **Settings:** one page at `/settings`, as the design's Settings: a menu on the left (Cloudflare, Time zone, Storage, API tokens) and the sections in one column. The old addresses (`/settings/general`, `/settings/storage`, `/settings/tokens`) send you to their section. Add storage location and a new location's password stay pages of their own, with the same menu. Creating a token shows the new token on the Settings page, above the tokens.
+- **The menu marks the section in view** (a small Stimulus controller). Without JavaScript, the links still jump.
+- **On a phone** the menu becomes a row of links above the sections, and nothing scrolls sideways.
+
+### AC ↔ test map (Batch 4)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The project page: the header and facts strip, then a menu whose links match the sections, in one column, in order | `project_pages_test.rb` `test "one column of sections under the header, with a menu"` | Parity |
+| 2 | The menu lists Connect pushes, Volumes and Maintenance only when the page has them | the same test, with an unlinked project | Honest surface |
+| 3 | Settings is one page with the menu and four sections | `settings/general_controller_test.rb` `test "settings is one page: the menu and its sections"` | Parity |
+| 4 | The old Settings addresses send you to their section; saving the time zone, making a default and revoking a token come back to their section | `settings/*_test.rb` (their redirects) | Re-entry |
+| 5 | A new token shows once, on the Settings page | `settings/tokens_controller_test.rb` `test "a token is shown once"` | Contract |
+| 6 | No sideways scroll at 375px; checked at 1440 and 375 | the visual check | Honest surface |
+
+### Batch 4: done
+- **Red first:** the new project page and Settings tests failed with no `settings_path`, no menu and no section ids.
+- **Green:** the Mission Control suite passes, 299 runs with 0 failures, and rubocop is clean.
+- **Visual check:** at 1440 wide, both pages show the menu on the left and one column of sections; the project page keeps its header and facts strip across the top. At 375 both are 375 wide, with the menu as a row of links. That needed a fix: the stacked project column had sized itself to its content, 3,636px wide.
+- **The snapshots frame** is `snapshots-list` now, so its id no longer clashes with the Snapshots section's `#snapshots`.
+
 ## Later (named, not built)
 From the Settings artboard, features rather than layout:
 - **Cloudflare:** Replace API token, and the zones list (Houston records per zone, their sync state, Export DNS).

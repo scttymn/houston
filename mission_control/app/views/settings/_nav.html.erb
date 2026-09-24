@@ -1,9 +1,3 @@
-<%# The design's Settings nav: the title, then one link per section, the current one filled. %>
-<nav class="settings-nav" aria-label="Settings sections">
-  <h1 class="disp">Settings</h1>
-  <% [ [ "General", settings_general_path, controller_name == "general" ],
-       [ "Storage", settings_storage_locations_path, controller_name == "storage" ],
-       [ "API tokens", settings_tokens_path, controller_name == "tokens" ] ].each do |label, path, current| %>
-    <%= link_to label, path, "aria-current": ("page" if current) %>
-  <% end %>
-</nav>
+<%= render "shared/section_nav", title: "Settings", label: "Settings sections",
+           items: [ [ "Cloudflare", "cloudflare" ], [ "Time zone", "time-zone" ], [ "Storage", "storage" ], [ "API tokens", "tokens" ] ],
+           base: (settings_path unless controller_name == "pages") %>

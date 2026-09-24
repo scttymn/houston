@@ -1,14 +1,24 @@
 require "test_helper"
 
 class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
-  # The design's Settings: the section nav on the left, the sections beside it.
-  test "settings follow the design" do
+  # The design's Settings: one page, a menu on the left that jumps to its
+  # sections, and the sections in one column.
+  test "settings is one page: the menu and its sections" do
     Installation.current.update!(dns_mode: "per_host")
     sign_in_as users(:one)
-    get settings_general_path
-    assert_select ".settings > nav.settings-nav h1", /Settings/i
-    assert_equal [ "General", "Storage", "API tokens" ], css_select("nav.settings-nav a").map { |a| a.text.strip }
-    assert_select "nav.settings-nav a[aria-current=page]", "General"
+    get settings_path
+    assert_select ".settings > nav.section-nav h1", /Settings/i
+    links = css_select("nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
+    assert_equal [ [ "Cloudflare", "#cloudflare" ], [ "Time zone", "#time-zone" ], [ "Storage", "#storage" ], [ "API tokens", "#tokens" ] ], links
+    assert_equal %w[cloudflare time-zone storage tokens], css_select(".settings__body > section").map { |s| s["id"] }
+    assert_select "header a[href='#{settings_path}']", "Settings"
+
+    { settings_general_path => "cloudflare", settings_storage_locations_path => "storage", settings_tokens_path => "tokens" }.each do |old, section|
+      get old
+      assert_redirected_to settings_path(anchor: section)
+    end
+
+    get settings_path
     assert_select ".settings__body section#cloudflare", /BASE DOMAIN\s+svnmns\.com/
     assert_select "section#cloudflare", /DNS\s+Host by host/
     assert_select "section#cloudflare .ingress", /admin\.svnmns\.com.*Mission Control.*hooks\.svnmns\.com.*webhook paths only.*everything else.*Your apps/m
@@ -17,13 +27,12 @@ class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
 
   test "the time zone" do
     sign_in_as users(:one)
-    get settings_general_path
+    get settings_path
     assert_response :success
     assert_select "select[name='time_zone'] option[selected]", "UTC"
-    assert_select "nav.settings-nav a[href='#{settings_tokens_path}']"
 
     patch settings_general_path, params: { time_zone: "Europe/Berlin" }
-    assert_redirected_to settings_general_path
+    assert_redirected_to settings_path(anchor: "time-zone")
     assert_equal "Europe/Berlin", Installation.current.time_zone
     follow_redirect!
     assert_select "select[name='time_zone'] option[selected]", "Europe/Berlin"
@@ -33,7 +42,7 @@ class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Europe/Berlin", Installation.current.reload.time_zone
 
     get root_path
-    assert_select "header a[href='#{settings_general_path}']", "Settings"
+    assert_select "header a[href='#{settings_path}']", "Settings"
   end
 
   test "settings need the admin" do

@@ -1,5 +1,5 @@
 <%# The list inside the project page's Snapshots panel (its head is on the page). %>
-<%= turbo_frame_tag "snapshots" do %>
+<%= turbo_frame_tag "snapshots-list" do %>
     <% if !@location %>
       <p class="panel__row panel__row--muted">No backup storage yet. Choose one under Backup plan, or set a default in Settings › Storage.</p>
     <% elsif @error %>

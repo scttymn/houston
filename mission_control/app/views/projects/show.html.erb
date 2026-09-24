@@ -1,5 +1,5 @@
 <% content_for :title, "#{@project.name} · Project" %>
-<%# Laid out as the design's ProjectDetail: header, facts strip, then two rows of two panels. %>
+<%# The header and facts strip, then a menu and one column of sections (docs/plans/mission-control-match-design.md, Batch 4). %>
 <main class="page project">
   <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <span class="crumbs__here"><%= @project.name %></span></nav>
 
@@ -68,8 +68,14 @@
       <span><%= @project.repo_words || "not linked" %></span></div>
   </div>
 
-  <div class="project-row">
-    <section class="panel history">
+  <% sections = [ [ "Deploy history", "history" ], [ "Snapshots", "snapshots" ], [ "Secrets", "secrets" ], [ "Backup plan", "backup-plan" ] ] %>
+  <% sections << [ "Connect pushes", "webhook" ] if @project.repo_url.present? %>
+  <% sections << [ "Volumes", "volumes" ] if @project.volumes.any? %>
+  <% sections << [ "Maintenance page", "maintenance" ] unless @project.maintenance? %>
+  <div class="project-layout">
+    <%= render "shared/section_nav", label: "Project sections", items: sections %>
+    <div class="project-sections">
+    <section class="panel history" id="history">
       <div class="panel__head">
         <h2 class="disp panel__title">Deploy history</h2>
         <span class="panel__meta">
@@ -113,7 +119,7 @@
       <% end %>
     </section>
     <%# The head renders with the page; the list is a lazy frame, since reading a repository can take seconds. %>
-    <section class="panel snapshots">
+    <section class="panel snapshots" id="snapshots">
       <div class="panel__head">
         <h2 class="disp panel__title">Snapshots</h2>
         <span class="panel__meta">
@@ -124,14 +130,12 @@
         </span>
       </div>
       <% if @storage %><%= render "projects/backup_run", run: @backup %><% end %>
-      <%= turbo_frame_tag "snapshots", src: project_snapshots_path(@project.name), loading: :lazy do %>
+      <%= turbo_frame_tag "snapshots-list", src: project_snapshots_path(@project.name), loading: :lazy do %>
         <p class="panel__row panel__row--muted">Reading the snapshots…</p>
       <% end %>
     </section>
-  </div>
 
-  <div class="project-row">
-    <section class="panel secrets">
+    <section class="panel secrets" id="secrets">
       <div class="panel__head">
         <h2 class="disp panel__title">Secrets</h2>
         <span class="panel__meta muted">Values are write-only.</span>
@@ -174,7 +178,7 @@
       <% end %>
     </section>
 
-    <section class="panel backup-plan">
+    <section class="panel backup-plan" id="backup-plan">
       <div class="panel__head">
         <h2 class="disp panel__title">Backup plan</h2>
         <span class="panel__meta muted">Edit in compose.yml</span>
@@ -205,11 +209,9 @@
         <% end %>
       </dl>
     </section>
-  </div>
 
-  <div class="project-more">
     <% if @project.repo_url.present? %>
-      <section class="panel webhook">
+      <section class="panel webhook" id="webhook">
         <div class="panel__head"><h2 class="disp panel__title">Connect pushes</h2><span class="panel__meta muted">In the repo's webhook settings</span></div>
         <p class="panel__row">Your git host calls this address on every push. Houston checks the secret, reads the repo's refs itself, and deploys what the deploy rule matches.</p>
         <dl class="plan">
@@ -233,7 +235,7 @@
       </section>
     <% end %>
     <% if @project.volumes.any? %>
-      <section class="panel volumes">
+      <section class="panel volumes" id="volumes">
         <div class="panel__head"><h2 class="disp panel__title">Volumes</h2><span class="panel__meta muted">Where each one lives</span></div>
         <% sqlite_volumes = @last_good_backup&.found.to_h.fetch("sqlite", []).map { |f| f["volume"] } %>
         <% @project.volume_rows.each do |volume, row| %>
@@ -256,7 +258,7 @@
       </section>
     <% end %>
     <% unless @project.maintenance? %>
-      <section class="panel maintenance">
+      <section class="panel maintenance" id="maintenance">
         <div class="panel__head"><h2 class="disp panel__title">Maintenance page</h2></div>
         <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
         <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
@@ -268,5 +270,6 @@
         <% end %>
       </section>
     <% end %>
+  </div>
   </div>
 </main>

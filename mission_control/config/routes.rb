@@ -96,6 +96,8 @@ Rails.application.routes.draw do
     end
   end
 
+  # Settings is one page; the old section pages send you to their section.
+  get "settings", to: "settings/pages#show", as: :settings
   namespace :settings do
     resource :general, only: %i[ show update ], controller: "general"
     resources :storage_locations, path: "storage", param: :name, only: %i[ index new create show ], controller: "storage" do

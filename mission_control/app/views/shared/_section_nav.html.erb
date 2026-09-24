@@ -1,0 +1,8 @@
+<%# A menu that jumps to the page's sections (the design's Settings menu).
+    items: [label, section id]; base: the page's path when this isn't it. %>
+<nav class="section-nav" aria-label="<%= local_assigns[:label] || "Sections" %>" data-controller="section-nav">
+  <% if local_assigns[:title] %><h1 class="disp"><%= title %></h1><% end %>
+  <% items.each do |label, id| %>
+    <%= link_to label, "#{local_assigns[:base]}##{id}" %>
+  <% end %>
+</nav>

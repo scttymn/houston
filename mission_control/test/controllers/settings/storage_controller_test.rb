@@ -18,10 +18,9 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
     project.backup_runs.create!(location: unas, kind: "auto", reason: "manual", status: "go", heartbeat_at: Time.current, finished_at: Time.utc(2026, 9, 22, 3, 0))
     StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "sm" }, restic_password: "pw", verified_at: Time.current, acknowledged_at: Time.current)
 
-    get settings_storage_locations_path
+    get settings_path
     assert_response :success
-    assert_select "nav.settings-nav a[href='#{settings_storage_locations_path}'][aria-current=page]", "Storage"
-    assert_select ".settings-section .storage-head", /NAME.*TYPE.*LOCATION.*HOLDS.*USED BY.*LAST WRITE/m
+    assert_select "section#storage .storage-head", /NAME.*TYPE.*LOCATION.*HOLDS.*USED BY.*LAST WRITE/m
     assert_select "[data-location=unas-nfs]", /DEFAULT.*nfs.*10\.0\.1\.20:\/volume1\/houston.*live volumes · backups.*1 project.*22 Sep 03:00.*Last prune failed: .*unable to create lock/m
     assert_select "[data-location=b2-offsite]", /b2.*backups.*not used yet/m
     assert_select "[data-location=b2-offsite]", { text: /live volumes/, count: 0 }
@@ -48,13 +47,13 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
     assert_not location.reload.acknowledged?
 
     post acknowledge_settings_storage_location_path("b2-offsite"), params: { saved: "1" }
-    assert_redirected_to settings_storage_locations_path
+    assert_redirected_to settings_path(anchor: "storage")
     assert location.reload.acknowledged?
     assert_not location.default?, "a new location isn't the default"
     assert storage_locations(:unas).reload.default?
 
     get settings_storage_location_path("b2-offsite")
-    assert_redirected_to settings_storage_locations_path
+    assert_redirected_to settings_path(anchor: "storage")
     follow_redirect!
     assert_not_includes response.body, location.restic_password
 
@@ -73,11 +72,11 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
     project = make_project("equip")
 
     post default_settings_storage_location_path("later")
-    assert_redirected_to settings_storage_locations_path
+    assert_redirected_to settings_path(anchor: "storage")
     assert storage_locations(:unas).reload.default?
 
     post default_settings_storage_location_path("b2-offsite")
-    assert_redirected_to settings_storage_locations_path
+    assert_redirected_to settings_path(anchor: "storage")
     assert offsite.reload.default?
     assert_not storage_locations(:unas).reload.default?
     assert_equal offsite, project.backup_location
@@ -86,7 +85,7 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
 
   test "storage needs the admin" do
     delete session_path
-    get settings_storage_locations_path
+    get settings_path
     assert_redirected_to new_session_path
   end
 end

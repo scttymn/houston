@@ -79,18 +79,26 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     assert_select ".facts-strip > div:nth-child(5)", %r{forgejo · houston/garage}
   end
 
-  test "the panels sit in the design's rows" do
+  # Your direction: one column of sections under the header, with a menu on
+  # the left that jumps to them (docs/plans/mission-control-match-design.md, Batch 4).
+  test "one column of sections under the header, with a menu" do
     make_linked_project("garage")
     get project_path("garage")
-    assert_select ".project-row", 2
-    assert_select ".project-row:nth-of-type(1) > .history + .snapshots"
-    assert_select ".snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create Snapshot"
-    assert_select ".snapshots > turbo-frame#snapshots[loading=lazy]"
-    assert_select ".snapshots > .panel__head", /unas-nfs/i
-    assert_select ".project-row:nth-of-type(2) > .secrets + .backup-plan"
-    assert_select ".project-more > .webhook"
-    assert_select ".project-more > .maintenance"
-    assert_select ".backup-plan", /Edit in compose\.yml/
+    assert_select ".project > .project-head + .facts-strip + .project-layout"
+    links = css_select(".project-layout > nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
+    ids = css_select(".project-sections > section").map { |s| s["id"] }
+    assert_equal %w[history snapshots secrets backup-plan webhook maintenance], ids
+    assert_equal ids.map { |id| "##{id}" }, links.map(&:last)
+    assert_equal [ "Deploy history", "Snapshots", "Secrets", "Backup plan", "Connect pushes", "Maintenance page" ], links.map(&:first)
+    assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create Snapshot"
+    assert_select "section#snapshots > turbo-frame#snapshots-list[loading=lazy]"
+    assert_select "section#snapshots > .panel__head", /unas-nfs/i
+    assert_select "section#backup-plan", /Edit in compose\.yml/
+
+    # Only the sections the page has: an unlinked project has no Connect pushes.
+    get project_path("equip")
+    assert_select ".section-nav a[href='#webhook']", 0
+    assert_select "section#webhook", 0
   end
 
   test "secrets: HOLD only for a blank required secret; optional ones can be set" do

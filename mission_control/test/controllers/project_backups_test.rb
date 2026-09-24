@@ -76,7 +76,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     @project.backup_runs.create!(location: storage_locations(:unas), kind: "auto", reason: "manual", status: "no_go", heartbeat_at: Time.current, found: {})
 
     get project_path("equip")
-    assert_select "turbo-frame#snapshots[src='/projects/equip/snapshots'][loading=lazy]"
+    assert_select "turbo-frame#snapshots-list[src='/projects/equip/snapshots'][loading=lazy]"
     assert_select ".backup-plan", /7 scheduled · 3 pre-deploy/
     Installation.current.update!(time_zone: "Europe/Berlin")
     @project.update!(backup_schedule: "daily 22:15")
