@@ -47,6 +47,17 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
    - its repo gets the setup from the migration notes, including its two app edits (dev bind address, esbuild's `NODE_PATH`)
    - a staging deploy at `estherpictures.svnmns.com` with a copy of its data
    - then the window: Coolify stopped, the final data copy, `domains: [estherpictures.com, www.estherpictures.com]` deployed (Houston makes the CNAMEs), checks, done
+   - **Moved on 2026-09-24**, dogfooding Houston's CLI at every step it has (repo `git@github.com:scttymn/estherpictures.git`, project `estherpictures`):
+     - Setup: `houston init`, then the recipe from init-generic.md (PR #1). `houston test` (42 tests) and `houston dev --production` caught three problems before the server did:
+       - `.dockerignore` kept `test/` out of the image, so `mix test` passed with no tests
+       - a flaky test (a headshot left in `cast/` by another test)
+       - `check_origin: :conn` refuses every browser behind Cloudflare (the app sees http on its own port); an explicit host list (`//estherpictures.com`, `//estherpictures.svnmns.com`) works
+     - Staging: the webhook (`gh`, the secret passed on stdin), `houston deploy --server` (GO), then the data by the runbook: SQLite's `.backup` from a throwaway Alpine container on Coolify's volume (`09c994eok5y0tq4cbvibcte6-estherpictures-data`), streamed into `estherpictures_data` (uid 999), with snapshots before (066ba5c1) and after (83a90eca), `houston maintenance on/off` around it. Every table's row count matched; the home page's text was identical to Coolify's.
+     - Houston's Cloudflare token first could see the zone but not its records ("Authentication error"); the token was given DNS access to `estherpictures.com`.
+     - The window (about 20:58–21:01 UTC, about 3 minutes down): Coolify's app stopped in its UI, a safety snapshot (808e5a77), the final copy (the same counts), Coolify's two CNAMEs deleted by ID after checking each pointed at its tunnel (`c7de32ad…`, no comment; saved for a rollback), the domains commit pushed (deploy #3 GO, `estherpictures.com` and `www.` DNS OK, `managed-by:houston project:estherpictures`), maintenance off.
+     - Checked: both names 10 × 200, www → the apex with path and query, the uploads serve, LiveView's websocket opens on both names. A snapshot after (f8ff0e2d).
+     - `SECRET_KEY_BASE` is new, so people signed in on Coolify sign in again.
+     - The way back, until Coolify's volume is removed: recreate the two records (saved), delete Houston's, start Coolify's app.
 4. **valleybuilt** (moved on 2026-09-24; its repo is `git@github.com:scttymn/valleybuiltcrossfit.git`):
    - **Its data came across after all**, by hand (the runbook, done once), about 07:45. Coolify's copy was running again (volume `jifewmynkknfmtkmhuy4vrai-storage-v5`; the earlier v1–v4 volumes are stale):
      - the four databases were copied with SQLite's `.backup` from inside the running container, then integrity-checked
@@ -115,6 +126,13 @@ It's an operation on your machines, so the checks are live, recorded in the tran
 | 7 | The way back is written down and possible until Coolify's copy is removed | the runbook in this plan | Crash & repair |
 
 ## Later (named, not built)
+- **Found dogfooding estherpictures' move (2026-09-24):**
+  - `houston init` guessed port 8080 when the Dockerfile says `EXPOSE 4000`.
+  - `houston init`'s `.env` has blank secrets and says only "created .env (SECRET_KEY_BASE)"; `houston dev` then starts the app with a required variable empty, without a warning.
+  - `houston deploy --server` redeploys a commit that's already GO (the webhook's ping had just deployed it); it could say "already serving 1e2d7dd".
+  - A Cloudflare API failure reads "houston: error code: 502"; it could say that Cloudflare failed, nothing changed, and to try again.
+  - There's no command to stop and start an app, and bringing data in needs one (`houston import`).
+  - The pre-flight check could confirm the token can edit each project domain's zone, before a cut-over finds out.
 - **Rename a storage location** from Settings › Storage, and with `houston storage rename <old> <new>` (CLI-first). Found at first run: the production VM's local-path location is named `unas`, which the real UNAS over NFS will want. A name is only a label, since projects and volumes point at the location's row, not its name. So a rename changes what Settings, `houston storage`, `houston volumes` and the snapshot lists show, and nothing on disk or in restic. The usual rules apply: lowercase letters, digits and dashes, and unique.
 
 ## Decisions (yours)
