@@ -68,7 +68,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
 
   test "create snapshot needs the admin" do
     post project_backups_path("equip")
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal 0, BackupRun.count
   end
 

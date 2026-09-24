@@ -15,7 +15,10 @@ Rails.application.routes.draw do
     match "*path", to: "webhooks#not_found", via: :all, format: false
   end
 
-  resource :session, only: %i[ new create destroy ]
+  # Signing in is at /sign-in; the form posts to /session, and signing out deletes it.
+  get "sign-in", to: "sessions#new", as: :sign_in
+  get "session/new", to: redirect("/sign-in")
+  resource :session, only: %i[ create destroy ]
   resource :setup, only: %i[ show create ], controller: "setup"
   namespace :setup do
     resource :cloudflare, only: %i[ show create ], controller: "cloudflare"

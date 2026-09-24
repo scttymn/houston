@@ -32,7 +32,7 @@ class ProjectVolumesTest < ActionDispatch::IntegrationTest
 
   test "volumes need the admin" do
     patch project_volume_path("equip", "storage"), params: { location: "unas-nfs" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal 0, ProjectVolume.count
   end
 end

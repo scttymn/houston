@@ -308,9 +308,9 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
     sign_out
     use_fake_git(FakeGit.new(&responder)) do |git|
       get link_path
-      assert_redirected_to new_session_path
+      assert_redirected_to sign_in_path
       check
-      assert_redirected_to new_session_path
+      assert_redirected_to sign_in_path
       read
       post link_path
       assert_empty git.calls
@@ -319,7 +319,7 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
 
     draft = RepoLink.start!(URL)
     delete link_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert RepoLink.exists?(draft.id), "Cancel signed out destroyed a draft"
   end
 

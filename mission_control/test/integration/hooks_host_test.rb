@@ -5,7 +5,7 @@ require "test_helper"
 class HooksHostTest < ActionDispatch::IntegrationTest
   test "hooks.<base> serves only the webhook and the ping" do
     host! "hooks.svnmns.com"
-    [ [ :get, "/session/new" ], [ :get, "/" ], [ :post, "/link" ], [ :get, "/projects/x" ], [ :get, "/up" ], [ :get, "/setup" ],
+    [ [ :get, "/sign-in" ], [ :get, "/" ], [ :post, "/link" ], [ :get, "/projects/x" ], [ :get, "/up" ], [ :get, "/setup" ],
       [ :post, "/api/projects/sync" ], [ :get, "/equip" ], [ :post, "/projects/equip/secrets/X/generate" ] ].each do |verb, path|
       send(verb, path)
       assert_response :not_found, "#{verb.upcase} #{path}"
@@ -17,7 +17,7 @@ class HooksHostTest < ActionDispatch::IntegrationTest
     assert_equal Installation.identity, response.body
 
     host! "admin.svnmns.com"
-    get "/session/new"
+    get "/sign-in"
     assert_response :success
   end
 end

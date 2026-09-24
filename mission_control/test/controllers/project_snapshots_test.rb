@@ -70,7 +70,7 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
   test "snapshots need the admin" do
     fake = listing
     use_fake_docker(fake) { get project_snapshots_path("equip") }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_empty fake.calls
   end
 end

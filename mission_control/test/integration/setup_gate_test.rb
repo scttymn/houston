@@ -4,7 +4,7 @@ class SetupGateTest < ActionDispatch::IntegrationTest
   setup { Session.delete_all; User.delete_all }
 
   test "every page leads to setup until an admin exists" do
-    [ "/", "/session/new" ].each do |path|
+    [ "/", "/sign-in" ].each do |path|
       get path
       assert_redirected_to setup_path, "#{path} should lead to setup"
     end
@@ -32,9 +32,9 @@ class SetupGateTest < ActionDispatch::IntegrationTest
     assert_redirected_to setup_cloudflare_path
 
     delete session_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     get root_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
   end
 
   test "the admin is taken to the storage step" do

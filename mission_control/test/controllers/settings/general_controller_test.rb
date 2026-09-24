@@ -47,7 +47,7 @@ class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
 
   test "settings need the admin" do
     patch settings_general_path, params: { time_zone: "Europe/Berlin" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal "UTC", Installation.current.time_zone
   end
 end

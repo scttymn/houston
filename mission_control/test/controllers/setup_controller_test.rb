@@ -71,10 +71,10 @@ class SetupControllerTest < ActionDispatch::IntegrationTest
     code = SetupCode.issue!
 
     get setup_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
 
     post setup_path, params: details(code: code, email_address: "second@example.com")
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal 1, User.count
   end
 

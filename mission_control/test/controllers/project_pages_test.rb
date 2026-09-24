@@ -154,7 +154,7 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
 
     sign_out
     put project_secret_path("equip", "SENTRY_DSN"), params: { value: "https://sentry" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_nil @project.secrets.find_by(key: "SENTRY_DSN")
   end
 

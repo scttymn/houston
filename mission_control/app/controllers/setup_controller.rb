@@ -21,6 +21,6 @@ class SetupController < ApplicationController
 
   private
     def closed_once_set_up
-      redirect_to(authenticated? ? root_path : new_session_path) if User.exists?
+      redirect_to(authenticated? ? root_path : sign_in_path) if User.exists?
     end
 end

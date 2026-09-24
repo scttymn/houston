@@ -5,12 +5,12 @@ class SignInTest < ActionDispatch::IntegrationTest
 
   test "pages need a signed-in admin" do
     get root_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
 
     post session_path, params: { email_address: @admin.email_address, password: "wrong" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     get root_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
 
     post session_path, params: { email_address: @admin.email_address, password: "password" }
     assert_redirected_to root_path
@@ -19,7 +19,17 @@ class SignInTest < ActionDispatch::IntegrationTest
 
     delete session_path
     get root_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
+  end
+
+  test "signing in is at /sign-in" do
+    get "/sign-in"
+    assert_response :success
+    assert_select "form[action='/session'][method=post]", 1
+
+    get "/session/new"
+    assert_redirected_to "/sign-in", "old bookmarks still work"
+    assert_response :moved_permanently
   end
 
   test "password reset is gone" do

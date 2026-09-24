@@ -4,7 +4,7 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
   setup { @user = User.take }
 
   test "new" do
-    get new_session_path
+    get sign_in_path
     assert_response :success
     assert_select ".topbar", 0, "signing in needs no top bar"
     assert_select "form[action='#{session_path}']", 1
@@ -20,7 +20,7 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
   test "create with invalid credentials" do
     post session_path, params: { email_address: @user.email_address, password: "wrong" }
 
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_nil cookies[:session_id]
   end
 
@@ -29,7 +29,7 @@ class SessionsControllerTest < ActionDispatch::IntegrationTest
 
     delete session_path
 
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_empty cookies[:session_id]
   end
 end

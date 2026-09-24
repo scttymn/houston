@@ -53,7 +53,7 @@ class ProjectRestoresTest < ActionDispatch::IntegrationTest
 
   test "restoring needs the admin" do
     post project_restores_path("equip"), params: { snapshot: "33333333", location: "unas-nfs", confirm: "equip" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal 0, @project.deploys.where(kind: "restore").count
   end
 end

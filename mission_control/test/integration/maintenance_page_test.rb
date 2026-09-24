@@ -15,7 +15,7 @@ class MaintenancePageTest < ActionDispatch::IntegrationTest
   test "the maintenance page" do
     [ "equip.svnmns.com", "equipping.com" ].each do |host|
       host! host
-      [ "/", "/deep/path?x=1", "/session/new", "/api/v1/me" ].each do |path|
+      [ "/", "/deep/path?x=1", "/sign-in", "/api/v1/me" ].each do |path|
         get path
         assert_response :service_unavailable, "#{host}#{path}"
         assert_equal "60", response.headers["Retry-After"]
@@ -68,7 +68,7 @@ class MaintenancePageTest < ActionDispatch::IntegrationTest
   test "an app host not in maintenance is a plain 404" do
     @project.update!(maintenance_since: nil)
     host! "equip.svnmns.com"
-    get "/session/new"
+    get "/sign-in"
     assert_response :not_found
     assert_not_includes response.body, "Sign in"
     post "/api/v1/projects/equip/maintenance"
@@ -77,7 +77,7 @@ class MaintenancePageTest < ActionDispatch::IntegrationTest
 
   test "Mission Control's own hosts are untouched" do
     host! "admin.svnmns.com"
-    get "/session/new"
+    get "/sign-in"
     assert_response :success
   end
 end

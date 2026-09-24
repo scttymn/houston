@@ -40,7 +40,7 @@ took=$(until_code 503)
 settle 503 "$url/up"
 body=$(curl -s --max-time 10 "$url/")
 printf '%s' "$body" | grep -q "is down for maintenance" && printf '%s' "$body" | grep -q "Back by 10:00" && ok "the page: the name and the message" || bad "page: $(printf '%s' "$body" | head -c 300)"
-[ "$(code_of "$url/session/new")" = 503 ] && ! curl -s --max-time 10 "$url/session/new" | grep -qi "sign in" && ok "Mission Control's sign-in never answers on the app's hostname" || bad "sign-in on the app host"
+[ "$(code_of "$url/sign-in")" = 503 ] && ! curl -s --max-time 10 "$url/sign-in" | grep -qi "sign in" && ok "Mission Control's sign-in never answers on the app's hostname" || bad "sign-in on the app host"
 
 vm sh -c "docker ps -q --filter label=service=$app | xargs -r docker stop" >/dev/null
 settle 503 "$url/up"

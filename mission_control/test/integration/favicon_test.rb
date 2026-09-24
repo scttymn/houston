@@ -5,7 +5,7 @@ require "test_helper"
 # URLs: Cloudflare caches them for a year, so a changed logo needs a new URL.
 class FaviconTest < ActionDispatch::IntegrationTest
   test "the favicon is the lander, following the browser's light or dark mode" do
-    get new_session_path
+    get sign_in_path
     svg, png = %w[image/svg+xml image/png].map { |type| css_select("link[rel=icon][type='#{type}']").first&.[]("href") }
     assert_match %r{\A/assets/icon-\h+\.svg\z}, svg.to_s
     assert_match %r{\A/assets/icon-\h+\.png\z}, png.to_s
@@ -23,7 +23,7 @@ class FaviconTest < ActionDispatch::IntegrationTest
   end
 
   test "the sign-in page shows the patch; the top bar shows the lander" do
-    get new_session_path
+    get sign_in_path
     assert_select "img.signin__patch[src^='/assets/patch-'][src$='.svg'][alt='Houston Mission Control'][width='320']", 1
     patch = css_select("img.signin__patch").first["src"]
     get patch

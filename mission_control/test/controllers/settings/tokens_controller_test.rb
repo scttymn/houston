@@ -47,9 +47,9 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
   test "tokens need the admin" do
     sign_out
     get settings_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     post settings_tokens_path, params: { name: "sneaky" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_equal 0, ApiToken.count
   end
 end

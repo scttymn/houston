@@ -47,7 +47,7 @@ class ProjectMaintenanceTest < ActionDispatch::IntegrationTest
   test "maintenance needs the admin" do
     pushes = record_pushes
     patch project_maintenance_path("equip"), params: { on: "1" }
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
     assert_empty pushes
   end
 
@@ -69,6 +69,6 @@ class ProjectMaintenanceTest < ActionDispatch::IntegrationTest
 
     delete session_path
     get preview_project_maintenance_path("equip")
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
   end
 end

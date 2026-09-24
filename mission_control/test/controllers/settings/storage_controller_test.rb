@@ -86,6 +86,6 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
   test "storage needs the admin" do
     delete session_path
     get settings_path
-    assert_redirected_to new_session_path
+    assert_redirected_to sign_in_path
   end
 end
