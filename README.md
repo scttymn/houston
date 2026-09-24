@@ -40,7 +40,7 @@ Finish setup at  http://<server address>:3000
 Setup code       XXXX-XXXX
 ```
 
-Rerunning the installer repairs and updates, and keeps the secrets. `HOUSTON_RUNNERS=3` changes how many runners there are.
+Rerunning the installer repairs and updates, and keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
 
 ## 2. First run (in the browser)
 

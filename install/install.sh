@@ -357,6 +357,19 @@ start() {
   step "Starting Houston"
   compose up -d --remove-orphans >/dev/null 2>&1 || compose up -d --remove-orphans
 
+  # The runners run the host's houston CLI, mounted as a file, and a running
+  # container keeps the binary it started with. So they're recreated to pick
+  # up this one. A deploy in flight on one is abandoned: NO-GO, and the old
+  # version keeps serving.
+  runners=""
+  i=1
+  while [ "$i" -le "$RUNNERS" ]; do
+    runners="$runners houston-runner-$i"
+    i=$((i + 1))
+  done
+  # shellcheck disable=SC2086 # one word per runner
+  compose up -d --no-deps --force-recreate $runners >/dev/null 2>&1 || compose up -d --no-deps --force-recreate $runners
+
   tries=0
   until curl -fs -o /dev/null http://127.0.0.1:3000/up; do
     tries=$((tries + 1))
