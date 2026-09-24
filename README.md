@@ -6,8 +6,8 @@ A small self-hosted deploy orchestrator. Each project is one Docker Compose file
 
 Houston ties proven tools together rather than reinventing them: Docker runs everything, Compose describes the app, Kamal deploys it, restic backs it up, and a Cloudflare Tunnel is the only way in. It knows no frameworks. A static site, Rails, Phoenix or anything else that builds a Docker image works the same way.
 
-- [The spec](https://claude.ai/artifact/R3d4fzN1u5QUP4kT88mqug): what Houston is and why.
 - [`docs/plans/`](docs/plans): how each part was built, with what was tested and found.
+- [Releases](https://github.com/scttymn/houston/releases): the CLI for macOS and Linux, and the installer. Mission Control's and the runner's images are on ghcr.io.
 
 ## What you need
 
@@ -19,11 +19,10 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 
 ## 1. Install the server
 
-Images aren't published yet, so the server builds Houston from a checkout of this repo:
+Pick a release from [Releases](https://github.com/scttymn/houston/releases) and install it:
 
 ```sh
-git clone https://github.com/scttymn/houston.git ~/houston
-sudo HOUSTON_SOURCE=$HOME/houston sh ~/houston/install/install.sh
+curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.1.0 sh
 ```
 
 The installer:
@@ -31,18 +30,22 @@ The installer:
 - installs Docker, git and an SSH server if they're missing, and starts them. Docker comes from Docker's own repository on apt and dnf, and from Arch's packages on pacman
 - creates a `houston` user, and checks it can SSH to the server (Kamal deploys over SSH)
 - generates Mission Control's secrets in `/opt/houston/.env`, which you must keep: losing them locks away every encrypted secret
-- builds Mission Control, the CLI and the runner image
+- pulls that version's Mission Control and runner images, and installs its CLI, checked against the release's `SHA256SUMS`. It checks the version exists before changing anything
 - starts everything from `/opt/houston/compose.yml`: Mission Control, a registry on `localhost:5000`, and two runners
 
 It ends with a URL and a one-time **setup code**:
 
 ```
-Houston is running.
+Houston v0.1.0 is running.
 Finish setup at  http://<server address>:3000
 Setup code       XXXX-XXXX
 ```
 
-Rerunning the installer repairs and updates, and keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
+**To update,** run it again with the new version. Rerunning the installer also repairs, and it keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
+
+The flight board's header and `houston status` say which version is running.
+
+**From a checkout** (working on Houston): `sudo HOUSTON_SOURCE=/path/to/houston sh install/install.sh` builds everything there, instead of pulling a release. The flight board then says `SOURCE <commit>`. Set one of `HOUSTON_VERSION` and `HOUSTON_SOURCE`, not both.
 
 ## 2. First run (in the browser)
 
@@ -54,19 +57,22 @@ Open the URL. The three steps:
    - `hooks.<base>` → Mission Control, webhook paths only
    - everything else → your apps
 
-   It also makes a proxied `*.<base>` record commented `managed-by:houston`, then connects the server. It never touches a DNS record without that comment.
+   For the apps' names, it makes a proxied `*.<base>` record commented `managed-by:houston`. If another server already has `*.<base>`, it leaves that alone and gives each app its own `<name>.<base>` record at its first deploy instead. Then it connects the server. It never touches a DNS record without that comment.
 3. **Default backup storage:** a location, a test write, and a restic password shown **once**. Save the password before you continue: without it the backups can't be read.
 
 Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of it is optional and recommended. Keep `hooks.<base>` outside Access.
 
 ## 3. Install the CLI (your laptop)
 
+Download it from the same release as the server (`darwin` or `linux`, `arm64` or `amd64`):
+
 ```sh
-git clone https://github.com/scttymn/houston.git && cd houston
-bin/install            # builds houston for this machine into ~/.local/bin, plus a `hou` symlink
+curl -fsSLo ~/.local/bin/houston https://github.com/scttymn/houston/releases/download/v0.1.0/houston-darwin-arm64
+chmod +x ~/.local/bin/houston && ln -sf houston ~/.local/bin/hou
+houston --version
 ```
 
-`bin/release` builds all four platforms (macOS or Linux, arm64 or amd64) into `dist/`.
+From a checkout, `bin/install` builds it for this machine into `~/.local/bin` instead, and `bin/release` builds all four into `dist/`.
 
 Then make an API token in Mission Control (**Settings › API tokens**) and log in:
 
@@ -209,6 +215,8 @@ bin/test-integration                 # the same, plus the ones that drive real D
 houston -f mission_control/compose.yml test    # Mission Control's suite, run by Houston itself
 ```
 
-The real runs are in `install/test/`. Each creates a throwaway OrbStack machine and installs Houston on it:
+**Releasing:** push a tag like `v0.2.0`. `.github/workflows/release.yml` runs the tests (Go, Mission Control, the installer), then publishes both images at that tag and a GitHub Release with the CLI binaries, `install.sh` and `SHA256SUMS`. Nothing is published unless the tests pass.
+
+`install/test/install-version.sh` checks installing a release, against a fake GitHub, in a container. The other real runs are in `install/test/`. Each creates a throwaway OrbStack machine and installs Houston on it:
 - `orbstack.sh ubuntu:noble` runs the whole install, including the real Cloudflare tunnel when `mission_control/.houston/cloudflare-check.env` exists.
 - `deploy-e2e.sh`, `backups-e2e.sh`, `restore-e2e.sh`, `init-e2e.sh` and others cover the rest.
