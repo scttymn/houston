@@ -5,7 +5,7 @@ require "open3"
 # then the branch and compose path, then what `houston inspect` read. Save
 # turns it into the project's link (ProjectLinking).
 class RepoLink < ApplicationRecord
-  encrypts :deploy_key_private
+  encrypts :deploy_key_private, :webhook_secret
 
   # Only what git should ever be asked to fetch: https://, ssh://, or
   # scp-style user@host:path. No credentials in the URL, no options (-x),
@@ -21,12 +21,13 @@ class RepoLink < ApplicationRecord
   validates :branch, format: { with: BRANCH, message: "isn't a branch name git accepts" }
   validates :compose_path, format: { with: COMPOSE_PATH, message: "must be a .yml or .yaml path inside the repo" }
 
-  # A new draft for repo_url with a fresh ed25519 key. Drafts older than a
-  # day are dropped: nobody finishes linking a repo a day later.
+  # A new draft for repo_url with a fresh ed25519 key and webhook secret
+  # (Add project shows both before Save). Drafts older than a day are
+  # dropped: nobody finishes linking a repo a day later.
   def self.start!(repo_url)
     where(created_at: ...1.day.ago).delete_all
     private_key, public_key = generate_key
-    create!(repo_url:, deploy_key_private: private_key, deploy_key_public: public_key)
+    create!(repo_url:, deploy_key_private: private_key, deploy_key_public: public_key, webhook_secret: SecureRandom.urlsafe_base64(32))
   end
 
   def self.generate_key

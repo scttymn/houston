@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_24_052437) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_24_053555) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -166,6 +166,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_24_052437) do
     t.string "preview_sha"
     t.string "repo_url", null: false
     t.datetime "updated_at", null: false
+    t.text "webhook_secret"
   end
 
   create_table "runners", force: :cascade do |t|

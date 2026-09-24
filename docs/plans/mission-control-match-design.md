@@ -69,8 +69,43 @@ Layout, from `ProjectDetail.dc.html`:
   - Backup plan keeps its storage menu.
   - "Add secret" is left out, since secrets come from compose.yml.
 
-## Batch 2: Add project (title only until Batch 1 is green)
-`AddProject.dc.html`: step 01 on the left (repo, deploy key with GO or NO-GO, branch and config side by side, Read); on the right, 02 What Houston found, 03 Secrets, 04 Connect pushes, then Cancel, Save and Deploy. Decisions 2 and 3.
+## Batch 2: Add project
+Layout, from `AddProject.dc.html`:
+- **Left, 01 Link the repo:** the repo URL and Check access; the deploy key box with its GO or NO-GO line; branch and config path side by side; Read compose.yml; the `houston init` hint.
+- **On the right, once compose.yml is read:**
+  - 02 What Houston found
+  - 03 Secrets: one row per variable in compose.yml, with a password field, "Required" or "Optional"
+  - 04 Connect pushes: the webhook URL and secret with Copy, and what to send
+  - then Cancel, Save and Deploy, with a line saying required secrets left blank hold deploys
+- **Before the read,** the right side says what will appear there.
+
+Behaviour (decisions 2 and 3):
+- **The webhook secret** is made with the draft, so step 04 can show it before Save. Linking a project again keeps its secret, and shows that one.
+- **Secrets entered here are saved with the project** in the same transaction. Blank fields are skipped, and a name compose.yml doesn't list is ignored. A value the container can't receive refuses the whole Save: the draft is kept and the field says why.
+- **Deploy** saves, then queues the head the deploy rule matches (as the project page's Deploy does) and opens its log. If the repo can't be read at that point, the project is still saved, and the project page says why nothing deployed.
+- **No volume step:** every volume starts on Local disk, and placement is on the project page. The `locations` parameter is gone.
+
+Where it differs from the design, on purpose:
+- No "Add secret" or Remove, since secrets come from compose.yml.
+- Domains are listed without the design's per-domain DNS readiness, since checking it needs Cloudflare calls at read time. The project page shows it after Save.
+
+### AC ↔ test map (Batch 2, `test/controllers/project_links_test.rb`)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | Step 01 is on the left; after the read, 02, 03 and 04 are on the right in order, and before it the right side has a placeholder and no secrets panel | `test "the steps sit where the design has them"` | Parity |
+| 2 | Secrets typed on Add project are saved with the project, write-only; blank ones are skipped; names outside compose.yml are ignored | `test "secrets set on Add project are saved with it"` | Contract |
+| 3 | A secret the container can't receive refuses Save: no project, no secrets, the draft kept, the error on its field | `test "a bad secret refuses the whole save"` | Atomicity |
+| 4 | The webhook secret shown in step 04 is the one the project gets; linking again shows and keeps the project's own | `test "the webhook secret is shown before saving and kept"` | Contract |
+| 5 | Deploy saves and queues the head, then opens its log; when the repo can't be read, the project is saved and the page says why | `test "Deploy saves then deploys; a failed read still saves"` | Crash & repair |
+| 6 | No volume step; volumes start on Local disk, and a `locations` parameter changes nothing | `test "volumes start on local disk; placement is on the project page"` | Honest surface |
+| 7 | Every existing Add project test still passes (hostile input, access, read, clash, admin, needs a read) | the file | Parity |
+
+### Batch 2: done
+- **Red first:** the six new rows failed (no layout, no secrets field, no webhook secret before Save, no Deploy, and a volume menu still shown).
+- **Green:** the Mission Control suite passes, 292 runs with 0 failures, and rubocop is clean. The migration (`repo_links.webhook_secret`, encrypted) runs both ways.
+- **Visual check** (rendered after a read, served with the real fonts): at 1440 wide it follows AddProject, with 01 on the left and 02, 03 and 04 with Cancel, Save and Deploy on the right. At 375 wide the document is 375 wide.
+- **Found while fixing:** a Save with no draft showed nothing, because its error sat inside the draft-only part of the page. It's a NO-GO notice at the top of the right side now.
+
 
 ## Batch 3: every other screen against its artboard (titles only)
 The projects list (`Main`, `ProjectsEmpty`), the deploy log (`DeployLog`), restore (`Restore`), Settings (`Settings`), and first run (`SetupAdmin`, `SetupCloudflare`, `SetupStorage`). An audit table first (artboard vs screen), then the fixes.

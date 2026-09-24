@@ -125,7 +125,7 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       assert_select ".found", /db · postgres:17/
       assert_select ".found", /Every commit to main · tests run first/
       assert_select ".found", /daily 03:00.*pgdata, storage/m
-      assert_select ".found", /POSTGRES_PASSWORD/
+      assert_select ".link-secrets", /POSTGRES_PASSWORD/
       assert_select "button", /Save/
     end
 
@@ -172,20 +172,101 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "choosing volume locations when saving" do
+  # The design's AddProject: step 01 on the left; 02-04 and Save on the right.
+  test "the steps sit where the design has them" do
+    use_fake_git(FakeGit.new(&responder)) do
+      get link_path
+      assert_select ".link-grid > .link-repo .panel__title", /01\s*Link the repo/i
+      assert_select ".link-grid > .link-side", /Read compose\.yml to see what Houston found/
+      assert_select ".link-secrets", 0
+
+      check
+      read
+      titles = css_select(".link-grid > .link-side .panel__title").map { |t| t.text.squish }
+      assert_equal [ "02 What Houston found", "03 Secrets", "04 Connect pushes" ], titles
+      assert_equal %w[Save Deploy], css_select(".link-side .link-save button").map { |b| b.text.strip }
+      assert_select ".link-side .link-save a", "Cancel"
+    end
+  end
+
+  test "secrets set on Add project are saved with it" do
     use_fake_git(FakeGit.new(&responder)) do
       check
       read
-      assert_select "select[name='locations[storage]'] option", 2
-      # Step 03, a panel like the others; each choice says where it is.
-      assert_select ".link-step .panel__title", /03 Where the data lives/i
-      assert_select ".link-step [data-volume=storage] select option", text: "Local disk (this server)"
-      assert_select ".link-step [data-volume=storage] select option[value=unas-nfs]", text: "unas-nfs (NFS, #{storage_locations(:unas).where_it_is})"
-      assert_select ".link-step .panel__row--muted", /backups go to/i
+      assert_select ".link-secrets [data-secret=POSTGRES_PASSWORD] input[type=password][placeholder=Required]"
+      assert_select ".link-secrets [data-secret=SENTRY_DSN] input[type=password][placeholder=Optional]"
+      post link_path, params: { secrets: { POSTGRES_PASSWORD: "pg-secret-123", SENTRY_DSN: "", NOT_IN_THE_FILE: "x" } }
+      assert_redirected_to project_path("garage")
+    end
+    project = Project.find_by!(name: "garage")
+    assert_equal({ "POSTGRES_PASSWORD" => "pg-secret-123" }, project.secrets.to_h { |s| [ s.key, s.value ] })
+    follow_redirect!
+    assert_not_includes response.body, "pg-secret-123"
+  end
+
+  test "a bad secret refuses the whole save" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      post link_path, params: { secrets: { POSTGRES_PASSWORD: "ok-value", SENTRY_DSN: 'C:\\data' } }
+      assert_response :unprocessable_entity
+      assert_select ".link-secrets [data-secret=SENTRY_DSN] .field__error", /backslash/
+      assert_not_includes response.body, "ok-value"
+    end
+    assert_nil Project.find_by(name: "garage")
+    assert_equal 0, Secret.count
+    assert_equal 1, RepoLink.count
+  end
+
+  test "the webhook secret is shown before saving and kept" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      shown = css_select(".link-webhook [data-webhook-secret]").first.text.strip
+      assert_operator shown.length, :>=, 43
+      assert_select ".link-webhook", %r{https://hooks\.svnmns\.com/garage}
+      post link_path
+      assert_equal shown, Project.find_by!(name: "garage").webhook_secret
+
+      check
+      read
+      assert_select ".link-webhook [data-webhook-secret]", shown
+      post link_path
+      assert_equal shown, Project.find_by!(name: "garage").webhook_secret
+    end
+  end
+
+  test "Deploy saves then deploys; a failed read still saves" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      post link_path, params: { deploy: "1" }
+    end
+    project = Project.find_by!(name: "garage")
+    assert_redirected_to project_deploy_path("garage", 1)
+    assert_equal [ "4be21c0aa11b2c3d4e5f60718293a4b5c6d7e8f9", "queued" ], project.deploys.sole.values_at(:sha, :status)
+
+    project.destroy!
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+    end
+    use_fake_git(FakeGit.new(&responder(ls_remote: git_failure("fatal: Could not read from remote repository.")))) { post link_path, params: { deploy: "1" } }
+    assert_redirected_to project_path("garage")
+    assert Project.find_by(name: "garage")
+    follow_redirect!
+    assert_select ".notice--nogo", /Could not read from remote repository/
+  end
+
+  test "volumes start on local disk; placement is on the project page" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      assert_select "select", 0
       post link_path, params: { locations: { storage: "unas-nfs" } }
       assert_redirected_to project_path("garage")
     end
-    assert_equal storage_locations(:unas), Project.find_by!(name: "garage").project_volumes.find_by!(name: "storage").location
+    assert_empty Project.find_by!(name: "garage").project_volumes.where.not(location_id: nil)
   end
 
   test "saving refuses a container-name clash and links a project houston deploy registered" do

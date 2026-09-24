@@ -1,14 +1,31 @@
 # Save on the Add project page: the project from what houston inspect read
 # (through ProjectSync, so its rules and the container-name index apply),
-# linked to the repo. The same model is what `houston link --server` will
-# call (build step 4b).
+# linked to the repo, with the secrets typed on the page. The same model is
+# what `houston link --server` calls.
 class ProjectLinking
   class Refused < StandardError; end
 
-  # locations: volume name → a location's name, or blank for local disk.
-  def initialize(link, locations: {})
+  # A secret the container can't receive: nothing is saved.
+  class SecretsRefused < Refused
+    attr_reader :errors # name → message
+
+    def initialize(errors)
+      @errors = errors
+      super("#{errors.keys.to_sentence} can't be saved")
+    end
+  end
+
+  # secrets: name → value, from Add project; blank ones and names compose.yml
+  # doesn't list are left out.
+  def initialize(link, secrets: {})
     @link = link
-    @locations = locations.to_h
+    @secrets = secrets.to_h.transform_keys(&:to_s)
+  end
+
+  # The project's own when it's linked again (a repo's webhook keeps working),
+  # else the draft's: what Add project shows in step 04 before Save.
+  def webhook_secret
+    existing&.webhook_secret.presence || @link.webhook_secret.presence
   end
 
   def save!
@@ -17,22 +34,36 @@ class ProjectLinking
     sync = ProjectSync.new(@link.preview["sync"])
     raise Refused, sync.errors.map { |field, messages| "#{field} #{messages.to_sentence}" }.to_sentence unless sync.valid?
 
-    existing = Project.find_by(name: @link.preview.dig("sync", "name"))
     if existing&.repo_url.present? && existing.repo_url != @link.repo_url
       raise Refused, "#{existing.name} is already linked to #{existing.repo_url}"
     end
 
-    project = sync.save!(link: {
-      repo_url: @link.repo_url, branch: @link.branch, compose_path: @link.compose_path,
-      deploy_key_private: @link.deploy_key_private, deploy_key_public: @link.deploy_key_public,
-      webhook_secret: existing&.webhook_secret.presence || SecureRandom.urlsafe_base64(32)
-    })
-    @locations.each do |volume, name|
-      ProjectVolume.choose!(project, volume.to_s, name.presence && StorageLocation.find_by!(name:))
+    secrets = wanted_secrets
+    errors = secrets.to_h { |key, value| [ key, Secret.new(key:, value:).tap(&:validate).errors[:value].to_sentence ] }.compact_blank
+    raise SecretsRefused, errors if errors.any?
+
+    Project.transaction do
+      project = sync.save!(link: {
+        repo_url: @link.repo_url, branch: @link.branch, compose_path: @link.compose_path,
+        deploy_key_private: @link.deploy_key_private, deploy_key_public: @link.deploy_key_public,
+        webhook_secret: webhook_secret || SecureRandom.urlsafe_base64(32)
+      })
+      secrets.each { |key, value| project.secrets.find_or_initialize_by(key:).update!(value:) }
+      @link.destroy!
+      project
     end
-    @link.destroy!
-    project
-  rescue ProjectSync::Refused, ProjectVolume::Refused, ProjectVolume::Placed => e
+  rescue ProjectSync::Refused => e
     raise Refused, e.message
   end
+
+  private
+    def existing
+      return @existing if defined?(@existing)
+      @existing = @link&.found? ? Project.find_by(name: @link.preview.dig("sync", "name")) : nil
+    end
+
+    def wanted_secrets
+      names = @link.preview.dig("sync", "variables").to_a.map { |v| v["name"] }
+      @secrets.slice(*names).reject { |_, value| value.blank? }
+    end
 end

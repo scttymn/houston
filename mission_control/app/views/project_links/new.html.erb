@@ -1,97 +1,127 @@
 <% content_for :title, "Add project · Mission Control" %>
-<% found = @link&.preview %>
-<main class="page board link">
-  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / Add project</nav>
-  <div class="board__title">
+<%# Laid out as the design's AddProject: step 01 on the left, then 02-04 and Save on the right. %>
+<% found = @link&.found? ? @link.preview : nil %>
+<main class="page link">
+  <div class="link-intro">
+    <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <span class="crumbs__here">Add project</span></nav>
     <h1 class="disp">Add project</h1>
-    <p>Link a repo. Mission Control reads its compose.yml, then you set its secrets on the project's page.</p>
+    <p>Link a repo. Mission Control reads its compose.yml, takes its secrets, and gives you a webhook so every push reaches Houston.</p>
   </div>
 
-  <section class="panel link-step">
-    <h2 class="disp panel__title"><span class="mono">01</span> Link the repo</h2>
-    <%= form_with url: link_access_path, class: "panel__row", data: { turbo: false } do |f| %>
-      <%= f.label :repo_url, "Repo URL" %>
-      <%= f.text_field :repo_url, value: @entered_url || @link&.repo_url, class: "mono", placeholder: "git@github.com:you/app.git", autocomplete: "off" %>
-      <span class="field__hint">Any git host. SSH or HTTPS URL.</span>
-      <% if @url_error %><span class="field__error">The repo URL <%= @url_error %></span><% end %>
-      <%= f.submit "Check access", class: "button button--small" %>
-    <% end %>
-    <% if @link %>
-      <div class="panel__row" data-controller="clipboard">
-        <span class="mono eyebrow">READ ACCESS · DEPLOY KEY</span>
-        <span>Add this key to the repo as a read-only deploy key. Public repos can skip it.</span>
-        <pre class="mono deploy-key" data-clipboard-target="source"><%= @link.deploy_key_public %></pre>
-        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
-      </div>
-    <% end %>
-    <% if @access %>
-      <p class="panel__row check"><span class="mono check__state check__state--<%= @access.ok ? "go" : "nogo" %>"><%= @access.ok ? "GO" : "NO-GO" %></span><span><%= @access.message %></span></p>
-    <% end %>
-  </section>
+  <div class="link-grid">
+    <section class="panel link-step link-repo">
+      <div class="panel__head"><h2 class="disp panel__title"><span class="mono step-number">01</span> Link the repo</h2></div>
+      <div class="link-repo__body">
+        <%= form_with url: link_access_path, class: "field", data: { turbo: false } do |f| %>
+          <%= f.label :repo_url, "Repo URL" %>
+          <span class="field__with-button">
+            <%= f.text_field :repo_url, value: @entered_url || @link&.repo_url, class: "mono", placeholder: "git@github.com:you/app.git", autocomplete: "off",
+                             "aria-invalid": (@url_error.present? ? "true" : nil) %>
+            <%= f.submit "Check access", class: "button button--medium" %>
+          </span>
+          <span class="field__hint">Any git host. SSH or HTTPS URL.</span>
+          <% if @url_error %><span class="field__error">The repo URL <%= @url_error %></span><% end %>
+        <% end %>
 
-  <% if @link %>
-    <section class="panel link-step">
-      <h2 class="disp panel__title"><span class="mono">02</span> Read compose.yml</h2>
-      <%= form_with url: link_read_path, class: "panel__row", data: { turbo: false } do |f| %>
-        <%= f.label :branch, "Branch to read" %>
-        <%= f.text_field :branch, value: @link.branch, class: "mono" %>
-        <% @link.errors[:branch].each do |e| %><span class="field__error">The branch <%= e %></span><% end %>
-        <%= f.label :compose_path, "Config path" %>
-        <%= f.text_field :compose_path, value: @link.compose_path, class: "mono" %>
-        <% @link.errors[:compose_path].each do |e| %><span class="field__error">The config path <%= e %></span><% end %>
-        <%= f.submit "Read compose.yml", class: "button button--small" %>
-      <% end %>
-      <p class="panel__row panel__row--muted"><span>No x-houston block yet? Run <span class="mono">houston init</span> in the repo and push it first.</span></p>
-      <% if @problems %>
-        <div class="panel__row problems"><span class="mono check__state--nogo">NO-GO</span><pre class="mono"><%= @problems %></pre></div>
-      <% end %>
-    </section>
-  <% end %>
+        <% if @link %>
+          <div class="key-box" data-controller="clipboard">
+            <span class="mono eyebrow">READ ACCESS · DEPLOY KEY</span>
+            <span>Add this key to the repo as a read-only deploy key. Public repos can skip it.</span>
+            <pre class="mono deploy-key" data-clipboard-target="source"><%= @link.deploy_key_public %></pre>
+            <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy key</button>
+            <% if @access %>
+              <p class="check"><span class="mono check__state check__state--<%= @access.ok ? "go" : "nogo" %>"><%= @access.ok ? "GO" : "NO-GO" %></span><span><%= @access.message %></span></p>
+            <% end %>
+          </div>
 
-  <% if found %>
-    <% sync, pv = found["sync"], found["preview"] %>
-    <section class="panel found">
-      <h2 class="disp panel__title">What Houston found <small class="mono"><%= @link.branch %> @ <%= @link.preview_sha.to_s.first(7) %></small></h2>
-      <dl class="facts">
-        <dt class="mono">NAME</dt><dd class="mono"><%= sync["name"] %> → <%= sync["name"] %>.<%= @installation.base_domain %></dd>
-        <dt class="mono">DOMAINS</dt><dd class="mono"><%= ([ "#{sync["name"]}.#{@installation.base_domain}" ] + sync["domains"]).join(" · ") %></dd>
-        <% app = [ "Port #{pv["port"]}", "health #{pv["health"]}" ] %>
-        <% app << "#{pv["cpus"]} #{"CPU".pluralize(pv["cpus"].to_f)}" if pv["cpus"] %>
-        <% app << pv["memory"] if pv["memory"] %>
-        <dt class="mono">APP</dt><dd><%= app.join(" · ") %></dd>
-        <% services = pv["services"].reject { |s| s["app"] } %>
-        <dt class="mono">SERVICES</dt><dd class="mono"><%= services.map { |s| "#{s["name"]} · #{s["image"]}" }.join(", ").presence || "none besides the app" %></dd>
-        <% rule = sync["deploy_rule"] %>
-        <dt class="mono">DEPLOYS</dt><dd><%= rule["on"] == "tag" ? "Tags matching #{rule["tags"]}" : "Every commit to #{rule["branch"]}" %><%= " · tests run first" if pv["test"] %></dd>
-        <% b = pv["backups"] %>
-        <dt class="mono">BACKUPS</dt><dd><%= b["schedule"] %> · keep <%= b["keep_auto"] %> auto, <%= b["keep_deploy"] %> deploy<%= " · volumes #{b["volumes"].join(", ")}" if b["volumes"].any? %></dd>
-        <dt class="mono">SECRETS</dt><dd class="mono"><%= sync["variables"].map { |v| v["name"] + (v["required"] ? "" : " (optional)") }.join(", ").presence || "none" %></dd>
-      </dl>
-    </section>
-  <% end %>
-
-  <% if @save_error %><p class="field__error"><%= @save_error %></p><% end %>
-  <% if @link %>
-    <%= form_with url: link_path, class: "link-finish" do |f| %>
-      <% volumes = @link.found? ? @link.preview.dig("sync", "volumes").to_a : [] %>
-      <% if volumes.any? %>
-        <section class="panel link-step">
-          <h2 class="disp panel__title"><span class="mono">03</span> Where the data lives</h2>
-          <% live = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?) %>
-          <% volumes.each do |volume| %>
-            <div class="panel__row link-volume" data-volume="<%= volume["name"] %>">
-              <label for="locations_<%= volume["name"] %>"><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span></label>
-              <%= select_tag "locations[#{volume["name"]}]", options_for_select([ [ "Local disk (this server)", "" ] ] + live.map { |l| [ l.choice_label, l.name ] }), class: "mono" %>
+          <%= form_with url: link_read_path, class: "link-read", data: { turbo: false } do |f| %>
+            <div class="field-pair">
+              <div class="field">
+                <%= f.label :branch, "Branch to read" %>
+                <%= f.text_field :branch, value: @link.branch, class: "mono" %>
+                <% @link.errors[:branch].each do |e| %><span class="field__error">The branch <%= e %></span><% end %>
+              </div>
+              <div class="field">
+                <%= f.label :compose_path, "Config path" %>
+                <%= f.text_field :compose_path, value: @link.compose_path, class: "mono" %>
+                <% @link.errors[:compose_path].each do |e| %><span class="field__error">The config path <%= e %></span><% end %>
+              </div>
             </div>
+            <%= f.submit "Read compose.yml", class: "button button--medium link-read__button" %>
           <% end %>
-          <% backups = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
-          <p class="panel__row panel__row--muted"><span>Local disk is the server's own disk, and right for databases. Backups go to <span class="mono"><%= backups&.name || "the default storage" %></span> either way.</span></p>
+          <% if @problems %>
+            <div class="problems"><span class="mono check__state--nogo">NO-GO</span><pre class="mono"><%= @problems %></pre></div>
+          <% end %>
+        <% end %>
+        <p class="panel__row--muted link-hint"><span>No x-houston block yet? Run <span class="mono code-chip">houston init</span> in the repo and push it first.</span></p>
+      </div>
+    </section>
+
+    <div class="link-side">
+      <% if @save_error %><div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= @save_error %></span></div><% end %>
+      <% if found %>
+        <% sync, pv = found["sync"], found["preview"] %>
+        <section class="panel found">
+          <div class="panel__head"><h2 class="disp panel__title"><span class="mono step-number">02</span> What Houston found</h2><span class="mono panel__meta muted"><%= @link.branch %> @ <%= @link.preview_sha.to_s.first(7) %></span></div>
+          <dl class="plan">
+            <dt class="mono">NAME</dt><dd><span class="mono"><%= sync["name"] %></span> → <%= sync["name"] %>.<%= @installation.base_domain %></dd>
+            <dt class="mono">DOMAINS</dt><dd class="plan__list"><% ([ "#{sync["name"]}.#{@installation.base_domain}" ] + sync["domains"]).each do |domain| %><span><%= domain %></span><% end %></dd>
+            <% app = [ "Port #{pv["port"]}", "health #{pv["health"]}" ] %>
+            <% app << "#{pv["cpus"]} #{"CPU".pluralize(pv["cpus"].to_f)}" if pv["cpus"] %>
+            <% app << pv["memory"] if pv["memory"] %>
+            <dt class="mono">APP</dt><dd><%= app.join(" · ") %></dd>
+            <% services = pv["services"].reject { |s| s["app"] } %>
+            <dt class="mono">SERVICES</dt><dd><%= services.map { |s| "#{s["name"]} · #{s["image"]}" }.join(", ").presence || "none besides the app" %></dd>
+            <% rule = sync["deploy_rule"] %>
+            <dt class="mono">DEPLOYS</dt><dd><%= rule["on"] == "tag" ? "Tags matching #{rule["tags"]}" : "Every commit to #{rule["branch"]}" %><%= " · tests run first" if pv["test"] %></dd>
+            <% b = pv["backups"] %>
+            <dt class="mono">BACKUPS</dt><dd><%= b["schedule"] %> · keep <%= b["keep_auto"] %> auto, <%= b["keep_deploy"] %> deploy<%= " · volumes #{b["volumes"].join(", ")}" if b["volumes"].any? %></dd>
+          </dl>
+        </section>
+      <% else %>
+        <section class="panel link-waiting">
+          <p class="panel__row panel__row--muted">Read compose.yml to see what Houston found: the name and domains, the services, and the secrets to set before the first deploy.</p>
         </section>
       <% end %>
-      <div class="link-save">
-        <%= link_to "Cancel", root_path %>
-        <%= f.button "Save", class: "button button--primary", disabled: !found %>
-      </div>
-    <% end %>
-  <% end %>
+
+      <% if @link %>
+        <%= form_with url: link_path, class: "link-finish" do |f| %>
+          <% if found %>
+            <% variables = found.dig("sync", "variables").to_a.sort_by { |v| [ v["required"] ? 0 : 1, v["name"] ] } %>
+            <section class="panel link-secrets">
+              <div class="panel__head"><h2 class="disp panel__title"><span class="mono step-number">03</span> Secrets</h2><span class="panel__meta muted">Set now so the first deploy doesn't stop</span></div>
+              <% if variables.empty? %><p class="panel__row panel__row--muted">compose.yml references no variables.</p><% end %>
+              <% variables.each do |variable| %>
+                <% key, error = variable["name"], @secret_errors.to_h[variable["name"]] %>
+                <div class="link-secret" data-secret="<%= key %>">
+                  <label class="mono" for="secret_<%= key %>"><%= key %></label>
+                  <span class="mono link-secret__source">COMPOSE.YML</span>
+                  <%= password_field_tag "secrets[#{key}]", nil, id: "secret_#{key}", class: "mono", autocomplete: "off", placeholder: variable["required"] ? "Required" : "Optional" %>
+                  <% if error %><span class="field__error"><%= key %> <%= error %></span><% end %>
+                </div>
+              <% end %>
+            </section>
+
+            <section class="panel link-webhook" data-controller="clipboard">
+              <div class="panel__head"><h2 class="disp panel__title"><span class="mono step-number">04</span> Connect pushes</h2><span class="panel__meta muted">In the repo's webhook settings</span></div>
+              <div class="link-webhook__body">
+                <p>Your git host calls this address every time you push. Houston checks the secret, reads the repo's refs itself, and deploys the commit when it matches the deploy rule. Paste both into the repo's webhook settings (GitHub calls the URL "Payload URL").</p>
+                <div class="copy-row"><span class="mono eyebrow">WEBHOOK URL</span><span class="mono copy-row__value">https://hooks.<%= @installation.base_domain %>/<%= found.dig("sync", "name") %></span></div>
+                <div class="copy-row"><span class="mono eyebrow">SECRET</span><span class="mono copy-row__value copy-row__value--dark" data-webhook-secret data-clipboard-target="source"><%= ProjectLinking.new(@link).webhook_secret %></span><button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button></div>
+                <div class="copy-row"><span class="mono eyebrow">SEND</span><span>Push events, as <span class="mono">application/json</span></span></div>
+                <p class="link-webhook__waiting">Waiting for the first push. The secret is shown in full only until one arrives.</p>
+              </div>
+            </section>
+          <% end %>
+
+          <div class="link-save">
+            <span class="muted link-save__note"><%= found ? "Required secrets left blank hold deploys until they have a value." : "Save needs what Houston read from the repo." %></span>
+            <%= link_to "Cancel", root_path, class: "button button--medium button--quiet" %>
+            <%= f.button "Save", class: "button button--medium", disabled: !found %>
+            <%= f.button "Deploy", name: "deploy", value: "1", class: "button button--medium button--primary", disabled: !found %>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
 </main>

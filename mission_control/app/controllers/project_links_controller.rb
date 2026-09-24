@@ -34,10 +34,19 @@ class ProjectLinksController < ApplicationController
     render :new, status: result.ok ? :ok : :unprocessable_entity
   end
 
+  # Save, or Deploy: save, then deploy the head the deploy rule matches.
   def create
-    project = ProjectLinking.new(@link, locations: params.fetch(:locations, {}).permit!.to_h).save!
+    project = ProjectLinking.new(@link, secrets: params.fetch(:secrets, {}).permit!.to_h).save!
     session.delete(:repo_link_id)
-    redirect_to project_path(project.name), notice: "#{project.name} is linked to #{project.repo_url}."
+    return redirect_to project_path(project.name), notice: "#{project.name} is linked to #{project.repo_url}." if params[:deploy].blank?
+
+    deploy = ChangeCheck.new(project).queue_head!
+    redirect_to project_deploy_path(project.name, deploy.number)
+  rescue ChangeCheck::Failed => e
+    redirect_to project_path(project.name), alert: "#{project.name} is linked, but it can't deploy yet: #{e.message}"
+  rescue ProjectLinking::SecretsRefused => e
+    @secret_errors = e.errors
+    render :new, status: :unprocessable_entity
   rescue ProjectLinking::Refused => e
     @save_error = e.message
     render :new, status: :unprocessable_entity
