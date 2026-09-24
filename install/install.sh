@@ -1,5 +1,7 @@
 #!/bin/sh
-# Houston server installer. Run as root on Ubuntu LTS or Debian stable:
+# Houston server installer. Run as root on a Linux that installs packages
+# with apt (Debian, Ubuntu and their derivatives), dnf (Fedora and the RHEL
+# family) or pacman (Arch and its derivatives):
 #
 #   curl -fsSL <install-url>/install.sh | sudo sh
 #
@@ -22,57 +24,166 @@ say() { printf '%s\n' "$*"; }
 compose() { docker compose -f "$HOUSTON_DIR/compose.yml" "$@"; }
 step() { printf '==> %s\n' "$*"; }
 fail() { printf 'houston install: %s\n' "$*" >&2; exit 1; }
+has() { command -v "$1" >/dev/null 2>&1; }
 
+# Everything is checked before anything is changed.
 check_system() {
   [ "$(id -u)" = 0 ] || fail "run it as root (for example: sudo sh install.sh)"
-  [ -r /etc/os-release ] || fail "can't read /etc/os-release; Houston supports Ubuntu LTS and Debian stable"
+  if has apt-get; then pm=apt
+  elif has dnf; then pm=dnf
+  elif has pacman; then pm=pacman
+  else fail "Houston installs its prerequisites with apt, dnf or pacman; this system has none of them"
+  fi
+  ID="" ID_LIKE="" VERSION_CODENAME="" UBUNTU_CODENAME=""
   # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${ID:-}" in
-    ubuntu | debian) ;;
-    *) fail "Houston supports Ubuntu LTS and Debian stable; this is ${PRETTY_NAME:-an unknown system}" ;;
+  [ -r /etc/os-release ] && . /etc/os-release
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) fail "unsupported architecture: $(uname -m)" ;;
   esac
+  has useradd || fail "no useradd on this system; install your distro's shadow package, then run this again"
+  if has getenforce && [ "$(getenforce)" = Enforcing ]; then
+    fail "SELinux is enforcing, and Houston doesn't label its containers for SELinux yet: set it to permissive (setenforce 0, and SELINUX=permissive in /etc/selinux/config), then run this again"
+  fi
   [ -n "$HOUSTON_SOURCE" ] || fail "set HOUSTON_SOURCE to a Houston checkout (published images come later)"
   [ -f "$HOUSTON_SOURCE/mission_control/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission_control/Dockerfile"
 }
 
-install_docker() {
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+# pm_install installs packages with the system's package manager, quietly,
+# and on failure stops with the command to run by hand (dnf -q prints
+# nothing at all for a package it can't find).
+pm_install() {
+  case "$pm" in
+    apt) set -- env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" ;;
+    dnf) set -- dnf install -y -q "$@" ;;
+    # Arch installs packages only as part of a full upgrade.
+    pacman) set -- pacman -Syu --noconfirm --needed "$@" ;;
+  esac
+  "$@" >/dev/null || fail "this failed: $*; run it by hand to see why, then run this again"
+}
+
+# Docker from Docker's own repository on apt and dnf; Arch packages it. A
+# repository is only written once it's known to exist for this system, and
+# is removed again if installing from it fails: a broken one would break
+# every later update.
+install_docker_packages() {
+  case "$pm" in
+    apt)
+      # Docker publishes for debian and ubuntu; a derivative uses its parent's
+      # release (Mint and Pop!_OS say UBUNTU_CODENAME, LMDE DEBIAN_CODENAME).
+      distro=$ID codename=$VERSION_CODENAME
+      case "$ID" in debian | ubuntu) ;; *)
+        case " $ID_LIKE " in
+          *" ubuntu "*) distro=ubuntu codename=${UBUNTU_CODENAME:-$VERSION_CODENAME} ;;
+          *" debian "*) distro=debian codename=${DEBIAN_CODENAME:-$VERSION_CODENAME} ;;
+          *) codename="" ;;
+        esac ;;
+      esac
+      apt-get update -qq
+      pm_install ca-certificates curl
+      if [ -z "$codename" ] || ! curl -fsI "https://download.docker.com/linux/$distro/dists/$codename/Release" >/dev/null; then
+        fail "Docker doesn't publish packages for ${PRETTY_NAME:-this system} (${distro:-?} ${codename:-?}): install Docker with Compose yourself, then run this again"
+      fi
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL "https://download.docker.com/linux/$distro/gpg" -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+        "$(dpkg --print-architecture)" "$distro" "$codename" >/etc/apt/sources.list.d/docker.list
+      if ! apt-get update -qq || ! (pm_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin); then
+        rm -f /etc/apt/sources.list.d/docker.list
+        fail "installing Docker from Docker's repository failed; install Docker with Compose yourself, then run this again"
+      fi
+      ;;
+    dnf)
+      # Fedora has its own repository and RHEL its own; the rest of the RHEL
+      # family (Rocky, Alma, CentOS Stream: ID_LIKE names rhel or centos) uses
+      # CentOS's. Fedora's derivatives (Amazon Linux: ID_LIKE=fedora) aren't
+      # Fedora releases, so Docker has nothing for them.
+      case "$ID" in
+        fedora) repo=fedora ;;
+        rhel) repo=rhel ;;
+        *) case " $ID_LIKE " in
+             *" rhel "* | *" centos "*) repo=centos ;;
+             *) fail "Docker doesn't publish packages for ${PRETTY_NAME:-this system}: install Docker with Compose yourself, then run this again" ;;
+           esac ;;
+      esac
+      url="https://download.docker.com/linux/$repo/docker-ce.repo"
+      if dnf --version 2>/dev/null | grep -q '^dnf5'; then
+        pm_install dnf5-plugins
+        dnf config-manager addrepo --overwrite --from-repofile="$url" >/dev/null
+      else
+        pm_install dnf-plugins-core
+        dnf config-manager --add-repo "$url" >/dev/null
+      fi
+      if ! (pm_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin); then
+        rm -f /etc/yum.repos.d/docker-ce.repo
+        fail "installing Docker from Docker's $repo repository failed; install Docker with Compose yourself, then run this again"
+      fi
+      ;;
+    pacman) pm_install docker docker-compose docker-buildx ;;
+  esac
+}
+
+install_prereqs() {
+  if has docker && docker compose version >/dev/null 2>&1; then
     step "Docker is installed"
   else
-    step "Installing Docker"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq ca-certificates curl >/dev/null
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
-      "$(dpkg --print-architecture)" "$ID" "$VERSION_CODENAME" >/etc/apt/sources.list.d/docker.list
-    apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    step "Installing Docker (with $pm)"
+    install_docker_packages
   fi
   systemctl enable --now docker >/dev/null 2>&1 || true
-  if ! command -v git >/dev/null 2>&1; then
-    step "Installing git (houston deploy reads the checkout)"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git >/dev/null
+  if ! has docker || ! docker compose version >/dev/null 2>&1; then
+    fail "Docker with Compose isn't working after installing it; see: docker compose version"
   fi
-  if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
+  # The daemon, not only the client: a full upgrade (pacman -Syu) can replace
+  # the running kernel, and its modules with it, until a reboot.
+  if ! docker info >/dev/null 2>&1; then
+    [ -d "/usr/lib/modules/$(uname -r)" ] || fail "the kernel was upgraded while installing, and Docker can't start until this server reboots: reboot, then run this again"
+    fail "the Docker daemon isn't running; see: systemctl status docker"
+  fi
+  has curl || { step "Installing curl"; pm_install curl; }
+  has git || { step "Installing git (houston deploy reads the checkout)"; pm_install git; }
+  if ! has sshd && [ ! -x /usr/sbin/sshd ]; then
     step "Installing OpenSSH server (Kamal deploys to this host over SSH)"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-server >/dev/null
+    case "$pm" in apt | dnf) pm_install openssh-server ;; pacman) pm_install openssh ;; esac
   fi
+  # The client too, for the check that houston can SSH here (dnf's server
+  # package doesn't bring it).
+  if ! has ssh; then
+    case "$pm" in apt) pm_install openssh-client ;; dnf) pm_install openssh-clients ;; pacman) pm_install openssh ;; esac
+  fi
+  # Kamal SSHes to this host as houston, so the server must be running; not
+  # every distro starts it on install. Debian names the service ssh.
+  systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || true
+}
+
+# Kamal reaches this host as houston over SSH: prove it before going on.
+# This host's key isn't pinned here (Kamal doesn't read houston's known_hosts
+# either), so a server whose host keys changed still passes.
+check_ssh() {
+  home=$(getent passwd houston | cut -d: -f6)
+  if ! out=$(su houston -c "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i '$home/.ssh/id_ed25519' houston@127.0.0.1 true" 2>&1); then
+    fail "houston can't SSH to this host, which Kamal needs: $out (is the SSH server running and allowing key logins?)"
+  fi
+}
+
+# The address to finish setup at: the first of this host's addresses.
+host_address() {
+  hostname -I 2>/dev/null | awk '{print $1}' | grep . && return
+  ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}'
 }
 
 create_user() {
   if ! id houston >/dev/null 2>&1; then
     step "Creating the houston user"
-    useradd --create-home --shell /bin/bash houston
+    useradd --create-home --shell "$(command -v bash || echo /bin/sh)" houston
   fi
   usermod -aG docker houston
   home=$(getent passwd houston | cut -d: -f6)
   install -d -m 700 -o houston -g houston "$home/.ssh"
   if [ ! -f "$home/.ssh/id_ed25519" ]; then
-    su houston -c "ssh-keygen -q -t ed25519 -N '' -C houston@$(hostname) -f '$home/.ssh/id_ed25519'"
+    su houston -c "ssh-keygen -q -t ed25519 -N '' -C houston@$(uname -n) -f '$home/.ssh/id_ed25519'"
   fi
   touch "$home/.ssh/authorized_keys"
   if ! grep -qF "$(cat "$home/.ssh/id_ed25519.pub")" "$home/.ssh/authorized_keys"; then
@@ -121,11 +232,6 @@ write_runner_token() {
 # The houston CLI, built from the checkout until binaries are published.
 install_cli() {
   step "Building the houston CLI from $HOUSTON_SOURCE"
-  case "$(uname -m)" in
-    x86_64) arch=amd64 ;;
-    aarch64 | arm64) arch=arm64 ;;
-    *) fail "unsupported architecture: $(uname -m)" ;;
-  esac
   out=$(mktemp -d)
   docker build --quiet --target release --output "type=local,dest=$out" "$HOUSTON_SOURCE" >/dev/null
   install -m 755 "$out/houston-linux-$arch" /usr/local/bin/houston
@@ -260,8 +366,8 @@ start() {
 }
 
 report() {
-  lan_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-  url="http://${lan_ip:-<this server>}:3000"
+  address=$(host_address || true)
+  url="http://${address:-<this server>}:3000"
   if code=$(compose exec -T mission-control bin/rails houston:setup_code 2>/dev/null); then
     say ""
     say "Houston is running."
@@ -274,8 +380,9 @@ report() {
 }
 
 check_system
-install_docker
+install_prereqs
 create_user
+check_ssh
 write_env
 write_runner_token
 write_compose

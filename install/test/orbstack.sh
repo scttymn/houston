@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Installs Houston on a throwaway OrbStack Linux machine and checks the result.
 #
-#   install/test/orbstack.sh ubuntu:noble
+#   install/test/orbstack.sh ubuntu:noble      # apt
 #   install/test/orbstack.sh debian:bookworm
+#   install/test/orbstack.sh fedora            # dnf
+#   install/test/orbstack.sh rocky:9
+#   install/test/orbstack.sh arch              # pacman
 #
 # KEEP=1 keeps the machine afterwards. If mission_control/.houston/cloudflare-check.env
 # exists (CLOUDFLARE_API_TOKEN, BASE_DOMAIN), setup step 2 runs against the real
@@ -12,7 +15,7 @@
 # shellcheck disable=SC2016 # single-quoted commands run inside the machine, not here
 set -euo pipefail
 
-distro="${1:?usage: $0 ubuntu:noble|debian:bookworm}"
+distro="${1:?usage: $0 <orb distro[:version]>, e.g. ubuntu:noble, fedora, rocky:9, arch}"
 name="houston-test-${distro//[:.]/-}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 failures=0
@@ -42,7 +45,8 @@ orb create "$distro" "$name" >/dev/null
 echo "== first install"
 vm env HOUSTON_SOURCE="$repo" sh "$repo/install/install.sh" | tee /tmp/houston-install-1.log
 code=$(sed -n 's/^Setup code *//p' /tmp/houston-install-1.log)
-ip=$(vm hostname -I | awk '{print $1}')
+# The machine's address (not every distro ships hostname -I).
+ip=$(vm sh -c "hostname -I 2>/dev/null | awk '{print \$1}' | grep . || ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if (\$i == \"src\") { print \$(i + 1); exit }}'")
 
 echo "== checks"
 check "docker and compose installed" vm docker compose version

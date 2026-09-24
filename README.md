@@ -9,7 +9,8 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 
 ## What you need
 
-- **A server:** Ubuntu LTS or Debian stable, with a LAN address you can reach from your laptop.
+- **A Linux server that installs packages with apt, dnf or pacman:** Debian, Ubuntu and their derivatives; Fedora and the RHEL family (RHEL, Rocky, Alma, CentOS Stream); Arch and its derivatives. The installer adds what's missing (Docker, git, an SSH server) with that package manager. SELinux must be permissive for now.
+- **An address your browser can reach** for first-run setup, before the Cloudflare tunnel exists: on your LAN, over a VPN, or a VPS's public IP (the setup code guards the page). After setup, everything goes through Cloudflare.
 - **A Cloudflare account with a domain** (the *base domain*). Apps are served at `<name>.<base>`, and Mission Control at `admin.<base>`.
 - **Docker with Compose on your laptop.** That's all the CLI needs.
 - **Somewhere for backups:** a path on the server, an NFS export, or S3, B2 or SFTP.
@@ -24,8 +25,9 @@ sudo HOUSTON_SOURCE=$HOME/houston sh ~/houston/install/install.sh
 ```
 
 The installer:
-- installs Docker, git and OpenSSH
-- creates a `houston` user
+- checks for apt, dnf or pacman (and stops, changing nothing, if there's none, or if SELinux is enforcing)
+- installs Docker, git and an SSH server if they're missing, and starts them. Docker comes from Docker's own repository on apt and dnf, and from Arch's packages on pacman
+- creates a `houston` user, and checks it can SSH to the server (Kamal deploys over SSH)
 - generates Mission Control's secrets in `/opt/houston/.env`, which you must keep: losing them locks away every encrypted secret
 - builds Mission Control, the CLI and the runner image
 - starts everything from `/opt/houston/compose.yml`: Mission Control, a registry on `localhost:5000`, and two runners
@@ -34,7 +36,7 @@ It ends with a URL and a one-time **setup code**:
 
 ```
 Houston is running.
-Finish setup at  http://<LAN address>:3000
+Finish setup at  http://<server address>:3000
 Setup code       XXXX-XXXX
 ```
 
@@ -70,7 +72,7 @@ Then make an API token in Mission Control (**Settings › API tokens**) and log 
 houston login https://admin.<base>      # asks for the token (hidden)
 ```
 
-If Cloudflare Access guards `admin.<base>`, add `--access-client-id` and `--access-client-secret` (an Access service token). For `houston console --server`, add `--ssh houston@<LAN address>`.
+If Cloudflare Access guards `admin.<base>`, add `--access-client-id` and `--access-client-secret` (an Access service token). For `houston console --server`, add `--ssh houston@<server address>`.
 
 ## 4. Set up a project
 

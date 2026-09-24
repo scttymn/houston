@@ -96,10 +96,13 @@ echo "== a push whose tests fail"
 push "sed -i 's|test -x /entry.sh|exit 3|' compose.yml" 'failing tests' >/dev/null
 out=$(houston deploy --server --project "$app" --follow 2>&1); code=$?
 [ "$code" = 1 ] && printf '%s' "$out" | grep -q 'tests failed (exit 3)' && ok "deploy --follow: NO-GO, tests failed (exit 3), exit 1" || bad "failing push: exit $code: $(printf '%s' "$out" | tail -2)"
-codes=$(for _ in 1 2 3 4 5 6 7 8 9 10; do code_of "https://$app.$base/up"; printf ' '; sleep 1; done)
+# The server is the proof: kamal-proxy still routes to the previous version.
+# Through Cloudflare, some edges can still answer with the base domain's
+# wildcard (the other server's 404) minutes after settling once, so that side
+# settles again, as every tunnel stage does.
 direct=$(vm docker run --rm --network kamal curlimages/curl:8.16.0 -s -o /dev/null -w '%{http_code}' -H "Host: $app.$base" http://kamal-proxy/up)
-[ "$codes" = "$(printf '200 %.0s' 1 2 3 4 5 6 7 8 9 10)" ] && ok "the previous version still serves (10 of 10 through Cloudflare)" ||
-  bad "the previous version: through Cloudflare $codes; straight at kamal-proxy $direct"
+[ "$direct" = 200 ] && ok "the previous version still serves (kamal-proxy: 200)" || bad "the previous version: kamal-proxy answered $direct"
+settle 200 "https://$app.$base/up"
 houston deploys --project "$app" | head -3 | sed 's/^/    /'
 
 exit "$((failures > 0))"
