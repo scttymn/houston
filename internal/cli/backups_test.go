@@ -27,7 +27,7 @@ func TestSnapshots(t *testing.T) {
 	}
 	for i, want := range []string{
 		`^2026-09-22 12:31 UTC +deploy +before deploy #7 +d4e0b17 +5 B +33333333$`,
-		`^2026-09-21 11:20 UTC +auto +Back up now +a07b2d1 +385 MB +11111111$`,
+		`^2026-09-21 11:20 UTC +auto +Create Snapshot +a07b2d1 +385 MB +11111111$`,
 	} {
 		if !regexp.MustCompile(want).MatchString(lines[i]) {
 			t.Errorf("line %d = %q, want %s", i, lines[i], want)

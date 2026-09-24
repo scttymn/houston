@@ -22,17 +22,28 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
       assert_response :success
       assert_select "turbo-frame#snapshots"
       assert_select "[data-snapshot]", 2
-      assert_select "[data-snapshot]:first-child", /Back up now.*385 MB/m
-      assert_select ".snapshots", %r{kept 2 / 14}
-      assert_select ".snapshots", %r{Daily at 03:00 \(UTC\), plus Back up now}
-      assert_select "a[href=?]", "/projects/equip/snapshots?kind=deploy", text: "Pre-deploy"
+      assert_match(/Create Snapshot.*385 MB/m, css_select("[data-snapshot]").first.text)
+      assert_select "#snapshots", %r{kept 2 / 14}
+      assert_select "#snapshots", %r{Daily at 03:00 \(UTC\), plus Create Snapshot}
+      assert_select "a[href=?]", "/projects/equip/snapshots?kind=deploy", text: /Pre-deploy/
 
       get project_snapshots_path("equip", kind: "deploy")
       assert_select "[data-snapshot]", 1
       assert_select "[data-snapshot]", /before deploy #7.*d4e0b17/m
-      assert_select ".snapshots", %r{kept 1 / 10}
+      assert_select "#snapshots", %r{kept 1 / 10}
     end
     assert_equal 1, fake.calls.size, "one listing serves both tabs"
+  end
+
+  # (A project always has storage once setup is finished: its gate needs a default.)
+  test "tabs by kind with counts" do
+    sign_in_as users(:one)
+    fake = listing(snapshot_json(id: "11111111", time: "2026-09-21T03:00:00Z"),
+                   snapshot_json(id: "33333333", time: "2026-09-22T12:31:00Z", kind: "deploy", reason: "deploy", deploy: 7))
+    use_fake_docker(fake) { get project_snapshots_path("equip") }
+    assert_select "#snapshots [role=tablist] a", 2
+    assert_select "#snapshots [role=tablist] a[aria-selected=true]", /Scheduled\s*1 \/ 14/
+    assert_select "#snapshots [role=tablist] a[aria-selected=false]", /Pre-deploy\s*1 \/ 10/
   end
 
   test "the panel says why it has nothing" do
@@ -40,7 +51,7 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
     use_fake_docker(FakeDocker.new { failure("Fatal: unable to open repository at /repo: permission denied\n") }) do
       get project_snapshots_path("equip")
       assert_response :success
-      assert_select ".snapshots", /Can't read snapshots.*unable to open repository/m
+      assert_select "#snapshots", /Can't read snapshots.*unable to open repository/m
     end
 
     # No acknowledged storage: setup isn't finished, so its gate answers first.

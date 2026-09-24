@@ -6,6 +6,12 @@ module DeploysHelper
     content_tag(tag, STATE_LABELS.fetch(status), class: "mono state state--#{status.to_s.dasherize}")
   end
 
+  # The status as the design's pill: a dot and the word, on its colour.
+  def state_pill(status)
+    status = status.to_sym
+    tag.span(class: "mono state state-pill state--#{status.to_s.dasherize}") { tag.span(class: "state-pill__dot") + STATE_LABELS.fetch(status) }
+  end
+
   # 108 → "1m 48s"
   def duration_words(seconds)
     seconds = seconds.to_i

@@ -108,6 +108,17 @@ type SyncRequest struct {
 	ServingGeneration int `json:"serving_generation,omitempty"`
 	// ServingSHA is that app's commit: with the generation, which restore it is.
 	ServingSHA string `json:"serving_sha,omitempty"`
+	// Details are what the project page shows; Houston acts on none of them.
+	Details *Details `json:"details,omitempty"`
+}
+
+// Details: each service's image (the app's is built, so it has none), the
+// app's limits, and the console command the server runs.
+type Details struct {
+	Images  map[string]string `json:"images"`
+	CPUs    string            `json:"cpus,omitempty"`
+	Memory  string            `json:"memory,omitempty"`
+	Console string            `json:"console,omitempty"`
 }
 
 // Backups are x-houston.backups: when to back up, and what to keep.

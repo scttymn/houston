@@ -1,7 +1,7 @@
 class Api::V1::BackupsController < Api::V1::BaseController
   before_action :set_project
 
-  # Back up now; a backup already queued is returned as it is.
+  # Create Snapshot; a backup already queued is returned as it is.
   def create
     render json: RemoteView.backup(BackupRun.request!(@project)), status: :accepted
   rescue BackupRun::Refused => e

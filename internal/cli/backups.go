@@ -37,7 +37,7 @@ func runSnapshots(file, projectFlag string, asJSON bool, stdout, stderr io.Write
 func snapshotNote(s server.Snapshot) string {
 	switch {
 	case s.Reason == "manual":
-		return "Back up now"
+		return "Create Snapshot"
 	case s.Reason == "schedule":
 		return "daily"
 	case s.Reason == "restore":
@@ -48,7 +48,7 @@ func snapshotNote(s server.Snapshot) string {
 	return s.Reason
 }
 
-// runBackup queues a backup (Back up now); with follow, waits for its
+// runBackup queues a backup (Create Snapshot); with follow, waits for its
 // result: exit 0 on GO or nothing to back up, 1 on NO-GO.
 func runBackup(file, projectFlag string, follow bool, stdout, stderr io.Writer) int {
 	client, name, code := remote(file, projectFlag, true, stderr)

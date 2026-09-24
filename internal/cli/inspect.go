@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/scttymn/houston/internal/mission"
@@ -79,29 +78,12 @@ func previewOf(p *project.Project) preview {
 		}
 		pv.Services = append(pv.Services, previewService{Name: name, Image: image, App: name == p.AppService})
 	}
-	if app := p.Compose.Services[p.AppService]; app.Deploy != nil && app.Deploy.Resources.Limits != nil {
-		if cpus := app.Deploy.Resources.Limits.NanoCPUs; cpus > 0 {
-			pv.CPUs = strconv.FormatFloat(float64(cpus), 'f', -1, 32)
-		}
-		if mem := int64(app.Deploy.Resources.Limits.MemoryBytes); mem > 0 {
-			pv.Memory = humanBytes(mem)
-		}
-	}
+	pv.CPUs, pv.Memory = mission.Limits(p)
 	for name := range p.Compose.Volumes {
 		pv.Backups.Volumes = append(pv.Backups.Volumes, name)
 	}
 	sort.Strings(pv.Backups.Volumes)
 	return pv
-}
-
-func humanBytes(b int64) string {
-	switch {
-	case b%(1<<30) == 0:
-		return strconv.FormatInt(b>>30, 10) + " GB"
-	case b%(1<<20) == 0:
-		return strconv.FormatInt(b>>20, 10) + " MB"
-	}
-	return strconv.FormatInt(b, 10) + " bytes"
 }
 
 func printInspection(w io.Writer, p *project.Project, in inspection) {

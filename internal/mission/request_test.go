@@ -35,6 +35,7 @@ x-houston:
 		DeployRule: DeployRule{On: "tag", Branch: p.Houston.Deploy.Branch, Tags: "release-*"},
 		Volumes:    []Volume{}, Databases: []Database{{Service: "db", Image: "postgres:17"}},
 		Backups: &Backups{Schedule: "daily 03:00", KeepAuto: 14, KeepDeploy: 10},
+		Details: &Details{Images: map[string]string{"db": "postgres:17"}},
 	}
 	if got := RequestFor(p); !reflect.DeepEqual(got, want) {
 		t.Errorf("RequestFor =\n%#v\nwant\n%#v", got, want)
@@ -91,5 +92,35 @@ x-houston:
 	}
 	if want := (&Backups{Schedule: "daily 22:15", KeepAuto: 3, KeepDeploy: 5}); !reflect.DeepEqual(got.Backups, want) {
 		t.Errorf("Backups = %#v, want %#v", got.Backups, want)
+	}
+}
+
+// What the project page shows beyond what Houston acts on: each service's
+// image, the app's limits, and the console command the server runs.
+func TestRequestForDetails(t *testing.T) {
+	p, err := project.Parse(filepath.Join(t.TempDir(), "compose.yml"), []byte(`name: shop
+services:
+  web:
+    build: .
+    ports: ["80:80"]
+    deploy: { resources: { limits: { cpus: "1.5", memory: 2g } } }
+  db: { image: "postgres:17" }
+  cache: { image: "redis:7" }
+x-houston:
+  health: /up
+  commands:
+    console: { dev: bin/rails console, server: bin/rails console -e production }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Details{Images: map[string]string{"db": "postgres:17", "cache": "redis:7"}, CPUs: "1.5", Memory: "2 GB", Console: "bin/rails console -e production"}
+	got := RequestFor(p).Details
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Details = %#v\nwant %#v", got, want)
+	}
+	b, _ := json.Marshal(RequestFor(p))
+	if !strings.Contains(string(b), `"details":{"images":{"cache":"redis:7","db":"postgres:17"},"cpus":"1.5","memory":"2 GB","console":"bin/rails console -e production"}`) {
+		t.Errorf("JSON = %s", b)
 	}
 }

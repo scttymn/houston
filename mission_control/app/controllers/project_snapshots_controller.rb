@@ -8,7 +8,7 @@ class ProjectSnapshotsController < ApplicationController
     return unless @location
 
     all = Snapshots.for(@project, @location)
-    @kept = all.count { |s| s.kind == @kind }
+    @counts = all.group_by(&:kind).transform_values(&:size)
     @snapshots = all.select { |s| s.kind == @kind }
   rescue Snapshots::Unavailable => e
     @error = e.message

@@ -1,23 +1,37 @@
 <% content_for :title, "#{@project.name} · Project" %>
-<main class="page board">
-  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= @project.name %></nav>
-  <div class="board__top">
-    <div class="board__title">
-      <h1 class="disp"><%= @project.name %></h1>
-      <div class="hosts">
-        <%= state_chip(@project.status) %>
-        <% ([ @project.host(@installation) ] + @project.domains).each do |host| %>
-          <%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
-          <%= render "projects/domain_state", project: @project, host: %>
+<%# Laid out as the design's ProjectDetail: header, facts strip, then two rows of two panels. %>
+<main class="page project">
+  <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <span class="crumbs__here"><%= @project.name %></span></nav>
+
+  <div class="project-head">
+    <div class="project-head__main">
+      <div class="project-head__title">
+        <h1 class="disp"><%= @project.name %></h1>
+        <%= state_pill(@project.status) %>
+      </div>
+      <div class="host-chips">
+        <% @project.hostnames(@installation).each do |host| %>
+          <% state = @project.domain_states.dig(host, "state") || ("WILDCARD" if host == @project.host(@installation) && @installation.dns_mode != "per_host") %>
+          <%= link_to app_url(host), target: "_blank", rel: "noopener noreferrer", class: "host-chip host-chip--#{state.to_s.parameterize.presence || "unknown"}" do %>
+            <span class="host-chip__dot"></span><%= host %>
+            <% if state %><small class="mono domain-state domain-state--<%= state.parameterize %>" title="<%= @project.domain_states.dig(host, "reason") %>"><%= state %></small><% end %>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2H10v5.5M10 2L2.5 9.5" stroke="currentColor" stroke-width="1.4"/></svg>
+            <span class="visually-hidden">(opens in a new window)</span>
+          <% end %>
         <% end %>
       </div>
     </div>
-    <% if @storage %>
-      <div class="backup-now">
-        <%= button_to "Back up now", project_backups_path(@project.name), class: "button button--small" %>
-        <%= render "projects/backup_run", run: @backup %>
-      </div>
-    <% end %>
+    <div class="project-head__actions">
+      <% if (console = @project.console_command) %>
+        <div class="console-box" data-controller="clipboard">
+          <span class="mono console-box__label">CONSOLE · RUNS <span><%= console %></span> FROM COMPOSE.YML</span>
+          <span class="console-box__field">
+            <span class="mono console-box__command" data-clipboard-target="source">houston console --server</span>
+            <button type="button" data-action="clipboard#copy" data-clipboard-target="button" aria-label="Copy console command">Copy</button>
+          </span>
+        </div>
+      <% end %>
+    </div>
   </div>
 
   <% if @project.maintenance? %>
@@ -34,139 +48,96 @@
     <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= alert %></span></div>
   <% end %>
 
-  <div class="board__body">
-    <div class="column">
-      <dl class="facts">
-        <dt class="mono">RUNNING SHA</dt><dd class="mono"><%= @running&.short_sha || "— (never deployed)" %></dd>
-        <dt class="mono">DEPLOY RULE</dt><dd><%= @project.deploy_rule_words %></dd>
-        <dt class="mono">SERVICES</dt><dd class="mono"><%= @project.accessories.presence&.join(" · ") || "none besides the app" %></dd>
-        <dt class="mono">HEALTH</dt><dd class="mono"><%= @project.health %> on port <%= @project.port %></dd>
-      </dl>
-
-      <section class="panel history">
-        <h2 class="disp panel__title">Deploy history <small class="mono eyebrow"><%= pluralize(@deploy_count, "deploy") %></small></h2>
-        <% if @deploys.empty? %>
-          <p class="panel__row panel__row--muted">No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span></p>
+  <div class="facts-strip">
+    <div><span class="mono facts-strip__label">RUNNING SHA</span>
+      <span class="mono facts-strip__sha"><%= @running&.short_sha || "never deployed" %></span></div>
+    <div><span class="mono facts-strip__label">DEPLOY RULE</span>
+      <span><%= @project.deploy_rule_words %></span></div>
+    <div><span class="mono facts-strip__label">RESOURCES</span>
+      <span><%= @project.resources_words || "no limits" %></span></div>
+    <div>
+      <span class="mono facts-strip__label">SERVICES · <%= @project.accessories.size %></span>
+      <span class="facts-strip__services">
+        <% @project.accessories.each do |service| %>
+          <span class="service"><span class="service__dot"></span><span class="service__name"><%= service %></span> <span class="mono service__image"><%= @project.service_image(service) || "—" %></span></span>
         <% end %>
-        <ul class="rows">
-          <% @deploys.each do |deploy| %>
-            <li data-deploy="<%= deploy.number %>">
-              <span class="mono">#<%= deploy.number %></span>
-              <span class="mono"><%= deploy.short_sha %></span>
-              <span>
-                <%= deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %> · <%= l(deploy.created_at, format: :short) %>
-                <% if deploy.error.present? %><small><%= deploy.error %></small><% end %>
-              </span>
-              <%= state_chip(deploy.status) %>
-              <span class="mono"><%= { "queued" => "—", "in_flight" => mission_elapsed(deploy.duration) }.fetch(deploy.status) { duration_words(deploy.duration) } %></span>
-              <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
-            </li>
-          <% end %>
-        </ul>
-        <% if @deploy_count > ProjectPage::PER_PAGE %>
-          <p class="panel__row pager">
-            <% if @page > 1 %><%= link_to "← Newer", project_path(@project.name, page: @page - 1) %><% end %>
-            <span class="mono">Page <%= @page %> of <%= (@deploy_count.to_f / ProjectPage::PER_PAGE).ceil %></span>
-            <% if @page * ProjectPage::PER_PAGE < @deploy_count %><%= link_to "Older →", project_path(@project.name, page: @page + 1) %><% end %>
-          </p>
-        <% end %>
-      </section>
+        <% if @project.accessories.empty? %><span>none besides the app</span><% end %>
+      </span>
     </div>
+    <div><span class="mono facts-strip__label">REPO</span>
+      <span><%= @project.repo_words || "not linked" %></span></div>
+  </div>
 
-    <div class="column column--side">
-    <% if @project.repo_url.present? %>
-      <section class="panel webhook">
-        <h2 class="disp panel__title">Connect pushes</h2>
-        <p class="panel__row">Your git host calls this address on every push. Houston checks the secret, reads the repo's refs itself, and deploys what the deploy rule matches.</p>
-        <dl class="facts">
-          <dt class="mono">WEBHOOK URL</dt><dd class="mono">https://hooks.<%= @installation.base_domain %>/<%= @project.name %></dd>
-          <dt class="mono">SECRET</dt>
-          <dd class="mono"><%= @project.webhook_verified_at ? "•••••••• (shown until the first push arrived)" : @project.webhook_secret %></dd>
-          <dt class="mono">SEND</dt><dd>Push events, as application/json</dd>
-          <dt class="mono">REPO</dt><dd class="mono"><%= @project.repo_url %> · <%= @project.branch %></dd>
-        </dl>
-        <p class="panel__row panel__row--muted">
-          <% if @project.webhook_verified_at %>First push arrived <%= time_ago_in_words(@project.webhook_verified_at) %> ago.<% else %>Waiting for the first push. The secret is shown in full only until one arrives.<% end %>
-          <% if @hooks_route && @hooks_route.state != :go %><br><%= state_chip(@hooks_route.state == :hold ? :queued : :no_go) %> hooks.<%= @installation.base_domain %>: <%= @hooks_route.reason %><% end %>
-          <% if @project.last_check_error %><br><span class="field__error">Last check: <%= @project.last_check_error %></span><% end %>
-        </p>
-        <div class="panel__row webhook__actions">
-          <%= button_to "Check for changes", check_project_path(@project.name), class: "button button--small" %>
-          <%= button_to "Rotate secret", rotate_webhook_project_path(@project.name), class: "button button--small" %>
-        </div>
-      </section>
-    <% end %>
-    <% if @project.volumes.any? %>
-      <section class="panel volumes">
-        <h2 class="disp panel__title">Volumes</h2>
-        <% sqlite_volumes = @last_good_backup&.found.to_h.fetch("sqlite", []).map { |f| f["volume"] } %>
-        <% @project.volume_rows.each do |volume, row| %>
-          <div class="panel__row" data-volume="<%= volume["name"] %>">
-            <span><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span></span>
-            <% if row&.placed_at %>
-              <span><%= row.where_words %> · <small>moving a volume is a later feature</small></span>
-            <% else %>
-              <%= form_with url: project_volume_path(@project.name, volume["name"]), method: :patch, class: "secret__form" do |f| %>
-                <%= f.select :location, [ [ "Local disk (this server)", "" ] ] + @live_locations.map { |l| [ l.choice_label, l.name ] }, selected: row&.location&.name.to_s %>
-                <%= f.submit "Save", class: "button button--small" %>
-              <% end %>
-            <% end %>
-            <% if row&.location&.kind == "nfs" %>
-              <small class="field__error">Live SQLite over a network share risks corruption<%= ": this volume holds SQLite databases" if sqlite_volumes.include?(volume["name"]) %>.</small>
-            <% end %>
-          </div>
-        <% end %>
-        <p class="panel__row panel__row--muted">Where each volume lives is chosen before Houston makes it (at the next deploy). Postgres data always stays on local disk.</p>
-      </section>
-    <% end %>
-    <% unless @project.maintenance? %>
-      <section class="panel maintenance">
-        <h2 class="disp panel__title">Maintenance page</h2>
-        <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
-        <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
-        <p class="panel__row panel__row--muted"><%= @project.maintenance_page.present? ? "The project's own page (x-houston.maintenance)." : "Houston's default page. Set x-houston.maintenance in compose.yml to use your own." %></p>
-        <%= form_with url: project_maintenance_path(@project.name), method: :patch, class: "panel__row secret__form" do |f| %>
-          <%= hidden_field_tag :on, "1" %>
-          <%= f.text_field :message, placeholder: "Message (optional)", maxlength: 500 %>
-          <%= f.submit "Show maintenance page", class: "button button--small", data: { turbo_confirm: "Visitors to #{@project.name} will see the maintenance page within seconds. Show it?" } %>
-        <% end %>
-      </section>
-    <% end %>
-    <section class="panel backup-plan">
-      <h2 class="disp panel__title">Backup plan</h2>
-      <dl class="facts">
-        <dt class="mono">SCHEDULE</dt><dd><%= BackupSchedule.new(@project, @installation.zone).words %>, plus Back up now</dd>
-        <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
-        <dt class="mono">STORAGE</dt>
-        <dd>
-          <%= form_with url: project_backup_target_path(@project.name), method: :patch, class: "secret__form" do |f| %>
-            <% default = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
-            <%= f.select :location, [ [ "Default (#{default&.name || "none yet"})", "" ] ] + StorageLocation.where.not(acknowledged_at: nil).where.not(id: default&.id).order(:name).map { |l| [ l.name, l.name ] },
-                         selected: @project.chosen_backup_location&.acknowledged? ? @project.chosen_backup_location.name : "" %>
-            <%= f.submit "Save", class: "button button--small" %>
+  <div class="project-row">
+    <section class="panel history">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Deploy history</h2>
+        <span class="panel__meta">
+          <span class="mono eyebrow"><%= pluralize(@deploy_count, "deploy").upcase %></span>
+          <% if @project.repo_url.present? %>
+            <%= button_to "Deploy", project_deploys_path(@project.name), class: "button button--primary button--small",
+                          title: "Deploy the head of what the deploy rule matches (#{@project.deploy_rule_words.downcase})" %>
           <% end %>
-          <small>Backing up to <span class="mono"><%= @storage&.name || "none yet" %></span>. Earlier snapshots stay where they were written.</small>
-        </dd>
-        <dt class="mono">VOLUMES</dt>
-        <dd><% if @project.volumes.empty? %>none<% end %><% @project.volumes.each do |volume| %><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span><br><% end %></dd>
-        <dt class="mono">DATABASES</dt>
-        <dd>
-          <% @project.databases.each do |db| %><span class="mono"><%= db["service"] %></span> · pg_dump<br><% end %>
-          <% @last_good_backup&.found.to_h.fetch("sqlite", []).each do |file| %><span class="mono"><%= file["path"] %></span> · .backup<br><% end %>
-          <% if @project.databases.empty? && @last_good_backup&.found.to_h.fetch("sqlite", []).blank? %>none found yet<% end %>
-        </dd>
-        <% if @project.not_backed_up.any? %>
-          <dt class="mono">NOT BACKED UP</dt><dd><span class="mono"><%= @project.not_backed_up.join(", ") %></span> · start empty after a restore</dd>
-        <% end %>
-      </dl>
+        </span>
+      </div>
+      <% if @deploys.empty? %>
+        <p class="panel__row panel__row--muted">
+          <% if @project.repo_url.present? %>
+            No deploys yet. Deploy sends the head of <%= @project.deploy_rule_words.downcase.delete_prefix("every commit to ") %>, and so does every push once the webhook is connected.
+          <% else %>
+            No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span>
+          <% end %>
+        </p>
+      <% end %>
+      <% @deploys.each do |deploy| %>
+        <div class="history__row <%= "history__row--no-go" if deploy.status == "no_go" %>" data-deploy="<%= deploy.number %>">
+          <span class="mono muted">#<%= deploy.number %></span>
+          <span class="mono"><%= deploy.short_sha %></span>
+          <span class="history__what">
+            <span><%= deploy.restore? ? "Restore" : deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></span>
+            <small class="<%= "history__error" if deploy.error.present? %>"><%= deploy.error.presence || "#{time_ago_in_words(deploy.created_at)} ago · #{l(deploy.created_at, format: :short)}" %></small>
+          </span>
+          <%= state_chip(deploy.status) %>
+          <span class="mono muted"><%= { "queued" => "—", "in_flight" => mission_elapsed(deploy.duration) }.fetch(deploy.status) { duration_words(deploy.duration) } %></span>
+          <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
+        </div>
+      <% end %>
+      <% if @deploy_count > ProjectPage::PER_PAGE %>
+        <% first = (@page - 1) * ProjectPage::PER_PAGE + 1 %>
+        <nav class="pager" aria-label="Deploy history pages">
+          <span class="mono muted pager__range"><%= first %>–<%= [ first + ProjectPage::PER_PAGE - 1, @deploy_count ].min %> of <%= @deploy_count %></span>
+          <% if @page > 1 %><%= link_to "← Newer", project_path(@project.name, page: @page - 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">← Newer</span><% end %>
+          <span class="mono">Page <%= @page %> of <%= (@deploy_count.to_f / ProjectPage::PER_PAGE).ceil %></span>
+          <% if @page * ProjectPage::PER_PAGE < @deploy_count %><%= link_to "Older →", project_path(@project.name, page: @page + 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">Older →</span><% end %>
+        </nav>
+      <% end %>
     </section>
-    <%= turbo_frame_tag "snapshots", src: project_snapshots_path(@project.name), loading: :lazy %>
-    <aside class="panel secrets">
-      <h2 class="disp panel__title">Secrets</h2>
-      <p class="panel__row panel__row--muted">Values are write-only: Houston never shows them again.</p>
-      <% required_missing = @missing %>
-      <% if required_missing.any? %>
-        <div class="notice notice--hold"><span class="mono">HOLD</span><span class="notice__text">The next deploy will stop until <%= required_missing.to_sentence %> <%= required_missing.one? ? "has" : "have" %> a value.</span></div>
+    <%# The head renders with the page; the list is a lazy frame, since reading a repository can take seconds. %>
+    <section class="panel snapshots">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Snapshots</h2>
+        <span class="panel__meta">
+          <% if @storage %>
+            <span class="mono eyebrow"><%= @storage.name %></span>
+            <%= button_to "Create Snapshot", project_backups_path(@project.name), class: "button button--primary button--small" %>
+          <% end %>
+        </span>
+      </div>
+      <% if @storage %><%= render "projects/backup_run", run: @backup %><% end %>
+      <%= turbo_frame_tag "snapshots", src: project_snapshots_path(@project.name), loading: :lazy do %>
+        <p class="panel__row panel__row--muted">Reading the snapshots…</p>
+      <% end %>
+    </section>
+  </div>
+
+  <div class="project-row">
+    <section class="panel secrets">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Secrets</h2>
+        <span class="panel__meta muted">Values are write-only.</span>
+      </div>
+      <% if @missing.any? %>
+        <div class="notice notice--nogo"><span class="mono">HOLD</span><span class="notice__text">The next deploy will stop until <%= @missing.to_sentence %> <%= @missing.one? ? "has" : "have" %> a value.</span></div>
       <% end %>
       <% if @variables.empty? %>
         <p class="panel__row panel__row--muted">compose.yml references no variables.</p>
@@ -175,23 +146,127 @@
         <% key = variable["name"] %>
         <% secret, error = @secrets[key], @secret_errors[key] %>
         <% set = secret.present? && secret.value.present? %>
-        <div class="panel__row secret" data-secret="<%= key %>">
-          <span class="mono"><%= key %><% unless variable["required"] %> <small>optional</small><% end %></span>
-          <% if set %>
-            <span class="mono">•••••••• · set <%= l(secret.updated_at.to_date, format: :short) %></span>
-            <details class="secret__replace" <%= "open" if error %>>
-              <summary>Replace</summary>
-              <%= render "projects/secret_form", key:, label: "Replace" %>
-            </details>
-            <%= button_to "Remove", project_secret_path(@project.name, key), method: :delete, class: "button button--small" %>
+        <% form_id = "secret-form-#{key}" %>
+        <div class="secret <%= "secret--missing" if !set && variable["required"] %>" id="secret-<%= key %>" data-secret="<%= key %>">
+          <span class="mono secret__name"><%= key %><% unless variable["required"] %> <small>optional</small><% end %></span>
+          <% if set && params[:replace] != key && !error %>
+            <span class="muted">•••••••• · set <%= l(secret.updated_at.to_date, format: :short) %></span>
+            <span class="secret__actions">
+              <%= link_to "Replace", project_path(@project.name, replace: key, anchor: "secret-#{key}") %>
+              <%= button_to "Remove", project_secret_path(@project.name, key), method: :delete, class: "link-button link-button--danger",
+                            data: { turbo_confirm: "Remove #{key}? #{variable["required"] ? "The next deploy will stop until it has a value again." : "The app gets it blank."}" } %>
+            </span>
           <% else %>
-            <%= render "projects/secret_form", key:, label: "Save value" %>
-            <%= button_to "Generate", generate_project_secret_path(@project.name, key), class: "button button--small", title: "Save a random value nobody needs to know" %>
+            <input type="password" name="value" id="<%= form_id %>-value" form="<%= form_id %>" class="mono" autocomplete="off" placeholder="<%= set ? "New value" : "Paste value" %>" aria-label="Value for <%= key %>">
+            <span class="secret__actions">
+              <%= form_with url: project_secret_path(@project.name, key), method: :put, id: form_id do |f| %>
+                <%= f.submit set ? "Replace" : "Save value", class: "button button--primary button--small" %>
+              <% end %>
+              <% if set %>
+                <%= link_to "Cancel", project_path(@project.name, anchor: "secret-#{key}") %>
+              <% else %>
+                <%= button_to "Generate", generate_project_secret_path(@project.name, key), class: "link-button", title: "Save a random value nobody needs to know" %>
+              <% end %>
+            </span>
           <% end %>
-          <% if error %><span class="field__error"><%= key %> <%= error %></span><% end %>
+          <% if error %><span class="field__error secret__error"><%= key %> <%= error %></span><% end %>
         </div>
       <% end %>
-    </aside>
-    </div>
+    </section>
+
+    <section class="panel backup-plan">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Backup plan</h2>
+        <span class="panel__meta muted">Edit in compose.yml</span>
+      </div>
+      <dl class="plan">
+        <dt class="mono">SCHEDULE</dt><dd><%= BackupSchedule.new(@project, @installation.zone).words %>, plus Create Snapshot</dd>
+        <dt class="mono">STORAGE</dt>
+        <dd>
+          <%= form_with url: project_backup_target_path(@project.name), method: :patch, class: "inline-form" do |f| %>
+            <% default = StorageLocation.where(default: true).where.not(acknowledged_at: nil).first %>
+            <%= f.select :location, [ [ "#{default&.name || "none yet"} (default)", "" ] ] + StorageLocation.where.not(acknowledged_at: nil).where.not(id: default&.id).order(:name).map { |l| [ l.name, l.name ] },
+                         { selected: @project.chosen_backup_location&.acknowledged? ? @project.chosen_backup_location.name : "" }, "aria-label": "Backup storage" %>
+            <%= f.submit "Save", class: "button button--small" %>
+          <% end %>
+          <small class="muted">Backing up to <span class="mono"><%= @storage&.name || "none yet" %></span>. Earlier snapshots stay where they were written.</small>
+        </dd>
+        <dt class="mono">KEEP</dt><dd><%= @project.keep_auto %> scheduled · <%= @project.keep_deploy %> pre-deploy</dd>
+        <dt class="mono">VOLUMES</dt>
+        <dd class="plan__list"><% if @project.volumes.empty? %>none<% end %><% @project.volumes.each do |volume| %><span><span class="mono"><%= volume["name"] %></span> → <%= volume["path"] %></span><% end %></dd>
+        <dt class="mono">DATABASES</dt>
+        <dd class="plan__list">
+          <% @project.databases.each do |db| %><span><span class="mono"><%= db["service"] %></span> · pg_dump</span><% end %>
+          <% @last_good_backup&.found.to_h.fetch("sqlite", []).each do |file| %><span><span class="mono"><%= file["path"] %></span> · .backup</span><% end %>
+          <% if @project.databases.empty? && @last_good_backup&.found.to_h.fetch("sqlite", []).blank? %><span>none found yet</span><% end %>
+        </dd>
+        <% if @project.not_backed_up.any? %>
+          <dt class="mono">NOT BACKED UP</dt><dd class="muted"><span class="mono"><%= @project.not_backed_up.join(", ") %></span> · start empty after a restore</dd>
+        <% end %>
+      </dl>
+    </section>
+  </div>
+
+  <div class="project-more">
+    <% if @project.repo_url.present? %>
+      <section class="panel webhook">
+        <div class="panel__head"><h2 class="disp panel__title">Connect pushes</h2><span class="panel__meta muted">In the repo's webhook settings</span></div>
+        <p class="panel__row">Your git host calls this address on every push. Houston checks the secret, reads the repo's refs itself, and deploys what the deploy rule matches.</p>
+        <dl class="plan">
+          <dt class="mono">WEBHOOK URL</dt><dd class="mono">https://hooks.<%= @installation.base_domain %>/<%= @project.name %></dd>
+          <dt class="mono">SECRET</dt>
+          <dd class="mono"><%= @project.webhook_verified_at ? "•••••••• (shown until the first push arrived)" : @project.webhook_secret %></dd>
+          <dt class="mono">SEND</dt><dd>Push events, as <span class="mono">application/json</span></dd>
+          <dt class="mono">REPO</dt><dd class="mono"><%= @project.repo_url %> · <%= @project.branch %></dd>
+        </dl>
+        <p class="panel__row panel__row--muted">
+          <span>
+            <% if @project.webhook_verified_at %>First push arrived <%= time_ago_in_words(@project.webhook_verified_at) %> ago.<% else %>Waiting for the first push. The secret is shown in full only until one arrives.<% end %>
+            <% if @hooks_route && @hooks_route.state != :go %><br><%= state_chip(@hooks_route.state == :hold ? :queued : :no_go) %> hooks.<%= @installation.base_domain %>: <%= @hooks_route.reason %><% end %>
+            <% if @project.last_check_error %><br><span class="field__error">Last check: <%= @project.last_check_error %></span><% end %>
+          </span>
+        </p>
+        <div class="panel__row panel__row--actions">
+          <%= button_to "Check for changes", check_project_path(@project.name), class: "button button--small" %>
+          <%= button_to "Rotate secret", rotate_webhook_project_path(@project.name), class: "button button--small" %>
+        </div>
+      </section>
+    <% end %>
+    <% if @project.volumes.any? %>
+      <section class="panel volumes">
+        <div class="panel__head"><h2 class="disp panel__title">Volumes</h2><span class="panel__meta muted">Where each one lives</span></div>
+        <% sqlite_volumes = @last_good_backup&.found.to_h.fetch("sqlite", []).map { |f| f["volume"] } %>
+        <% @project.volume_rows.each do |volume, row| %>
+          <div class="panel__row" data-volume="<%= volume["name"] %>">
+            <span><span class="mono"><%= volume["name"] %></span> → <span class="mono"><%= volume["path"] %></span></span>
+            <% if row&.placed_at %>
+              <span><%= row.where_words %> · <small class="muted">moving a volume is a later feature</small></span>
+            <% else %>
+              <%= form_with url: project_volume_path(@project.name, volume["name"]), method: :patch, class: "inline-form" do |f| %>
+                <%= f.select :location, [ [ "Local disk (this server)", "" ] ] + @live_locations.map { |l| [ l.choice_label, l.name ] }, { selected: row&.location&.name.to_s }, "aria-label": "Where #{volume["name"]} lives" %>
+                <%= f.submit "Save", class: "button button--small" %>
+              <% end %>
+            <% end %>
+            <% if row&.location&.kind == "nfs" %>
+              <small class="field__error">Live SQLite over a network share risks corruption<%= ": this volume holds SQLite databases" if sqlite_volumes.include?(volume["name"]) %>.</small>
+            <% end %>
+          </div>
+        <% end %>
+        <p class="panel__row panel__row--muted">Chosen before Houston makes the volume, at its first deploy. Local disk is the server's own disk, and right for databases. Postgres data always stays on local disk.</p>
+      </section>
+    <% end %>
+    <% unless @project.maintenance? %>
+      <section class="panel maintenance">
+        <div class="panel__head"><h2 class="disp panel__title">Maintenance page</h2></div>
+        <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
+        <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
+        <p class="panel__row panel__row--muted"><%= @project.maintenance_page.present? ? "The project's own page (x-houston.maintenance)." : "Houston's default page. Set x-houston.maintenance in compose.yml to use your own." %></p>
+        <%= form_with url: project_maintenance_path(@project.name), method: :patch, class: "panel__row inline-form" do |f| %>
+          <%= hidden_field_tag :on, "1" %>
+          <%= f.text_field :message, placeholder: "Message (optional)", maxlength: 500, "aria-label": "Maintenance message" %>
+          <%= f.submit "Show maintenance page", class: "button button--small", data: { turbo_confirm: "Visitors to #{@project.name} will see the maintenance page within seconds. Show it?" } %>
+        <% end %>
+      </section>
+    <% end %>
   </div>
 </main>

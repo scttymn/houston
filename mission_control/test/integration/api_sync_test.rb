@@ -171,6 +171,28 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_nil project.reload.maintenance_page, "no page in the file: the default again"
   end
 
+  # What the project page shows beyond what Houston acts on (the facts strip,
+  # the console box). An older CLI sends none.
+  test "details: stored, validated, optional" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    details = { images: { db: "postgres:17" }, cpus: "1.5", memory: "2 GB", console: "bin/rails console" }
+    sync(equip_payload(variables: optional, details:))
+    assert_response :success
+    project = Project.find_by!(name: "equip")
+    assert_equal({ "images" => { "db" => "postgres:17" }, "cpus" => "1.5", "memory" => "2 GB", "console" => "bin/rails console" }, project.details)
+
+    sync(equip_payload(variables: optional))
+    assert_response :success
+    assert_equal({}, project.reload.details, "an older CLI's sync leaves nothing stale behind")
+
+    [ "x", { images: [ "postgres" ] }, { images: { web: "nginx" } }, { images: { db: "x" * 256 } }, { cpus: 2 },
+      { memory: "x" * 33 }, { console: "x" * 501 }, { console: "a\u0000b" } ].each do |bad|
+      sync(equip_payload(variables: optional, details: bad))
+      assert_response :unprocessable_entity, bad.inspect
+      assert_includes json["errors"].keys, "details", bad.inspect
+    end
+  end
+
   test "sync rejects what the CLI would never send" do
     {
       "name" => [ { name: "Equip" }, { name: "admin" }, { name: "hooks" }, { name: "-x" }, { name: nil } ],

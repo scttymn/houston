@@ -11,10 +11,10 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     make_deploy(@project, 1, "go")
   end
 
-  test "back up now" do
+  test "create snapshot" do
     sign_in_as users(:one)
     get project_path("equip")
-    assert_select "form[action='/projects/equip/backups'] button", "Back up now"
+    assert_select ".snapshots .panel__head form[action='/projects/equip/backups'] button", "Create Snapshot"
 
     assert_enqueued_jobs(1, only: BackupJob) do
       post project_backups_path("equip")
@@ -44,7 +44,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  test "back up now needs something to back up and somewhere to put it" do
+  test "create snapshot needs something to back up and somewhere to put it" do
     sign_in_as users(:one)
     fresh = make_project("fresh")
     post project_backups_path("fresh")
@@ -62,7 +62,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     assert fresh
   end
 
-  test "back up now needs the admin" do
+  test "create snapshot needs the admin" do
     post project_backups_path("equip")
     assert_redirected_to new_session_path
     assert_equal 0, BackupRun.count

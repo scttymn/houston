@@ -107,6 +107,26 @@ class Project < ApplicationRecord
     latest_deploy&.status&.to_sym || :standby
   end
 
+  REPO_HOSTS = { "github.com" => "GitHub", "gitlab.com" => "GitLab", "codeberg.org" => "Codeberg", "bitbucket.org" => "Bitbucket" }.freeze
+
+  # "GitHub · scttymn/equip", from git@github.com:scttymn/equip.git and the
+  # like; the URL itself when it doesn't parse.
+  def repo_words
+    return if repo_url.blank?
+    host, path = repo_url.match(%r{\A(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/](.+?)(?:\.git)?/?\z})&.captures
+    host ? "#{REPO_HOSTS.fetch(host, host)} · #{path}" : repo_url
+  end
+
+  # "2 CPUs · 2 GB" from the sync's details; nil without limits.
+  def resources_words
+    cpus, memory = details.values_at("cpus", "memory")
+    [ ("#{cpus} #{cpus == "1" ? "CPU" : "CPUs"}" if cpus.present?), memory.presence ].compact.join(" · ").presence
+  end
+
+  def console_command = details["console"].presence
+
+  def service_image(name) = details.dig("images", name)
+
   def deploy_rule_words
     if deploy_rule["on"] == "tag"
       "Tags matching #{deploy_rule["tags"].presence || "v*"}"

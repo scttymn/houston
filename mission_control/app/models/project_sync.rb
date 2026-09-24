@@ -43,7 +43,7 @@ class ProjectSync
                        databases: @payload["databases"].to_a.map { |d| d.slice("service", "image") },
                        keep_auto: @payload.dig("backups", "keep_auto") || 14, keep_deploy: @payload.dig("backups", "keep_deploy") || 10,
                        backup_schedule: @payload.dig("backups", "schedule") || "daily 03:00",
-                       maintenance_page: @payload["maintenance_page"],
+                       maintenance_page: @payload["maintenance_page"], details: details,
                        synced_at: Time.current, **link.to_h)
       claim_hosts
     end
@@ -57,6 +57,12 @@ class ProjectSync
   def missing_secrets(project)
     have = project.secrets.select { |s| s.value.present? }.map(&:key)
     @payload["variables"].select { |v| v["required"] == true }.map { |v| v["name"] } - have
+  end
+
+  # What the page shows, as the CLI sent it (validated): nothing from an older CLI.
+  def details
+    d = @payload.fetch("details", {})
+    { "images" => d["images"], "cpus" => d["cpus"], "memory" => d["memory"], "console" => d["console"] }.compact
   end
 
   # Host-by-host: <name>.<base> needs its own record. Returns the DNS mode.
@@ -147,11 +153,22 @@ class ProjectSync
         errors["backups"] << "must be {schedule: \"daily HH:MM\", keep_auto, keep_deploy}, keeps from 1 to 1000"
       end
 
+      details = @payload.fetch("details", {})
+      unless details.is_a?(Hash) && details.except("images", "cpus", "memory", "console").empty? &&
+             (images = details.fetch("images", {})).is_a?(Hash) &&
+             images.all? { |service, image| services.is_a?(Array) && services.include?(service) && short_text?(image, 255) } &&
+             [ [ "cpus", 32 ], [ "memory", 32 ], [ "console", 500 ] ].all? { |key, max| details[key].nil? || short_text?(details[key], max) }
+        errors["details"] << "must be {images: {service: image}, cpus, memory, console}, as short text"
+      end
+
       databases = @payload.fetch("databases", [])
       unless databases.is_a?(Array) && databases.all? { |d| d.is_a?(Hash) && services.is_a?(Array) && services.include?(d["service"]) && d["image"].is_a?(String) && d["image"].present? }
         errors["databases"] << "must be a list of {service, image} naming the project's services"
       end
     end
+
+    # Text for the page: a string of at most max characters, no control characters.
+    def short_text?(value, max) = value.is_a?(String) && value.valid_encoding? && value.length <= max && !value.match?(/[[:cntrl:]]/)
 
     def domain?(d)
       return false unless d.is_a?(String) && d.length <= 253

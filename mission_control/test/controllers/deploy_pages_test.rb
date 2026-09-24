@@ -1,12 +1,47 @@
 require "test_helper"
 require_relative "../support/project_helpers"
+require_relative "../support/fake_git"
 
 class DeployPagesTest < ActionDispatch::IntegrationTest
   include ProjectHelpers
+  include FakeGitHelper
 
   setup do
     sign_in_as users(:one)
     @project = make_project("equip")
+  end
+
+  def refs(map) = FakeGit.new { |args, _| args[1] == "ls-remote" ? git_ok(map.map { |ref, sha| "#{sha}\t#{ref}\n" }.join) : git_ok }
+
+  # The Deploy button at the top of Deploy history: the same as houston deploy --server.
+  test "Deploy queues the head and opens its log; a second click reuses it" do
+    garage = make_linked_project("garage")
+    get project_path("garage")
+    assert_select ".history .panel__head form[action='/projects/garage/deploys'] button", "Deploy"
+
+    use_fake_git(refs("refs/heads/main" => "a" * 40)) { post project_deploys_path("garage") }
+    assert_redirected_to project_deploy_path("garage", 1)
+    assert_equal [ "a" * 40, "queued" ], garage.deploys.sole.values_at(:sha, :status)
+
+    use_fake_git(refs("refs/heads/main" => "b" * 40)) { post project_deploys_path("garage") }
+    assert_redirected_to project_deploy_path("garage", 1)
+    assert_equal [ "b" * 40 ], garage.deploys.pluck(:sha), "the queued deploy moves to the newest head"
+  end
+
+  test "Deploy refuses without a repo or when the repo can't be read" do
+    git = FakeGit.new { |_, _| git_ok }
+    use_fake_git(git) { post project_deploys_path("equip") }
+    assert_redirected_to project_path("equip")
+    follow_redirect!
+    assert_select ".notice--nogo", /Link the repo first/
+    assert_empty git.calls
+
+    make_linked_project("garage")
+    use_fake_git(FakeGit.new { |_, _| git_failure("fatal: Could not read from remote repository.") }) { post project_deploys_path("garage") }
+    assert_redirected_to project_path("garage")
+    follow_redirect!
+    assert_select ".notice--nogo", /Could not read from remote repository/
+    assert_equal 0, Deploy.where(project: Project.find_by!(name: "garage")).count
   end
 
   test "a deploy's page" do

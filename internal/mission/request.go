@@ -2,6 +2,7 @@ package mission
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/scttymn/houston/internal/project"
@@ -30,7 +31,48 @@ func RequestFor(p *project.Project) SyncRequest {
 		Volumes:    appVolumes(p), Databases: databases(p, services),
 		MaintenancePage: p.Houston.MaintenancePage,
 		Backups:         &Backups{Schedule: p.Houston.Backups.Schedule, KeepAuto: p.Houston.Backups.KeepAuto, KeepDeploy: p.Houston.Backups.KeepDeploy},
+		Details:         details(p, services),
 	}
+}
+
+func details(p *project.Project, services []string) *Details {
+	d := &Details{Images: map[string]string{}}
+	for _, name := range services {
+		if image := p.Compose.Services[name].Image; name != p.AppService && image != "" {
+			d.Images[name] = image
+		}
+	}
+	d.CPUs, d.Memory = Limits(p)
+	if c := p.Houston.Commands.Console; c != nil {
+		d.Console = c.Server
+	}
+	return d
+}
+
+// Limits are the app service's deploy.resources.limits, as words: "1.5"
+// CPUs, "2 GB". Blank when unset.
+func Limits(p *project.Project) (cpus, memory string) {
+	app := p.Compose.Services[p.AppService]
+	if app.Deploy == nil || app.Deploy.Resources.Limits == nil {
+		return "", ""
+	}
+	if n := app.Deploy.Resources.Limits.NanoCPUs; n > 0 {
+		cpus = strconv.FormatFloat(float64(n), 'f', -1, 32)
+	}
+	if mem := int64(app.Deploy.Resources.Limits.MemoryBytes); mem > 0 {
+		memory = humanBytes(mem)
+	}
+	return cpus, memory
+}
+
+func humanBytes(b int64) string {
+	switch {
+	case b%(1<<30) == 0:
+		return strconv.FormatInt(b>>30, 10) + " GB"
+	case b%(1<<20) == 0:
+		return strconv.FormatInt(b>>20, 10) + " MB"
+	}
+	return strconv.FormatInt(b, 10) + " bytes"
 }
 
 // appVolumes are the app service's named volumes (bind mounts are dev-only).

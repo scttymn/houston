@@ -82,7 +82,7 @@ Rails.application.routes.draw do
       post :check
       post :rotate_webhook
     end
-    resources :deploys, only: :show, param: :number
+    resources :deploys, only: %i[ show create ], param: :number
     resources :backups, only: :create, controller: "project_backups"
     resources :snapshots, only: :index, controller: "project_snapshots"
     resources :volumes, only: :update, param: :name, controller: "project_volumes"
