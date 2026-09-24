@@ -90,6 +90,8 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     # Alphabetical, to scan ("order navigation and sections alphabetically").
     assert_equal %w[webhook history maintenance secrets snapshots], ids
     assert_equal ids.map { |id| "##{id}" }, links.map(&:last)
+    # A click marks its link until the reader scrolls (the last sections can't reach the top).
+    assert_select ".section-nav a[data-action='section-nav#choose']", links.size
     assert_equal [ "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots" ], links.map(&:first)
     assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create"
     assert_select "section#snapshots > turbo-frame#snapshots-list[loading=lazy]"
