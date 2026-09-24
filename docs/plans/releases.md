@@ -71,6 +71,16 @@ A server installs or updates with `HOUSTON_VERSION=v0.1.0`, building nothing. Th
   - At first, "no logout" survived, because the image step had no test. The image checks were added.
 - **The design, as built:** images are fetched right after Docker is installed, before anything is written, so a failed pull or build changes nothing. Source builds now stamp the CLI `source-<sha>` and Mission Control `source <sha>`.
 
+- **The live check (8), 2026-09-24:**
+  - Tag `v0.1.0` (at 825fd63) ran the workflow: test 3 min, images 3 min, release 2 min, all green.
+  - The Release has the four binaries, `install.sh` and `SHA256SUMS`. The Mac arm64 binary matches its checksum and says `houston version v0.1.0`.
+  - The repo and both packages were made public, and anonymous pulls then answered 200.
+  - The production server updated exactly as the README says: `curl …/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.1.0 sh`, with no token. It pulled Houston v0.1.0 and reported "Houston v0.1.0 is running".
+  - Mission Control and both runners run `ghcr.io/scttymn/…:v0.1.0`. The host's CLI and both runners' say `v0.1.0`.
+  - The flight board reads "FLIGHT BOARD · SVNMNS.COM · V0.1.0", and `houston status` (the release CLI) prints "Houston v0.1.0 at svnmns.com" first.
+  - equip, valleybuiltcrossfit, estherpictures.com and admin each answered 10 × 200 afterwards.
+- **License:** MIT, copyright Seven Moons LLC (9976ee7). The Later item "Going public" is done.
+
 ## Later (named, not built)
 - **arm64 images:** when the repo is public, via GitHub's free arm64 runners.
 - **Going public:** flip the repo's and packages' visibility, then drop `HOUSTON_GITHUB_TOKEN` from the update. That's the whole change, since the token is already optional.
