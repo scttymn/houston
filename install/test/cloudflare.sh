@@ -13,6 +13,18 @@ env_file="$repo/mission_control/.houston/cloudflare-check.env"
 [ -f "$env_file" ] || { echo "no $env_file (CLOUDFLARE_API_TOKEN=…, BASE_DOMAIN=…)"; exit 1; }
 base=$(sed -n 's/^BASE_DOMAIN=//p' "$env_file")
 tunnel_name="houston-${base%%.*}"
+
+# A Houston already live on this base domain is someone's production: a test
+# run would take over its tunnel (setup reuses one by name) and its cleanup
+# would delete the tunnel and every record Houston manages there. Tests need
+# a zone of their own. A test's own Houston is gone by cleanup time (its
+# machine is deleted first); with KEEP=1 the cleanup waits for it.
+refuse_live_houston() {
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://admin.$base/up")" = 200 ]; then
+    echo "admin.$base answers as a live Houston: a test run would take over its tunnel ($tunnel_name) and delete its records. Point $env_file at a zone of its own."
+    exit 1
+  fi
+}
 api="https://api.cloudflare.com/client/v4"
 
 auth=$(mktemp)
@@ -35,6 +47,7 @@ zone=$(cf "$api/zones?name=$base" | jqr 'r=d.get("result") or []; print(r[0]["id
 
 case "${1:-}" in
   preflight)
+    refuse_live_houston
     report=$(
     echo "accounts the token sees: $(printf '%s' "$accounts" | jqr 'print(len(d.get("result") or []), "" if d.get("success") else d.get("errors"))')"
     [ -n "$zone" ] && echo "zone $base: found" || echo "zone $base: NOT found (check the token's Zone · DNS permission)"
@@ -58,6 +71,7 @@ print('tunnel $tunnel_name:', ('CAN\'T LIST TUNNELS: %s (give the token Cloudfla
     case "$report" in *"NOT found"* | *"CAN'T"*) exit 1 ;; esac
     ;;
   cleanup)
+    refuse_live_houston
     [ -n "$account" ] && [ -n "$zone" ] || { echo "can't see exactly one account and the zone; nothing done"; exit 1; }
     tunnels=$(cf "$api/accounts/$account/cfd_tunnel?name=$tunnel_name&is_deleted=false" | jqr 'print(" ".join(x["id"] for x in d.get("result") or []))')
     for id in $tunnels; do
