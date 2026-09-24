@@ -237,6 +237,8 @@ type fakeDocker struct {
 	created  map[string]string // project → its containers' creation times, one per line
 	downs    [][]string
 	lsErr    error
+	prunes   [][]string
+	prune    func(args []string) ([]byte, error)
 }
 
 func (d *fakeDocker) Output(args ...string) ([]byte, error) {
@@ -249,6 +251,12 @@ func (d *fakeDocker) Output(args ...string) ([]byte, error) {
 	case args[0] == "compose" && slices.Contains(args, "down"):
 		d.downs = append(d.downs, args)
 		return nil, nil
+	case args[0] == "builder" && args[1] == "prune":
+		d.prunes = append(d.prunes, args)
+		if d.prune != nil {
+			return d.prune(args)
+		}
+		return []byte("Total:\t0B\n"), nil
 	}
 	return nil, errors.New("unexpected docker " + strings.Join(args, " "))
 }
@@ -282,5 +290,64 @@ func TestSweepRemovesOnlyStaleTestProjects(t *testing.T) {
 	Sweep(d, now, &log)
 	if len(d.downs) != 0 || !strings.Contains(log.String(), "Cannot connect") {
 		t.Errorf("docker error: downs %v, log %q", d.downs, log.String())
+	}
+}
+
+// Docker's build cache grew to 15.7 GB on the production server in a day
+// (every deploy builds), and Houston never pruned it. The hourly sweep
+// keeps it to BuildCacheLimit, so builds stay fast and the disk stays free.
+func TestPruneBuildCache(t *testing.T) {
+	d := &fakeDocker{prune: func([]string) ([]byte, error) { return []byte("ID\tRECLAIMABLE\nabc\t1GB\nTotal:\t14.38GB\n"), nil }}
+	var log strings.Builder
+	PruneBuildCache(d, &log)
+	want := [][]string{{"builder", "prune", "--force", "--max-used-space", BuildCacheLimit}}
+	if !reflect.DeepEqual(d.prunes, want) {
+		t.Errorf("prunes = %v, want %v", d.prunes, want)
+	}
+	if !strings.Contains(log.String(), "freed 14.38GB of build cache") {
+		t.Errorf("log = %q", log.String())
+	}
+
+	// Nothing freed: nothing logged, since it runs every hour.
+	d = &fakeDocker{}
+	log.Reset()
+	PruneBuildCache(d, &log)
+	if log.Len() != 0 {
+		t.Errorf("an empty prune logged %q", log.String())
+	}
+
+	// Docker before 28 names the limit --keep-storage.
+	d = &fakeDocker{prune: func(args []string) ([]byte, error) {
+		if slices.Contains(args, "--max-used-space") {
+			return nil, errors.New("exit status 125: unknown flag: --max-used-space") // stderr, as docker.Output puts it
+		}
+		return []byte("Total:\t2GB\n"), nil
+	}}
+	log.Reset()
+	PruneBuildCache(d, &log)
+	want = [][]string{{"builder", "prune", "--force", "--max-used-space", BuildCacheLimit}, {"builder", "prune", "--force", "--keep-storage", BuildCacheLimit}}
+	if !reflect.DeepEqual(d.prunes, want) || !strings.Contains(log.String(), "freed 2GB") {
+		t.Errorf("older docker: prunes %v, log %q", d.prunes, log.String())
+	}
+
+	// Any other failure is logged, not retried, and never stops the runner.
+	d = &fakeDocker{prune: func([]string) ([]byte, error) { return nil, errors.New("Cannot connect to the Docker daemon") }}
+	log.Reset()
+	PruneBuildCache(d, &log)
+	if len(d.prunes) != 1 || !strings.Contains(log.String(), "can't prune the build cache: Cannot connect") {
+		t.Errorf("failure: prunes %v, log %q", d.prunes, log.String())
+	}
+}
+
+func TestRunPrunesTheBuildCacheHourly(t *testing.T) {
+	r, m, _, _ := setup(t)
+	m.claimErr = errors.New("can't reach Mission Control")
+	d := &fakeDocker{projects: "[]"}
+	r.Docker = d
+	ctx, cancel := context.WithCancel(context.Background())
+	r.Sleep = func(context.Context, time.Duration) { cancel() }
+	r.Run(ctx)
+	if len(d.prunes) != 1 {
+		t.Errorf("prunes on the first pass = %v, want one", d.prunes)
 	}
 }

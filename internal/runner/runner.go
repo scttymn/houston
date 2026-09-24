@@ -53,6 +53,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		if r.Docker != nil && time.Since(swept) >= time.Hour {
 			Sweep(r.Docker, time.Now(), r.Base.Stderr)
+			PruneBuildCache(r.Docker, r.Base.Stderr)
 			swept = time.Now()
 		}
 		if _, err := r.RunOnce(ctx); err != nil {
@@ -215,4 +216,29 @@ func allOlderThan(d Docker, project string, cutoff time.Time) bool {
 		}
 	}
 	return true
+}
+
+// BuildCacheLimit is how much of Docker's build cache the hourly sweep
+// keeps: enough for the next builds to reuse their layers. Every deploy
+// builds, and nothing else prunes it (15.7 GB on the production server in
+// a day).
+const BuildCacheLimit = "5GB"
+
+var totalReclaimed = regexp.MustCompile(`(?m)^Total:\s*(\S+)`)
+
+// PruneBuildCache trims Docker's build cache to BuildCacheLimit. Docker
+// before 28 names the limit --keep-storage. Problems are only logged: a
+// full cache slows builds, it doesn't stop them.
+func PruneBuildCache(d Docker, log io.Writer) {
+	out, err := d.Output("builder", "prune", "--force", "--max-used-space", BuildCacheLimit)
+	if err != nil && strings.Contains(err.Error()+string(out), "unknown flag") {
+		out, err = d.Output("builder", "prune", "--force", "--keep-storage", BuildCacheLimit)
+	}
+	if err != nil {
+		fmt.Fprintf(log, "houston runner: can't prune the build cache: %v\n", err)
+		return
+	}
+	if m := totalReclaimed.FindSubmatch(out); m != nil && string(m[1]) != "0B" {
+		fmt.Fprintf(log, "houston runner: freed %s of build cache (keeping up to %s)\n", m[1], BuildCacheLimit)
+	}
 }
