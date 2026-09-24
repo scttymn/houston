@@ -41,6 +41,15 @@ When the server runs a release and a newer one is out, the flight board says so,
   - a failed check not logged
 - **Visual check** (the rendered board): the note sits under the header, the command has its own line with Copy beside it, and nothing overflows from 320 to 1280 px.
 
+- **The live check (8), 2026-09-24:**
+  - `v0.2.0` (3dc7788) released green, and the production server updated to it with the README's command.
+  - Mission Control and both runners run `…:v0.2.0`, and the CLI on the host and both runners says `v0.2.0`.
+  - The migration ran, and `check_latest_release` is scheduled "every 6 hours".
+  - The check, run once by hand on the server, reached GitHub and stored `v0.2.0` (its release page, 22:18:59 UTC). No note, since it runs the latest.
+  - The flight board reads "FLIGHT BOARD · SVNMNS.COM · V0.2.0" with no update note, and `houston status` says "Houston v0.2.0 at svnmns.com".
+  - The four apps each answered 10 × 200.
+  - The note itself shows when the next release comes out (within 6 hours).
+
 ## Later (named, not built)
 - `houston update --server`, or a button (a host-side helper that runs the installer).
 - Automatic updates, when the server is idle.
