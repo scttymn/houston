@@ -305,7 +305,7 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .console-box__label { font-size: 10px; letter-spacing: 0.16em; color: var(--muted); }
 .console-box__label span { color: var(--ink); text-transform: none; letter-spacing: 0.04em; }
 .console-box__field { display: flex; align-items: stretch; height: 44px; border: 1px solid var(--rule); background: #E6E0D0; }
-.console-box__command { display: flex; align-items: center; padding: 0 14px; font-size: 13px; white-space: nowrap; }
+.console-box__command { flex: 1 1 auto; display: flex; align-items: center; padding: 0 14px; font-size: 13px; white-space: nowrap; } /* fills the box, so Copy sits at its right edge */
 .console-box__field button { border: 0; border-left: 1px solid var(--rule); background: var(--surface); color: var(--ink); padding: 0 14px; font: 13px var(--text); cursor: pointer; white-space: nowrap; }
 .backup-run { margin: 0; padding: 10px 20px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--rule); }
 .backup-run .state { padding: 0; margin-right: 4px; }
