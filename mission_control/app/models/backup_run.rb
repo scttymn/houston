@@ -2,6 +2,10 @@
 # token), then GO, NO-GO or skipped. The snapshot it makes lives in restic;
 # this records the run. See docs/plans/volumes-backups.md, Batch 1.
 class BackupRun < ApplicationRecord
+  # The flight board shows each project's last backup. Status changes made
+  # with update_all (a claim, a finish, giving up) refresh it by hand.
+  after_commit -> { FlightBoard.refresh! }, if: -> { previously_new_record? || saved_change_to_status? }
+
   class Refused < StandardError; end
 
   NOTHING_DEPLOYED = "nothing deployed yet"
@@ -86,6 +90,7 @@ class BackupRun < ApplicationRecord
       now = Time.current
       claimed = where(id: run.id, status: "queued").update_all(status: "running", token_digest: digest(token), heartbeat_at: now,
                                                              started_at: now, updated_at: now)
+      FlightBoard.refresh! if claimed == 1
       claimed == 1 ? token : nil
     end
   rescue ActiveRecord::RecordNotUnique
@@ -98,7 +103,9 @@ class BackupRun < ApplicationRecord
 
   # A queued run that will never start (its job gave up waiting).
   def give_up!(reason)
-    self.class.where(id:, status: "queued").update_all(status: "no_go", error: reason, finished_at: Time.current, updated_at: Time.current)
+    gave_up = self.class.where(id:, status: "queued").update_all(status: "no_go", error: reason, finished_at: Time.current, updated_at: Time.current)
+    FlightBoard.refresh! if gave_up == 1
+    gave_up
   end
 
   # Running, but silent for STALE_AFTER: Mission Control stopped during it.
@@ -122,6 +129,7 @@ class BackupRun < ApplicationRecord
     written = ours(token).update_all(status:, error: error&.truncate(4000), snapshot_id:, bytes:, found:, log:,
                                      finished_at: Time.current, updated_at: Time.current)
     reload
+    FlightBoard.refresh! if written == 1
     written == 1
   end
 

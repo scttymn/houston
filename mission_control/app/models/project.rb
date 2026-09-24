@@ -1,6 +1,12 @@
 # A project Houston deploys, as last synced from its compose.yml by houston
 # deploy. Facts only; secret values live in Secret.
 class Project < ApplicationRecord
+  # What the flight board shows of a project: its name and services, its
+  # repo, its domains and their DNS, and maintenance.
+  BOARD_ATTRIBUTES = %w[services details repo_url domains domain_states maintenance_since].freeze
+  after_commit -> { FlightBoard.refresh! }, on: %i[ create destroy ]
+  after_commit -> { FlightBoard.refresh! }, on: :update, if: -> { saved_changes.keys.intersect?(BOARD_ATTRIBUTES) }
+
   class Refused < StandardError; end
 
   has_many :hosts, class_name: "ProjectHost", dependent: :delete_all

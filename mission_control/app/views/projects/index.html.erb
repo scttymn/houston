@@ -2,6 +2,8 @@
 <% base = @installation.base_domain %>
 <%# The HOLD banner refreshes the page in place until admin.<base> switches over. %>
 <% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%# Live: Mission Control refreshes this stream when anything below changes (FlightBoard). %>
+<%= turbo_stream_from FlightBoard::STREAM %>
 
 <main class="page board">
   <div class="board__top">

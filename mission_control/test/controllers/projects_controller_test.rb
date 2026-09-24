@@ -199,6 +199,16 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
   end
 
   # The design's Main: pills, services with images, host rows, and LAST BACKUP.
+  # docs/plans/live-flight-board.md: the board redraws itself on changes.
+  test "the flight board listens for changes" do
+    stub_tunnel
+    make_deploy(make_project("equip"), 1, "go")
+    get root_path
+    assert_select "turbo-cable-stream-source[signed-stream-name]", 1
+    assert_select "meta[name=turbo-refresh-method][content=morph]"
+    assert_select "meta[name=turbo-refresh-scroll][content=preserve]"
+  end
+
   test "the flight board follows the design" do
     stub_tunnel
     equip = make_project("equip", services: %w[app db], domains: %w[equipping.com])

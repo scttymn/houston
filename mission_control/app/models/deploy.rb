@@ -3,6 +3,10 @@
 # finish it, and only while it's still in flight. See the ownership template
 # in docs/plans/deploy-path.md, Batch 3.
 class Deploy < ApplicationRecord
+  # The flight board shows each deploy's commit, step and status. Every new
+  # deploy sets its commit, so creating one counts; a heartbeat doesn't.
+  after_commit -> { FlightBoard.refresh! }, if: -> { saved_change_to_status? || saved_change_to_step? || saved_change_to_sha? }
+
   class Busy < StandardError
     attr_reader :deploy
 
@@ -167,7 +171,9 @@ class Deploy < ApplicationRecord
     generation = deploy.project.data_generation + (deploy.restore? ? 1 : 0)
     claimed = where(id: deploy.id, status: "queued").update_all(status: "in_flight", runner:, token_digest: digest(token), generation:,
                                                                  heartbeat_at: Time.current, updated_at: Time.current)
-    claimed == 1 ? [ deploy.reload, token ] : nil
+    return unless claimed == 1
+    FlightBoard.refresh! # update_all skips the callback
+    [ deploy.reload, token ]
   end
 
   # Finishes a silent in-flight deploy; returns its number.
