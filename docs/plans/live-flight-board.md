@@ -36,6 +36,7 @@ The Projects page (the flight board) redraws by itself when something it shows c
 - The suite: 310 runs, 0 failures; rubocop clean.
 - Mutation check: each of 13 mutants (removing a trigger, the rescue or the subscription, or refreshing on every save) fails a test. One mutant survived at first: dropping "a new deploy" didn't matter, because every new deploy sets its commit. That condition was cut, and the CLI start test was added (2b).
 - The live check (7), on the production server (4a2a6f1), 2026-09-24: a board open in the user's browser subscribed to `flight_board` ("Turbo::StreamsChannel is streaming from flight_board"). A refresh sent at 17:25:11 UTC (Solid Cable message on `flight_board`) was followed in the same second by that browser's `GET "/"`, the board re-fetching itself without a reload.
+- Then a visible change: with the board open in the browser pane (a marker set on the page, to prove no reload), a manual snapshot of equip was requested on the server (backup run #11). Within 10 seconds the board's Last backup for equip went from "24 Sep 11:31 · deploy · 321 KB" to "24 Sep 12:26 · auto · 321 KB", and the marker was still there.
 
 ## Later (named, not built)
 - The **"Deploying · T+00:52"** clock ticks only when the board refreshes (each step). A per-second tick would be a small Stimulus timer.
