@@ -56,18 +56,27 @@ check_system() {
   check_release
 }
 
-# check_release: exactly one of a release (HOUSTON_VERSION) or a checkout
-# (HOUSTON_SOURCE). A release must exist before anything is changed.
+# check_release: a release (HOUSTON_VERSION, or the latest when it's unset) or
+# a checkout (HOUSTON_SOURCE), not both. A release must exist before anything
+# is changed.
 check_release() {
   [ -n "$HOUSTON_VERSION" ] && [ -n "$HOUSTON_SOURCE" ] && fail "set HOUSTON_VERSION or HOUSTON_SOURCE, not both"
   if [ -n "$HOUSTON_SOURCE" ]; then
     [ -f "$HOUSTON_SOURCE/mission_control/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission_control/Dockerfile"
     return 0
   fi
-  [ -n "$HOUSTON_VERSION" ] || fail "set HOUSTON_VERSION to a release (for example v0.1.0), or HOUSTON_SOURCE to a checkout"
+  has curl || fail "installing a release needs curl"
+  # Neither set: the latest release (GitHub's "latest" leaves prereleases out).
+  if [ -z "$HOUSTON_VERSION" ]; then
+    latest_json=$(github "$HOUSTON_GITHUB_API/repos/$HOUSTON_REPO/releases/latest") || latest_json=""
+    # shellcheck disable=SC2020 # each of , { and } becomes a newline, on purpose
+    HOUSTON_VERSION=$(printf '%s' "$latest_json" | tr ',{}' '\n\n\n' | sed 's/^ *//; s/": *"/":"/' | sed -n 's/^"tag_name":"\([^"]*\)"$/\1/p' | head -1)
+    [ -n "$HOUSTON_VERSION" ] ||
+      fail "couldn't find Houston's latest release (set HOUSTON_VERSION to one, or HOUSTON_SOURCE to a checkout)"
+    step "The latest release is $HOUSTON_VERSION"
+  fi
   printf '%s' "$HOUSTON_VERSION" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$' ||
     fail "HOUSTON_VERSION must be a release tag like v0.1.0"
-  has curl || fail "installing a release needs curl"
   release_json=$(github "$HOUSTON_GITHUB_API/repos/$HOUSTON_REPO/releases/tags/$HOUSTON_VERSION") ||
     fail "$HOUSTON_VERSION isn't a Houston release (or the repo is private: set HOUSTON_GITHUB_TOKEN to a token that can read it)"
   owner=${HOUSTON_REPO%%/*}

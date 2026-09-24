@@ -20,11 +20,11 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 
 ## 1. Install the server
 
-Pick a release from [Releases](https://github.com/scttymn/houston/releases) and install it:
-
 ```sh
-curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.2.0 sh
+curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo sh
 ```
+
+That installs the latest release. To pin one from [Releases](https://github.com/scttymn/houston/releases), use `sudo HOUSTON_VERSION=<tag> sh`.
 
 The installer:
 - checks for apt, dnf or pacman (and stops, changing nothing, if there's none, or if SELinux is enforcing)
@@ -37,14 +37,14 @@ The installer:
 It ends with a URL and a one-time **setup code**:
 
 ```
-Houston v0.2.0 is running.
+Houston vX.Y.Z is running.
 Finish setup at  http://<server address>:3000
 Setup code       XXXX-XXXX
 ```
 
-**To update,** run it again with the new version. Rerunning the installer also repairs, and it keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
+**To update,** run the same command again: it installs the latest release (or the `HOUSTON_VERSION` you give). Rerunning the installer also repairs, and it keeps the secrets. It restarts the runners so they use the new CLI; a deploy in flight at that moment is abandoned (NO-GO, the old version keeps serving). `HOUSTON_RUNNERS=3` changes how many runners there are.
 
-The flight board's header and `houston status` say which version is running. When a newer release is out, the flight board says so, with its release notes and the update command to copy, and `houston status` adds "(v0.2.1 available)". Mission Control checks GitHub every 6 hours; nothing updates by itself.
+The flight board's header and `houston status` say which version is running. When a newer release is out, the flight board says so, with its release notes and the update command to copy, and `houston status` adds "(vX.Y.Z available)". Mission Control checks GitHub every 6 hours; nothing updates by itself.
 
 **From a checkout** (working on Houston): `sudo HOUSTON_SOURCE=/path/to/houston sh install/install.sh` builds everything there, instead of pulling a release. The flight board then says `SOURCE <commit>`. Set one of `HOUSTON_VERSION` and `HOUSTON_SOURCE`, not both.
 
@@ -65,10 +65,10 @@ Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of
 
 ## 3. Install the CLI (your laptop)
 
-Download it from the same release as the server (`darwin` or `linux`, `arm64` or `amd64`):
+Download the latest (`darwin` or `linux`, `arm64` or `amd64`). For a pinned server, use the same release: `releases/download/<tag>/…`.
 
 ```sh
-curl -fsSLo ~/.local/bin/houston https://github.com/scttymn/houston/releases/download/v0.2.0/houston-darwin-arm64
+curl -fsSLo ~/.local/bin/houston https://github.com/scttymn/houston/releases/latest/download/houston-darwin-arm64
 chmod +x ~/.local/bin/houston && ln -sf houston ~/.local/bin/hou
 houston --version
 ```
@@ -232,7 +232,7 @@ bin/test-integration                 # the same, plus the ones that drive real D
 houston -f mission_control/compose.yml test    # Mission Control's suite, run by Houston itself
 ```
 
-**Releasing:** push a tag like `v0.2.0`. `.github/workflows/release.yml` runs the tests (Go, Mission Control, the installer), then publishes both images at that tag and a GitHub Release with the CLI binaries, `install.sh` and `SHA256SUMS`. Nothing is published unless the tests pass.
+**Releasing:** push a tag like `vX.Y.Z`. `.github/workflows/release.yml` runs the tests (Go, Mission Control, the installer), then publishes both images at that tag and a GitHub Release with the CLI binaries, `install.sh` and `SHA256SUMS`. Nothing is published unless the tests pass.
 
 `install/test/install-version.sh` checks installing a release, against a fake GitHub, in a container. The other real runs are in `install/test/`. Each creates a throwaway OrbStack machine and installs Houston on it:
 - `orbstack.sh ubuntu:noble` runs the whole install, including the real Cloudflare tunnel when `mission_control/.houston/cloudflare-check.env` exists.

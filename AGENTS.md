@@ -38,5 +38,5 @@ install/test/install-version.sh                     # the installer's release pa
 - **Mission Control never waits on the outside world at render time.** GitHub, Cloudflare and registries are checked by jobs or timeouts, and failures are logged, never raised to the page.
 
 ## Releasing
-Tag `vX.Y.Z` and push the tag, only when a human asks. The workflow must go green; then a server updates with:
-`curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=vX.Y.Z sh`
+Tag `vX.Y.Z` and push the tag, only when a human asks. The workflow must go green; then a server updates to it (the latest) with:
+`curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo sh`

@@ -25,9 +25,9 @@ ls compose.yml Dockerfile   # in the app's repo: is it set up for Houston alread
 ## 1. The server (only if there isn't one)
 **HUMAN:** they need a Linux server (apt, dnf or pacman), a Cloudflare account with a domain, and somewhere for backups. On the server, as root:
 ```sh
-curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=<latest tag> sh
+curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo sh
 ```
-- Find the latest tag on the [Releases](https://github.com/scttymn/houston/releases) page. The installer checks everything before changing anything, and ends with a URL and a setup code.
+- That installs the latest release (`sudo HOUSTON_VERSION=<tag> sh` pins one). The installer checks everything before changing anything, and ends with a URL and a setup code.
 - **HUMAN: first run, in the browser:**
   1. The admin login.
   2. A Cloudflare API token (Account › Cloudflare Tunnel › Edit, and Zone › DNS › Edit on the domain).
@@ -35,10 +35,10 @@ curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.s
 - **Check:** `https://admin.<their domain>/up` answers 200.
 
 ## 2. The CLI, and logging in
-Download the CLI from the same release as the server (`darwin` or `linux`, `arm64` or `amd64`), and check its checksum:
+Download the CLI (`darwin` or `linux`, `arm64` or `amd64`), and check its checksum. This is the latest release. If the server is pinned to an older one, use `releases/download/<tag>/…` for both files, and match `houston status`'s version.
 ```sh
-curl -fsSLo houston https://github.com/scttymn/houston/releases/download/<tag>/houston-darwin-arm64
-curl -fsSL https://github.com/scttymn/houston/releases/download/<tag>/SHA256SUMS | grep " houston-darwin-arm64$" | shasum -a 256 -c
+curl -fsSLo houston https://github.com/scttymn/houston/releases/latest/download/houston-darwin-arm64
+curl -fsSL https://github.com/scttymn/houston/releases/latest/download/SHA256SUMS | grep " houston-darwin-arm64$" | shasum -a 256 -c
 install -m 755 houston ~/.local/bin/houston
 ```
 - **HUMAN:** they create an API token in Mission Control (Settings › API tokens), then run `houston login https://admin.<domain>` themselves and paste it. The input is hidden.

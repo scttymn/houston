@@ -3,8 +3,10 @@
 # Debian container: install.sh loaded as a library (HOUSTON_INSTALL_LIB=1)
 # against a fake GitHub (release JSON and assets, logging every request's
 # Authorization header), with docker stubbed. Nothing here needs the network.
-#   - both or neither of HOUSTON_VERSION and HOUSTON_SOURCE, a malformed
-#     version, and an unknown one are refused before anything changes
+#   - neither HOUSTON_VERSION nor HOUSTON_SOURCE: the latest release; no
+#     latest release to be found stops before anything changes
+#   - both, a malformed version and an unknown one are refused before
+#     anything changes
 #   - a release's CLI is installed, checked against SHA256SUMS
 #   - the token is sent when given, and nothing when not (a public repo)
 #   - a checksum mismatch stops the install, and the old CLI stays
@@ -39,7 +41,7 @@ class H(http.server.BaseHTTPRequestHandler):
         with open("/fake/requests.log", "a") as f:
             f.write("%s auth=%s\n" % (self.path, self.headers.get("Authorization", "-")))
         base = "http://127.0.0.1:%d/repos/scttymn/houston/releases" % PORT
-        if self.path == "/repos/scttymn/houston/releases/tags/v0.1.0":
+        if self.path in ("/repos/scttymn/houston/releases/tags/v0.1.0", "/repos/scttymn/houston/releases/latest"):
             assets = [{"url": "%s/assets/%d" % (base, i + 1), "id": i + 1, "node_id": "x", "name": n,
                        "uploader": {"login": "github-actions[bot]", "url": "https://api.github.com/users/github-actions%5Bbot%5D"}}
                       for i, n in enumerate(NAMES)]
@@ -73,11 +75,16 @@ refused() { # refused <want> <env...>
   out=$(LIB_CMD='check_release; echo "not refused"' lib "$@" 2>&1); code=$?
   [ "$code" = 1 ] && printf '%s' "$out" | grep -qF "$want" && ok "exit 1: $(printf '%s' "$out" | tail -1)" || bad "wanted \"$want\", got exit $code: $out"
 }
-refused "set HOUSTON_VERSION to a release (for example v0.1.0), or HOUSTON_SOURCE to a checkout" HOUSTON_VERSION= HOUSTON_SOURCE=
 refused "set HOUSTON_VERSION or HOUSTON_SOURCE, not both" HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE=/src
 refused "HOUSTON_VERSION must be a release tag like v0.1.0" HOUSTON_VERSION='v0.1; rm -rf /' HOUSTON_SOURCE=
 refused "v9.9.9 isn't a Houston release" HOUSTON_VERSION=v9.9.9 HOUSTON_SOURCE=
+refused "couldn't find Houston's latest release" HOUSTON_VERSION= HOUSTON_SOURCE= HOUSTON_REPO=scttymn/nothing
 [ ! -e /usr/local/bin/houston ] && ok "nothing installed" || bad "something was installed"
+
+echo "== neither HOUSTON_VERSION nor HOUSTON_SOURCE: the latest release"
+out=$(LIB_CMD='check_release && echo "version=$HOUSTON_VERSION image=$IMAGE runner=$RUNNER_IMAGE"' lib HOUSTON_VERSION= HOUSTON_SOURCE= 2>&1); code=$?
+[ "$code" = 0 ] && printf '%s' "$out" | grep -qx "version=v0.1.0 image=ghcr.io/scttymn/houston-mission-control:v0.1.0 runner=ghcr.io/scttymn/houston-runner:v0.1.0" &&
+  ok "resolved the latest release, v0.1.0, and its images" || bad "exit $code: $out"
 
 echo "== a release's CLI, checked against SHA256SUMS; no token: no Authorization"
 : > /fake/requests.log
