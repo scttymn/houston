@@ -645,3 +645,16 @@ a.button--primary { color: var(--on-dark); }
   .section-nav h1.disp { margin: 0 12px 0 0; font-size: 36px; flex-basis: 100%; }
   .section-nav a { padding: 6px 10px; border: 1px solid var(--rule); }
 }
+
+/* Dropdowns draw their own caret: the browser's ignores padding and sits
+   against the right border. Room on the right for it, 12px in. */
+select, .inline-form select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%231A1D24' stroke-width='1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+  cursor: pointer;
+}
