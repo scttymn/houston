@@ -2,6 +2,10 @@
 # (x-houston.maintenance) with {{project}} and {{message}} filled in,
 # HTML-escaped, or Houston's default. Nothing else in a page is interpreted.
 class MaintenancePage
+  # Houston's patch, for the default page to inline: that page loads nothing
+  # (the app is down), so the logo is part of the HTML, not a link to it.
+  LOGO = Rails.root.join("app/assets/images/patch.svg").read.sub(/<!--.*?-->\n?/m, "").freeze
+
   def self.html(project, message: project.maintenance_message)
     return nil if project.maintenance_page.blank?
 

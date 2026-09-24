@@ -14,11 +14,14 @@
   main { max-width: 34rem; text-align: center; }
   h1 { margin: 0 0 8px; font-size: 1.9rem; letter-spacing: -0.01em; }
   p { margin: 0; color: var(--muted); }
+  .logo { width: 200px; max-width: 60vw; margin: 0 auto 28px; }
+  .logo svg { display: block; width: 100%; height: auto; }
   .message { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--rule); color: var(--fg); white-space: pre-line; }
 </style>
 </head>
 <body>
 <main>
+  <div class="logo" role="img" aria-label="Houston"><%= MaintenancePage::LOGO.html_safe %></div>
   <h1><%= @project.name %></h1>
   <p>is down for maintenance. We'll be back shortly.</p>
   <% if @project.maintenance_message.present? %><p class="message"><%= @project.maintenance_message %></p><% end %>

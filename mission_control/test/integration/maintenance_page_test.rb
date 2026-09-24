@@ -25,6 +25,8 @@ class MaintenancePageTest < ActionDispatch::IntegrationTest
         assert_includes response.body, "Back by &lt;b&gt;10:00&lt;/b&gt;", "the message is escaped"
         assert_not_includes response.body, "Mission Control"
         assert_select "link[rel=stylesheet], script[src]", 0
+        assert_select "main > .logo > svg", 1, "Houston's patch, inline: the page loads nothing else"
+        assert_select "img, image, use", 0
       end
       post "/session", params: { email_address: "x", password: "y" }
       assert_response :service_unavailable
@@ -56,6 +58,7 @@ class MaintenancePageTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "&lt;script&gt;alert(1)&lt;/script&gt; &amp; back soon"
     assert_not_includes response.body, "<script>alert(1)"
     assert_includes response.body, "{{other}}", "nothing else is interpreted"
+    assert_select "svg", 0, "a project's own page is left as written"
 
     @project.update!(maintenance_message: nil)
     get "/"
