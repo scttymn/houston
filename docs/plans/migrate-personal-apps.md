@@ -51,7 +51,8 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
    - The project is named `valleybuiltcrossfit` on purpose (the full domain), so it's served at `valleybuiltcrossfit.svnmns.com`, with `APP_HOST` the same. `valleybuilt.svnmns.com` was Coolify's name, and it's gone with Coolify's copy.
    - Solid Queue runs inside Puma from the production image's `ENV`, since development has no queue database.
    - Deploy #1 (3b76cdd) went GO, with 10 × 200 on `/up`; 43 jobs ran on Solid Queue. Coolify's valleybuilt is stopped.
-   - Still to do: the GitHub webhook and a first backup.
+   - The GitHub webhook: the ping got 202, and a push to `main` (4fabec1) deployed on its own as #2, GO with its tests.
+   - The first backup: GO, snapshot 23372207, 3.3 MB, with its four SQLite files.
 
    The plan as written:
    - its repo gets the setup (like equip's: Rails, SQLite, Solid Queue), with `APP_HOST: valleybuilt.svnmns.com`
