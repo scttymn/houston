@@ -220,3 +220,7 @@ houston -f mission_control/compose.yml test    # Mission Control's suite, run by
 `install/test/install-version.sh` checks installing a release, against a fake GitHub, in a container. The other real runs are in `install/test/`. Each creates a throwaway OrbStack machine and installs Houston on it:
 - `orbstack.sh ubuntu:noble` runs the whole install, including the real Cloudflare tunnel when `mission_control/.houston/cloudflare-check.env` exists.
 - `deploy-e2e.sh`, `backups-e2e.sh`, `restore-e2e.sh`, `init-e2e.sh` and others cover the rest.
+
+## License
+
+MIT, copyright Seven Moons LLC. See [LICENSE](LICENSE).
