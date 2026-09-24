@@ -49,3 +49,8 @@
   - After re-reading an existing project, the HOLD notice sits above Save, with the project name linking to its page. Cancel, Save and Deploy are unchanged, and Cancel is the same width as the old link.
   - At 375px there's no overflow, and the notice stays inside the 16px gutter.
   - A pre-existing wrap: at 1280px, Deploy falls to a second line beside the long "Required secrets…" note. It does the same with the old Cancel link.
+- The live check on the production server (c2292a7), 2026-09-24:
+  - Add project with equip's HTTPS URL made a draft: a key, and NO-GO, since the repo is private.
+  - Cancel went to the board, and that draft was destroyed on the server.
+  - Add project then opened empty: no URL, no key, no Cancel.
+  - The Save-updates notice is covered by the tests and the render. A live Read needs a deploy key on the repo.
