@@ -58,6 +58,7 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
      - Checked: both names 10 × 200, www → the apex with path and query, the uploads serve, LiveView's websocket opens on both names. A snapshot after (f8ff0e2d).
      - `SECRET_KEY_BASE` is new, so people signed in on Coolify sign in again.
      - The way back, until Coolify's volume is removed: recreate the two records (saved), delete Houston's, start Coolify's app.
+     - The user signed in to the admin on Houston (it works), and shut the Coolify server down. Step 8 is done: equip, valleybuiltcrossfit and estherpictures run only on Houston, and the way back for each is Houston's own snapshots.
 4. **valleybuilt** (moved on 2026-09-24; its repo is `git@github.com:scttymn/valleybuiltcrossfit.git`):
    - **Its data came across after all**, by hand (the runbook, done once), about 07:45. Coolify's copy was running again (volume `jifewmynkknfmtkmhuy4vrai-storage-v5`; the earlier v1–v4 volumes are stale):
      - the four databases were copied with SQLite's `.backup` from inside the running container, then integrity-checked
