@@ -22,7 +22,11 @@ func TestDevProduction_RunsCompose(t *testing.T) {
 		if code != 5 {
 			t.Errorf("exit = %d, want compose's 5 (stderr: %s)", code, stderr)
 		}
-		want := []string{"compose", "-p", "phoenixapp", "--project-directory", dir, "-f", path,
+		// Its own project, so its own volumes: dev's were made by the dev
+		// stage (often root), and a production image running as a user
+		// can't write them. A fresh volume is seeded from the image, with
+		// the image's ownership, as on the server.
+		want := []string{"compose", "-p", "phoenixapp-production", "--project-directory", dir, "-f", path,
 			"-f", filepath.Join(dir, ".houston", "compose.production.yml"), "up", "--build"}
 		if len(d.runs) != 1 || !reflect.DeepEqual(d.runs[0], want) {
 			t.Errorf("runs = %q\nwant %q", d.runs, want)

@@ -112,7 +112,7 @@ Then check it the way the server will run it:
 ```sh
 houston dev                  # the dev stage, code mounted
 houston test                 # commands.test in a throwaway copy
-houston dev --production     # the production image, locally
+houston dev --production     # the production image, locally, with volumes of its own
 houston init                 # again: "already set up" when nothing's missing
 ```
 

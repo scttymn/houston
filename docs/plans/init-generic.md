@@ -291,7 +291,7 @@ What `houston init` does to an app with its own Dockerfile, and the edits after 
 - `test` from `dev`: `RAILS_ENV=test`, `COPY . .`.
 - The compose file:
   - `127.0.0.1:3000:3000`
-  - `RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}` (required: the server HOLDs until it's set; dev needs it in `.env`, since `config/master.key` stays out of the image)
+  - `RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}`, optional and not required. `houston test` gives each required variable a random value, and Rails can't decrypt its credentials with a random key (`ActiveSupport::MessageEncryptor::InvalidMessage`). Found on equip's real repo during step 8. Dev reads `config/master.key` from the mounted folder. Being optional, it doesn't HOLD the server's first deploy, so set it before that deploy. Without it, the new version fails its health check and the deploy is NO-GO.
   - `.:/rails` and `storage:/rails/storage`
 - `x-houston`: `health: /up`, `app_port: 80` (Thruster), `commands` (`bin/rails console`, `bin/rails test`), `hooks.release: bin/rails db:migrate`.
 

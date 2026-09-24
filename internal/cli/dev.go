@@ -38,9 +38,13 @@ func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int
 	}
 	warnAboutOverrideFiles(dir, stderr)
 
-	name, content := "compose.dev.yml", variant.DevOverride(p)
+	name, content, projectName := "compose.dev.yml", variant.DevOverride(p), p.Name
 	if production {
 		name, content = "compose.production.yml", variant.ProductionOverride(p)
+		// Its own project, so its own volumes: dev's were written by the dev
+		// stage (often as root), which a production image running as a user
+		// can't write. Fresh volumes are seeded from the image, as on the server.
+		projectName = p.Name + "-production"
 		noteBlankOptional(p, values, stderr)
 	}
 	override := filepath.Join(dir, ".houston", name)
@@ -50,7 +54,7 @@ func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int
 	}
 	// -p pins the project name: compose would otherwise let a stray
 	// COMPOSE_PROJECT_NAME (shell or .env) rename the containers.
-	code, err := d.Run(dir, nil, "compose", "-p", p.Name, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
+	code, err := d.Run(dir, nil, "compose", "-p", projectName, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
 		return exitFailure

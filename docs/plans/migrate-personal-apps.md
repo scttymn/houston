@@ -67,7 +67,7 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
 2. **The CLI on your laptop:** `bin/install`, `houston login https://admin.svnmns.com`.
 3. **equip's repo gets its Houston setup** (decision 2): `houston init` in it, plus the edits from the migration notes:
    - real `dev` and `test` stages
-   - the compose file: port 3000 on `127.0.0.1`, `RAILS_MASTER_KEY: ${RAILS_MASTER_KEY}`, `storage:/rails/storage`
+   - the compose file: port 3000 on `127.0.0.1`, `RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}` (optional: `houston test` fills required variables with random values, which Rails can't decrypt with; so it's set before the first deploy, not held for), `storage:/rails/storage`
    - `x-houston`: `health: /up`, `app_port: 80`, the console, test and release commands
    - `houston dev`, `houston test` and `houston dev --production` pass locally
 4. **Link and deploy:**
@@ -94,6 +94,9 @@ It's an operation on your machines, so the checks are live, recorded in the tran
 | 5 | Push to deploy works from GitHub | a commit, the webhook, a GO deploy | Contract |
 | 6 | A backup of equip is GO on the chosen storage | `houston backup --follow` | Contract |
 | 7 | The way back is written down and possible until Coolify's copy is removed | the runbook in this plan | Crash & repair |
+
+## Later (named, not built)
+- **Rename a storage location** from Settings › Storage, and with `houston storage rename <old> <new>` (CLI-first). Found at first run: the production VM's local-path location is named `unas`, which the real UNAS over NFS will want. A name is only a label, since projects and volumes point at the location's row, not its name. So a rename changes what Settings, `houston storage`, `houston volumes` and the snapshot lists show, and nothing on disk or in restic. The usual rules apply: lowercase letters, digits and dashes, and unique.
 
 ## Decisions (yours)
 1. **The test domain.** I'd keep `svnmns.com` for production, where `equip.svnmns.com` and your git host already live, and give the tests one of your other zones. Which one can be the throwaway (records created and deleted by every test run)? For example `mostlyseriousgames.com`, `featureflow.app` or `trailbound.app`, if nothing serves on it.
