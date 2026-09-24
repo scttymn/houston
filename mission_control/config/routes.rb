@@ -76,6 +76,7 @@ Rails.application.routes.draw do
   post "link/access", to: "project_links#access", as: :link_access
   post "link/read", to: "project_links#read", as: :link_read
   post "link", to: "project_links#create"
+  delete "link", to: "project_links#destroy"
 
   resources :projects, only: :show, param: :name do
     member do

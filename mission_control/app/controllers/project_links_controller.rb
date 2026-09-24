@@ -1,10 +1,13 @@
 # Add project: link a repo, check access with its deploy key, read its
 # compose file with houston inspect, and save. The draft lives in the
-# session until Save.
+# session while the page steps through its forms; opening the page again,
+# Cancel and Save all end it.
 class ProjectLinksController < ApplicationController
   before_action :set_link
 
+  # Always empty: a draft from an earlier visit isn't carried over.
   def new
+    discard_draft
   end
 
   def access
@@ -53,7 +56,20 @@ class ProjectLinksController < ApplicationController
     render :new, status: :unprocessable_entity
   end
 
+  # Cancel. Idempotent: with no draft, it only goes back to the board.
+  def destroy
+    discard_draft
+    redirect_to root_path, status: :see_other
+  end
+
   private
+    # The draft holds a private key: destroyed, not just forgotten.
+    def discard_draft
+      @link&.destroy!
+      @link = nil
+      session.delete(:repo_link_id)
+    end
+
     def set_link
       @link = RepoLink.find_by(id: session[:repo_link_id])
       @installation = Installation.current

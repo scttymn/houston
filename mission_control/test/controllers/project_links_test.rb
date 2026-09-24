@@ -184,8 +184,7 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       read
       titles = css_select(".link-grid > .link-side .panel__title").map { |t| t.text.squish }
       assert_equal [ "02 What Houston found", "03 Secrets", "04 Connect pushes" ], titles
-      assert_equal %w[Save Deploy], css_select(".link-side .link-save button").map { |b| b.text.strip }
-      assert_select ".link-side .link-save a", "Cancel"
+      assert_equal %w[Cancel Save Deploy], css_select(".link-side .link-save button").map { |b| b.text.strip }
     end
   end
 
@@ -316,6 +315,63 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       post link_path
       assert_empty git.calls
       assert_equal 0, RepoLink.count
+    end
+
+    draft = RepoLink.start!(URL)
+    delete link_path
+    assert_redirected_to new_session_path
+    assert RepoLink.exists?(draft.id), "Cancel signed out destroyed a draft"
+  end
+
+  # Your direction: "If I start to add a project, then cancel, and then add a
+  # project again, the previous entries are still visible."
+  test "Cancel throws the draft away" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      assert_select "form#link-cancel[action='#{link_path}'] input[name=_method][value=delete]", 1
+      assert_select "button[form=link-cancel]", "Cancel"
+
+      delete link_path
+      assert_redirected_to root_path
+      assert_equal 0, RepoLink.count, "the draft (and its private key) is left behind"
+
+      get link_path
+      assert_select "input[name=repo_url]:not([value])", 1
+      assert_select ".deploy-key", 0
+
+      delete link_path
+      assert_redirected_to root_path, "a second Cancel, or one from another tab"
+    end
+  end
+
+  test "Add project always starts empty" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      get link_path
+      assert_response :success
+      assert_select "input[name=repo_url]:not([value])", 1
+      assert_select ".deploy-key", 0
+      assert_equal 0, RepoLink.count, "the draft left behind"
+
+      read
+      assert_redirected_to link_path, "the next step has no draft to carry on from"
+    end
+  end
+
+  test "reading a project that exists says Save updates it" do
+    make_project("equip")
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      assert_select ".link-existing", 0, "a new name says nothing, whatever else exists"
+      post link_path
+
+      check
+      read
+      assert_select ".link-existing", /garage is already a project\. Save updates it: this branch, config path and deploy key replace the current ones\. Its subdomains and webhook stay as they are\./
+      assert_select ".link-existing a[href='#{project_path("garage")}']", "garage"
     end
   end
 

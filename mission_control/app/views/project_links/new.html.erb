@@ -85,6 +85,8 @@
       <% end %>
 
       <% if @link %>
+        <%# Cancel sits with Save, but forms can't nest: its button names this one. %>
+        <%= form_with url: link_path, method: :delete, id: "link-cancel" do %><% end %>
         <%= form_with url: link_path, class: "link-finish" do |f| %>
           <% if found %>
             <% variables = found.dig("sync", "variables").to_a.sort_by { |v| [ v["required"] ? 0 : 1, v["name"] ] } %>
@@ -114,9 +116,16 @@
             </section>
           <% end %>
 
+          <% if found && (existing = Project.find_by(name: found.dig("sync", "name"))) %>
+            <div class="notice notice--hold link-existing">
+              <span class="mono">UPDATE</span>
+              <span class="notice__text"><%= link_to existing.name, project_path(existing.name) %> is already a project. Save updates it: this branch, config path and deploy key replace the current ones. Its subdomains and webhook stay as they are.</span>
+            </div>
+          <% end %>
+
           <div class="link-save">
             <span class="muted link-save__note"><%= found ? "Required secrets left blank hold deploys until they have a value." : "Save needs what Houston read from the repo." %></span>
-            <%= link_to "Cancel", root_path, class: "button button--medium button--quiet" %>
+            <%= f.button "Cancel", type: "submit", form: "link-cancel", class: "button button--medium button--quiet" %>
             <%= f.button "Save", class: "button button--medium", disabled: !found %>
             <%= f.button "Deploy", name: "deploy", value: "1", class: "button button--medium button--primary", disabled: !found %>
           </div>
