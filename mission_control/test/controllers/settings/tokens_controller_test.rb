@@ -24,6 +24,13 @@ class Settings::TokensControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, ApiToken.count
   end
 
+  # Create answers with the page itself (200), which Turbo drops after a form
+  # post, so a browser never showed the new token. It submits as plain HTML.
+  test "the create form submits without Turbo, so the token shows" do
+    get settings_tokens_path
+    assert_select "form[action='#{settings_tokens_path}'][data-turbo='false']"
+  end
+
   test "revoking a token" do
     post settings_tokens_path, params: { name: "agent" }
     token = css_select(".new-token").text[/hou_[A-Za-z0-9_-]+/]

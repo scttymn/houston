@@ -33,7 +33,7 @@
         </li>
       <% end %>
     </ul>
-    <%= form_with url: settings_tokens_path, class: "panel__row secret__form" do |f| %>
+    <%= form_with url: settings_tokens_path, class: "panel__row secret__form", data: { turbo: false } do |f| %>
       <%= f.text_field :name, placeholder: "Name, e.g. laptop or ci-agent", class: "mono", maxlength: 50 %>
       <%= f.submit "Create token", class: "button button--small" %>
       <% if @error %><span class="field__error"><%= @error %></span><% end %>

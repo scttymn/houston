@@ -26,6 +26,18 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
   def check(url = URL) = post(link_access_path, params: { repo_url: url })
   def read(branch: "main", compose_path: "compose.yml") = post(link_read_path, params: { branch:, compose_path: })
 
+  # Check access and Read compose.yml answer with the page itself (200), which
+  # Turbo drops after a form post (it wants a redirect), so a browser showed
+  # nothing. These forms submit as plain HTML instead.
+  test "the forms that answer in place submit without Turbo" do
+    use_fake_git(FakeGit.new(&responder)) do
+      get link_path
+      assert_select "form[action='#{link_access_path}'][data-turbo='false']"
+      check
+      assert_select "form[action='#{link_read_path}'][data-turbo='false']"
+    end
+  end
+
   test "hostile repo input never reaches git" do
     use_fake_git(FakeGit.new(&responder)) do |git|
       [ "file:///etc", "ext::sh -c id", "/srv/repo", "-oProxyCommand=id", "https://x/y.git --upload-pack=id",
