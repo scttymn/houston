@@ -74,8 +74,14 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
    - `houston link git@github.com:scttymn/equip.git --wait`; add the deploy key to the GitHub repo (read-only)
    - `houston secrets set RAILS_MASTER_KEY --project equip < config/master.key`
    - `houston deploy --server --follow --project equip`
-5. **The switch:** that first deploy creates `equip.svnmns.com` → Houston's tunnel, beating the wildcard. There's no data, so there's no window. Coolify's copy can keep answering until the edges have switched.
-6. **Checks:**
+5. **The switch:** the first GO creates `equip.svnmns.com` → Houston's tunnel, beating the wildcard. There's no data, so there's no window. Coolify's copy can keep answering until the edges have switched.
+   - **Found on the real run:** deploy #1 went NO-GO (`RAILS_MASTER_KEY` wasn't set yet, and an optional secret doesn't HOLD), but its sync had already pointed the name. So `equip.svnmns.com` answered 502 until deploy #2. Now a project that has never served keeps its names where they are until its first GO, and a failed first deploy leaves the old host answering. Tested in `api_sync_test.rb` `test "a project's first deploy points its names only once it's GO"`.
+6. **Checks** (done on 2026-09-24, except stopping Coolify's copy):
+   - deploy #2 GO; `equip.svnmns.com/up` 10 × 200 in a row
+   - the GitHub webhook: the ping got 202, and a push to `main` (8d9f56d) deployed on its own as #3, GO with its tests
+   - the first backup: GO, snapshot 708c4477, 321 KB, with its four SQLite files
+
+   The steps as planned:
    - `https://equip.svnmns.com/up` answers 200, ten in a row, from Houston
    - a push to the repo, with the webhook added in GitHub (push events, JSON, the secret), deploys on its own
    - `houston backup --follow --project equip` is GO

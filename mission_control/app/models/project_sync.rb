@@ -17,9 +17,12 @@ class ProjectSync
 
   attr_reader :errors, :project
 
-  def initialize(payload, installation: Installation.current)
+  # project: an existing project whose names are pointed without a payload
+  # (at its first GO).
+  def initialize(payload, installation: Installation.current, project: nil)
     @payload = payload.is_a?(Hash) ? payload : {}
     @installation = installation
+    @project = project
     @errors = Hash.new { |h, k| h[k] = [] }
   end
 
@@ -65,9 +68,16 @@ class ProjectSync
     { "images" => d["images"], "cpus" => d["cpus"], "memory" => d["memory"], "console" => d["console"] }.compact
   end
 
+  # A project that has never served keeps its names where they are: another
+  # host may still answer them (equip's first deploy, NO-GO, left
+  # equip.svnmns.com at 502 while Coolify's copy ran). Its first GO points
+  # them (Api::DeploysController); every sync after that does.
+  def waiting_for_first_go? = project.running_deploy.nil?
+
   # Host-by-host: <name>.<base> needs its own record. Returns the DNS mode.
   def point_dns!
     return "wildcard" unless @installation.dns_mode == "per_host"
+    return "after_first_go" if waiting_for_first_go?
 
     records = Cloudflare::Records.new(Cloudflare::Client.new(@installation.cloudflare_api_token), @installation.cloudflare_zone_id)
     name = project.host(@installation)
@@ -82,6 +92,12 @@ class ProjectSync
   # Custom domains: points each, removes the records of dropped ones, and
   # stores the states. Returns domain → { state, reason }.
   def point_domains!
+    if waiting_for_first_go?
+      states = project.domains.reject { |d| d == project.host(@installation) }
+                      .index_with { { "state" => "AFTER FIRST GO", "reason" => "pointed here once a deploy of #{project.name} is GO" } }
+      project.update!(domain_states: states)
+      return states
+    end
     dns = DomainDns.new(project, @installation)
     @dropped_domains.to_a.each { |domain| dns.remove(domain) }
     states = project.domains.reject { |d| d == project.host(@installation) }.index_with { |domain| dns.point(domain).to_h }

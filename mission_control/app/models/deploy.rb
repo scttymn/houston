@@ -201,6 +201,13 @@ class Deploy < ApplicationRecord
   end
 
   def in_flight? = status == "in_flight"
+
+  # The project's first GO: nothing it deployed or restored served before.
+  # Its names are pointed then, not at its first sync (ProjectSync).
+  def first_go?
+    others = project.deploys.where.not(id:)
+    status == "go" && !others.where(status: "go").exists? && !others.where.not(switched_at: nil).exists?
+  end
   def restore? = kind == "restore"
 
   # Applies one progress report. The caller has checked ownership inside the

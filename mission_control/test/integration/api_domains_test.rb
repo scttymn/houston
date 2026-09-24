@@ -1,13 +1,18 @@
 require "test_helper"
 require_relative "../support/api_helpers"
 require_relative "../support/cloudflare_stubs"
+require_relative "../support/project_helpers"
 
 class ApiDomainsTest < ActionDispatch::IntegrationTest
   include ApiHelpers
   include CloudflareStubs
+  include ProjectHelpers
 
   setup do
     Installation.current.update!(dns_mode: "wildcard", cloudflare_zone_id: ZONE, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+    # garage has served, so its domains are pointed on every sync (a first
+    # deploy's wait for GO is api_sync_test's).
+    make_deploy(make_project("garage"), 1, "go")
   end
 
   def zone(name, result) = cf(:get, "/zones", query: { "name" => name }, result:)

@@ -265,10 +265,71 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     end
   end
 
+  # Found on equip's first production deploy: the sync pointed
+  # equip.svnmns.com at Houston, the deploy failed its release hook, and the
+  # name answered 502 while Coolify's copy still ran. A project that has
+  # never served keeps its names where they are until its first GO.
+  test "a project's first deploy points its names only once it's GO" do
+    record = { type: "CNAME", name: "equip.svnmns.com", content: "#{TUNNEL}.cfargotunnel.com", proxied: true, comment: "managed-by:houston project:equip" }
+    Installation.current.update!(dns_mode: "per_host", cloudflare_zone_id: ZONE, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+
+    sync(equip_payload(variables: [], domains: %w[equipping.com]))
+    assert_response :success
+    assert_equal "after_first_go", json["dns"]
+    assert_equal({ "equipping.com" => "AFTER FIRST GO" }, json["domains"].transform_values { |v| v["state"] })
+    assert_not_requested :any, /api\.cloudflare\.com/
+
+    project = Project.find_by!(name: "equip")
+    failed, token, = Deploy.start!(project, sha: "a" * 40, ref: "refs/heads/main")
+    patch "/api/deploys/#{failed.id}", params: { status: "no_go", error: "release hook failed" }.to_json, headers: api_headers.merge("X-Houston-Deploy-Token" => token)
+    assert_response :success
+    assert_not_requested :any, /api\.cloudflare\.com/ # a NO-GO first deploy leaves the names alone
+
+    cf(:get, "/zones/#{ZONE}/dns_records", query: { "name" => "equip.svnmns.com" }, result: [])
+    create = cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec1" }).with(body: record)
+    cf(:get, "/zones", query: { "name" => "equipping.com" }, result: [ { id: "z2", name: "equipping.com", status: "active" } ])
+    cf(:get, "/zones/z2/dns_records", query: { "name" => "equipping.com" }, result: [])
+    apex = cf(:post, "/zones/z2/dns_records", result: { id: "r1" })
+    deploy, token, = Deploy.start!(project, sha: "b" * 40, ref: "refs/heads/main")
+    patch "/api/deploys/#{deploy.id}", params: { status: "go" }.to_json, headers: api_headers.merge("X-Houston-Deploy-Token" => token)
+    assert_response :success
+    assert_requested create
+    assert_requested apex
+    assert_equal "DNS OK", project.reload.domain_states.dig("equipping.com", "state")
+
+    # A second GO doesn't point again: the sync does, on every deploy from now on.
+    WebMock.reset!
+    later, token, = Deploy.start!(project, sha: "c" * 40, ref: "refs/heads/main")
+    patch "/api/deploys/#{later.id}", params: { status: "go" }.to_json, headers: api_headers.merge("X-Houston-Deploy-Token" => token)
+    assert_response :success
+    assert_not_requested :any, /api\.cloudflare\.com/
+  end
+
+  test "a Cloudflare failure at the first GO leaves the deploy GO; the next sync points" do
+    Installation.current.update!(dns_mode: "per_host", cloudflare_zone_id: ZONE, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+    sync(equip_payload(variables: []))
+    project = Project.find_by!(name: "equip")
+    stub_request(:any, /api\.cloudflare\.com/).to_return(status: 500, body: { success: false, errors: [ { code: 1, message: "boom" } ] }.to_json)
+    deploy, token, = Deploy.start!(project, sha: "a" * 40, ref: "refs/heads/main")
+    patch "/api/deploys/#{deploy.id}", params: { status: "go" }.to_json, headers: api_headers.merge("X-Houston-Deploy-Token" => token)
+    assert_response :success
+    assert_equal "go", deploy.reload.status
+
+    WebMock.reset!
+    cf(:get, "/zones/#{ZONE}/dns_records", query: { "name" => "equip.svnmns.com" }, result: [])
+    create = cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec1" })
+    sync(equip_payload(variables: []))
+    assert_response :success
+    assert_equal "per_host", json["dns"]
+    assert_requested create
+  end
+
   test "sync points <name>.<base> in host-by-host mode" do
     record = { type: "CNAME", name: "equip.svnmns.com", content: "#{TUNNEL}.cfargotunnel.com", proxied: true, comment: "managed-by:houston project:equip" }
 
     Installation.current.update!(dns_mode: "per_host", cloudflare_zone_id: ZONE, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+    # A project that has served: its names are pointed on every sync.
+    make_deploy(make_project("equip", services: %w[app db]), 1, "go")
     cf(:get, "/zones/#{ZONE}/dns_records", query: { "name" => "equip.svnmns.com" }, result: [])
     create = cf(:post, "/zones/#{ZONE}/dns_records", result: { id: "rec1" }).with(body: record)
     sync(equip_payload(variables: []))
@@ -301,6 +362,7 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
 
   test "a Cloudflare failure during sync can be retried" do
     Installation.current.update!(dns_mode: "per_host", cloudflare_zone_id: ZONE, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
+    make_deploy(make_project("equip", services: %w[app db]), 1, "go") # it has served, so the sync points
     cf(:get, "/zones/#{ZONE}/dns_records", query: { "name" => "equip.svnmns.com" }, status: 500, errors: [ { code: 1000, message: "Internal error" } ])
 
     sync(equip_payload(variables: []))
