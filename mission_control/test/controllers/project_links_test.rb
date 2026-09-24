@@ -184,7 +184,7 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       read
       titles = css_select(".link-grid > .link-side .panel__title").map { |t| t.text.squish }
       assert_equal [ "02 What Houston found", "03 Secrets", "04 Connect pushes" ], titles
-      assert_equal %w[Cancel Save Deploy], css_select(".link-side .link-save button").map { |b| b.text.strip }
+      assert_equal %w[Cancel Save Deploy], css_select(".link-side .link-save .link-save__actions > button").map { |b| b.text.strip }, "one row of buttons that doesn't wrap"
     end
   end
 

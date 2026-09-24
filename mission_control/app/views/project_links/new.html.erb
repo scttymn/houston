@@ -125,9 +125,11 @@
 
           <div class="link-save">
             <span class="muted link-save__note"><%= found ? "Required secrets left blank hold deploys until they have a value." : "Save needs what Houston read from the repo." %></span>
-            <%= f.button "Cancel", type: "submit", form: "link-cancel", class: "button button--medium button--quiet" %>
-            <%= f.button "Save", class: "button button--medium", disabled: !found %>
-            <%= f.button "Deploy", name: "deploy", value: "1", class: "button button--medium button--primary", disabled: !found %>
+            <div class="link-save__actions">
+              <%= f.button "Cancel", type: "submit", form: "link-cancel", class: "button button--medium button--quiet" %>
+              <%= f.button "Save", class: "button button--medium", disabled: !found %>
+              <%= f.button "Deploy", name: "deploy", value: "1", class: "button button--medium button--primary", disabled: !found %>
+            </div>
           </div>
         <% end %>
       <% end %>
