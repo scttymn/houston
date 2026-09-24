@@ -47,7 +47,13 @@ Cloudflare: the token sees 14 zones, including `svnmns.com` and `estherpictures.
    - its repo gets the setup from the migration notes, including its two app edits (dev bind address, esbuild's `NODE_PATH`)
    - a staging deploy at `estherpictures.svnmns.com` with a copy of its data
    - then the window: Coolify stopped, the final data copy, `domains: [estherpictures.com, www.estherpictures.com]` deployed (Houston makes the CNAMEs), checks, done
-4. **valleybuilt:**
+4. **valleybuilt** (moved on 2026-09-24; its repo is `git@github.com:scttymn/valleybuiltcrossfit.git`, and it started fresh with no data brought across):
+   - The project is named `valleybuiltcrossfit` on purpose (the full domain), so it's served at `valleybuiltcrossfit.svnmns.com`, with `APP_HOST` the same. `valleybuilt.svnmns.com` was Coolify's name, and it's gone with Coolify's copy.
+   - Solid Queue runs inside Puma from the production image's `ENV`, since development has no queue database.
+   - Deploy #1 (3b76cdd) went GO, with 10 × 200 on `/up`; 43 jobs ran on Solid Queue. Coolify's valleybuilt is stopped.
+   - Still to do: the GitHub webhook and a first backup.
+
+   The plan as written:
    - its repo gets the setup (like equip's: Rails, SQLite, Solid Queue), with `APP_HOST: valleybuilt.svnmns.com`
    - its data comes in (decision 5)
    - its first Houston deploy takes over `valleybuilt.svnmns.com` from the wildcard, as equip's does
