@@ -68,116 +68,16 @@
       <span><%= @project.repo_words || "not linked" %></span></div>
   </div>
 
-  <% sections = [ [ "Deploy history", "history" ], [ "Snapshots", "snapshots" ], [ "Secrets", "secrets" ], [ "Backup plan", "backup-plan" ] ] %>
+  <%# Alphabetical, to scan; the sections below are in the same order. %>
+  <% sections = [ [ "Backup plan", "backup-plan" ] ] %>
   <% sections << [ "Connect pushes", "webhook" ] if @project.repo_url.present? %>
-  <% sections << [ "Volumes", "volumes" ] if @project.volumes.any? %>
+  <% sections << [ "Deploy history", "history" ] %>
   <% sections << [ "Maintenance page", "maintenance" ] unless @project.maintenance? %>
+  <% sections += [ [ "Secrets", "secrets" ], [ "Snapshots", "snapshots" ] ] %>
+  <% sections << [ "Volumes", "volumes" ] if @project.volumes.any? %>
   <div class="project-layout">
     <%= render "shared/section_nav", label: "Project sections", items: sections %>
     <div class="project-sections">
-    <section class="panel history" id="history">
-      <div class="panel__head">
-        <h2 class="disp panel__title">Deploy history</h2>
-        <span class="panel__meta">
-          <span class="mono eyebrow"><%= pluralize(@deploy_count, "deploy").upcase %></span>
-          <% if @project.repo_url.present? %>
-            <%= button_to "Deploy", project_deploys_path(@project.name), class: "button button--primary button--small",
-                          title: "Deploy the head of what the deploy rule matches (#{@project.deploy_rule_words.downcase})" %>
-          <% end %>
-        </span>
-      </div>
-      <% if @deploys.empty? %>
-        <p class="panel__row panel__row--muted">
-          <% if @project.repo_url.present? %>
-            No deploys yet. Deploy sends the head of <%= @project.deploy_rule_words.downcase.delete_prefix("every commit to ") %>, and so does every push once the webhook is connected.
-          <% else %>
-            No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span>
-          <% end %>
-        </p>
-      <% end %>
-      <% @deploys.each do |deploy| %>
-        <div class="history__row <%= "history__row--no-go" if deploy.status == "no_go" %>" data-deploy="<%= deploy.number %>">
-          <span class="mono muted">#<%= deploy.number %></span>
-          <span class="mono"><%= deploy.short_sha %></span>
-          <span class="history__what">
-            <span><%= deploy.restore? ? "Restore" : deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></span>
-            <small class="<%= "history__error" if deploy.error.present? %>"><%= deploy.error.presence || "#{time_ago_in_words(deploy.created_at)} ago · #{l(deploy.created_at, format: :short)}" %></small>
-          </span>
-          <%= state_chip(deploy.status) %>
-          <span class="mono muted"><%= { "queued" => "—", "in_flight" => mission_elapsed(deploy.duration) }.fetch(deploy.status) { duration_words(deploy.duration) } %></span>
-          <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
-        </div>
-      <% end %>
-      <% if @deploy_count > ProjectPage::PER_PAGE %>
-        <% first = (@page - 1) * ProjectPage::PER_PAGE + 1 %>
-        <nav class="pager" aria-label="Deploy history pages">
-          <span class="mono muted pager__range"><%= first %>–<%= [ first + ProjectPage::PER_PAGE - 1, @deploy_count ].min %> of <%= @deploy_count %></span>
-          <% if @page > 1 %><%= link_to "← Newer", project_path(@project.name, page: @page - 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">← Newer</span><% end %>
-          <span class="mono">Page <%= @page %> of <%= (@deploy_count.to_f / ProjectPage::PER_PAGE).ceil %></span>
-          <% if @page * ProjectPage::PER_PAGE < @deploy_count %><%= link_to "Older →", project_path(@project.name, page: @page + 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">Older →</span><% end %>
-        </nav>
-      <% end %>
-    </section>
-    <%# The head renders with the page; the list is a lazy frame, since reading a repository can take seconds. %>
-    <section class="panel snapshots" id="snapshots">
-      <div class="panel__head">
-        <h2 class="disp panel__title">Snapshots</h2>
-        <span class="panel__meta">
-          <% if @storage %>
-            <span class="mono eyebrow"><%= @storage.name %></span>
-            <%= button_to "Create Snapshot", project_backups_path(@project.name), class: "button button--primary button--small" %>
-          <% end %>
-        </span>
-      </div>
-      <% if @storage %><%= render "projects/backup_run", run: @backup %><% end %>
-      <%= turbo_frame_tag "snapshots-list", src: project_snapshots_path(@project.name), loading: :lazy do %>
-        <p class="panel__row panel__row--muted">Reading the snapshots…</p>
-      <% end %>
-    </section>
-
-    <section class="panel secrets" id="secrets">
-      <div class="panel__head">
-        <h2 class="disp panel__title">Secrets</h2>
-        <span class="panel__meta muted">Values are write-only.</span>
-      </div>
-      <% if @missing.any? %>
-        <div class="notice notice--nogo"><span class="mono">HOLD</span><span class="notice__text">The next deploy will stop until <%= @missing.to_sentence %> <%= @missing.one? ? "has" : "have" %> a value.</span></div>
-      <% end %>
-      <% if @variables.empty? %>
-        <p class="panel__row panel__row--muted">compose.yml references no variables.</p>
-      <% end %>
-      <% @variables.each do |variable| %>
-        <% key = variable["name"] %>
-        <% secret, error = @secrets[key], @secret_errors[key] %>
-        <% set = secret.present? && secret.value.present? %>
-        <% form_id = "secret-form-#{key}" %>
-        <div class="secret <%= "secret--missing" if !set && variable["required"] %>" id="secret-<%= key %>" data-secret="<%= key %>">
-          <span class="mono secret__name"><%= key %><% unless variable["required"] %> <small>optional</small><% end %></span>
-          <% if set && params[:replace] != key && !error %>
-            <span class="muted">•••••••• · set <%= l(secret.updated_at.to_date, format: :short) %></span>
-            <span class="secret__actions">
-              <%= link_to "Replace", project_path(@project.name, replace: key, anchor: "secret-#{key}") %>
-              <%= button_to "Remove", project_secret_path(@project.name, key), method: :delete, class: "link-button link-button--danger",
-                            data: { turbo_confirm: "Remove #{key}? #{variable["required"] ? "The next deploy will stop until it has a value again." : "The app gets it blank."}" } %>
-            </span>
-          <% else %>
-            <input type="password" name="value" id="<%= form_id %>-value" form="<%= form_id %>" class="mono" autocomplete="off" placeholder="<%= set ? "New value" : "Paste value" %>" aria-label="Value for <%= key %>">
-            <span class="secret__actions">
-              <%= form_with url: project_secret_path(@project.name, key), method: :put, id: form_id do |f| %>
-                <%= f.submit set ? "Replace" : "Save value", class: "button button--primary button--small" %>
-              <% end %>
-              <% if set %>
-                <%= link_to "Cancel", project_path(@project.name, anchor: "secret-#{key}") %>
-              <% else %>
-                <%= button_to "Generate", generate_project_secret_path(@project.name, key), class: "link-button", title: "Save a random value nobody needs to know" %>
-              <% end %>
-            </span>
-          <% end %>
-          <% if error %><span class="field__error secret__error"><%= key %> <%= error %></span><% end %>
-        </div>
-      <% end %>
-    </section>
-
     <section class="panel backup-plan" id="backup-plan">
       <div class="panel__head">
         <h2 class="disp panel__title">Backup plan</h2>
@@ -234,6 +134,125 @@
         </div>
       </section>
     <% end %>
+
+    <section class="panel history" id="history">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Deploy history</h2>
+        <span class="panel__meta">
+          <span class="mono eyebrow"><%= pluralize(@deploy_count, "deploy").upcase %></span>
+          <% if @project.repo_url.present? %>
+            <%= button_to "Deploy", project_deploys_path(@project.name), class: "button button--primary button--small",
+                          title: "Deploy the head of what the deploy rule matches (#{@project.deploy_rule_words.downcase})" %>
+          <% end %>
+        </span>
+      </div>
+      <% if @deploys.empty? %>
+        <p class="panel__row panel__row--muted">
+          <% if @project.repo_url.present? %>
+            No deploys yet. Deploy sends the head of <%= @project.deploy_rule_words.downcase.delete_prefix("every commit to ") %>, and so does every push once the webhook is connected.
+          <% else %>
+            No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span>
+          <% end %>
+        </p>
+      <% end %>
+      <% @deploys.each do |deploy| %>
+        <div class="history__row <%= "history__row--no-go" if deploy.status == "no_go" %>" data-deploy="<%= deploy.number %>">
+          <span class="mono muted">#<%= deploy.number %></span>
+          <span class="mono"><%= deploy.short_sha %></span>
+          <span class="history__what">
+            <span><%= deploy.restore? ? "Restore" : deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></span>
+            <small class="<%= "history__error" if deploy.error.present? %>"><%= deploy.error.presence || "#{time_ago_in_words(deploy.created_at)} ago · #{l(deploy.created_at, format: :short)}" %></small>
+          </span>
+          <%= state_chip(deploy.status) %>
+          <span class="mono muted"><%= { "queued" => "—", "in_flight" => mission_elapsed(deploy.duration) }.fetch(deploy.status) { duration_words(deploy.duration) } %></span>
+          <%= link_to "Log", project_deploy_path(@project.name, deploy.number) %>
+        </div>
+      <% end %>
+      <% if @deploy_count > ProjectPage::PER_PAGE %>
+        <% first = (@page - 1) * ProjectPage::PER_PAGE + 1 %>
+        <nav class="pager" aria-label="Deploy history pages">
+          <span class="mono muted pager__range"><%= first %>–<%= [ first + ProjectPage::PER_PAGE - 1, @deploy_count ].min %> of <%= @deploy_count %></span>
+          <% if @page > 1 %><%= link_to "← Newer", project_path(@project.name, page: @page - 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">← Newer</span><% end %>
+          <span class="mono">Page <%= @page %> of <%= (@deploy_count.to_f / ProjectPage::PER_PAGE).ceil %></span>
+          <% if @page * ProjectPage::PER_PAGE < @deploy_count %><%= link_to "Older →", project_path(@project.name, page: @page + 1), class: "button button--small" %><% else %><span class="button button--small is-disabled">Older →</span><% end %>
+        </nav>
+      <% end %>
+    </section>
+
+    <% unless @project.maintenance? %>
+      <section class="panel maintenance" id="maintenance">
+        <div class="panel__head"><h2 class="disp panel__title">Maintenance page</h2></div>
+        <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
+        <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
+        <p class="panel__row panel__row--muted"><%= @project.maintenance_page.present? ? "The project's own page (x-houston.maintenance)." : "Houston's default page. Set x-houston.maintenance in compose.yml to use your own." %></p>
+        <%= form_with url: project_maintenance_path(@project.name), method: :patch, class: "panel__row inline-form" do |f| %>
+          <%= hidden_field_tag :on, "1" %>
+          <%= f.text_field :message, placeholder: "Message (optional)", maxlength: 500, "aria-label": "Maintenance message" %>
+          <%= f.submit "Show maintenance page", class: "button button--small", data: { turbo_confirm: "Visitors to #{@project.name} will see the maintenance page within seconds. Show it?" } %>
+        <% end %>
+      </section>
+    <% end %>
+
+    <section class="panel secrets" id="secrets">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Secrets</h2>
+        <span class="panel__meta muted">Values are write-only.</span>
+      </div>
+      <% if @missing.any? %>
+        <div class="notice notice--nogo"><span class="mono">HOLD</span><span class="notice__text">The next deploy will stop until <%= @missing.to_sentence %> <%= @missing.one? ? "has" : "have" %> a value.</span></div>
+      <% end %>
+      <% if @variables.empty? %>
+        <p class="panel__row panel__row--muted">compose.yml references no variables.</p>
+      <% end %>
+      <% @variables.each do |variable| %>
+        <% key = variable["name"] %>
+        <% secret, error = @secrets[key], @secret_errors[key] %>
+        <% set = secret.present? && secret.value.present? %>
+        <% form_id = "secret-form-#{key}" %>
+        <div class="secret <%= "secret--missing" if !set && variable["required"] %>" id="secret-<%= key %>" data-secret="<%= key %>">
+          <span class="mono secret__name"><%= key %><% unless variable["required"] %> <small>optional</small><% end %></span>
+          <% if set && params[:replace] != key && !error %>
+            <span class="muted">•••••••• · set <%= l(secret.updated_at.to_date, format: :short) %></span>
+            <span class="secret__actions">
+              <%= link_to "Replace", project_path(@project.name, replace: key, anchor: "secret-#{key}") %>
+              <%= button_to "Remove", project_secret_path(@project.name, key), method: :delete, class: "link-button link-button--danger",
+                            data: { turbo_confirm: "Remove #{key}? #{variable["required"] ? "The next deploy will stop until it has a value again." : "The app gets it blank."}" } %>
+            </span>
+          <% else %>
+            <input type="password" name="value" id="<%= form_id %>-value" form="<%= form_id %>" class="mono" autocomplete="off" placeholder="<%= set ? "New value" : "Paste value" %>" aria-label="Value for <%= key %>">
+            <span class="secret__actions">
+              <%= form_with url: project_secret_path(@project.name, key), method: :put, id: form_id do |f| %>
+                <%= f.submit set ? "Replace" : "Save value", class: "button button--primary button--small" %>
+              <% end %>
+              <% if set %>
+                <%= link_to "Cancel", project_path(@project.name, anchor: "secret-#{key}") %>
+              <% else %>
+                <%= button_to "Generate", generate_project_secret_path(@project.name, key), class: "link-button", title: "Save a random value nobody needs to know" %>
+              <% end %>
+            </span>
+          <% end %>
+          <% if error %><span class="field__error secret__error"><%= key %> <%= error %></span><% end %>
+        </div>
+      <% end %>
+    </section>
+
+    <%# The head renders with the page; the list is a lazy frame, since reading a repository can take seconds. %>
+    <section class="panel snapshots" id="snapshots">
+      <div class="panel__head">
+        <h2 class="disp panel__title">Snapshots</h2>
+        <span class="panel__meta">
+          <% if @storage %>
+            <span class="mono eyebrow"><%= @storage.name %></span>
+            <%= button_to "Create Snapshot", project_backups_path(@project.name), class: "button button--primary button--small" %>
+          <% end %>
+        </span>
+      </div>
+      <% if @storage %><%= render "projects/backup_run", run: @backup %><% end %>
+      <%= turbo_frame_tag "snapshots-list", src: project_snapshots_path(@project.name), loading: :lazy do %>
+        <p class="panel__row panel__row--muted">Reading the snapshots…</p>
+      <% end %>
+    </section>
+
     <% if @project.volumes.any? %>
       <section class="panel volumes" id="volumes">
         <div class="panel__head"><h2 class="disp panel__title">Volumes</h2><span class="panel__meta muted">Where each one lives</span></div>
@@ -255,19 +274,6 @@
           </div>
         <% end %>
         <p class="panel__row panel__row--muted">Chosen before Houston makes the volume, at its first deploy. Local disk is the server's own disk, and right for databases. Postgres data always stays on local disk.</p>
-      </section>
-    <% end %>
-    <% unless @project.maintenance? %>
-      <section class="panel maintenance" id="maintenance">
-        <div class="panel__head"><h2 class="disp panel__title">Maintenance page</h2></div>
-        <p class="panel__row panel__row--muted">Houston shows it on every hostname of <%= @project.name %>, whatever state the app is in, until you turn it off. Deploys and restores never change it.</p>
-        <iframe class="maintenance__preview" sandbox="" src="<%= preview_project_maintenance_path(@project.name) %>" title="Maintenance page preview" loading="lazy"></iframe>
-        <p class="panel__row panel__row--muted"><%= @project.maintenance_page.present? ? "The project's own page (x-houston.maintenance)." : "Houston's default page. Set x-houston.maintenance in compose.yml to use your own." %></p>
-        <%= form_with url: project_maintenance_path(@project.name), method: :patch, class: "panel__row inline-form" do |f| %>
-          <%= hidden_field_tag :on, "1" %>
-          <%= f.text_field :message, placeholder: "Message (optional)", maxlength: 500, "aria-label": "Maintenance message" %>
-          <%= f.submit "Show maintenance page", class: "button button--small", data: { turbo_confirm: "Visitors to #{@project.name} will see the maintenance page within seconds. Show it?" } %>
-        <% end %>
       </section>
     <% end %>
   </div>

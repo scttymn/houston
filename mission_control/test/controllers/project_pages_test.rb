@@ -87,9 +87,10 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     assert_select ".project > .project-head + .facts-strip + .project-layout"
     links = css_select(".project-layout > nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
     ids = css_select(".project-sections > section").map { |s| s["id"] }
-    assert_equal %w[history snapshots secrets backup-plan webhook maintenance], ids
+    # Alphabetical, to scan ("order navigation and sections alphabetically").
+    assert_equal %w[backup-plan webhook history maintenance secrets snapshots], ids
     assert_equal ids.map { |id| "##{id}" }, links.map(&:last)
-    assert_equal [ "Deploy history", "Snapshots", "Secrets", "Backup plan", "Connect pushes", "Maintenance page" ], links.map(&:first)
+    assert_equal [ "Backup plan", "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots" ], links.map(&:first)
     assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create Snapshot"
     assert_select "section#snapshots > turbo-frame#snapshots-list[loading=lazy]"
     assert_select "section#snapshots > .panel__head", /unas-nfs/i

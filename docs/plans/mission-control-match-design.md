@@ -157,6 +157,12 @@ This replaces Batch 1's two-row grid and Batch 3's three Settings pages.
 | 5 | A new token shows once, on the Settings page | `settings/tokens_controller_test.rb` `test "a token is shown once"` | Contract |
 | 6 | No sideways scroll at 375px; checked at 1440 and 375 | the visual check | Honest surface |
 
+**Ordered alphabetically** (your follow-up: "order navigation and sections alphabetically to make them easier to scan"):
+- Project page: Backup plan, Connect pushes, Deploy history, Maintenance page, Secrets, Snapshots, Volumes.
+- Settings: API tokens, Cloudflare, Storage, Time zone.
+
+The menus and the sections share the order; the tests pin both.
+
 ### Batch 4: done
 - **Red first:** the new project page and Settings tests failed with no `settings_path`, no menu and no section ids.
 - **Green:** the Mission Control suite passes, 299 runs with 0 failures, and rubocop is clean.
