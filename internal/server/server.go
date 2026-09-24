@@ -111,8 +111,9 @@ func New(c Config) *Client { return &Client{c: c, http: &http.Client{Timeout: 30
 
 // Me is the token's name and the server's base domain.
 type Me struct {
-	Token  string `json:"token"`
-	Server string `json:"server"`
+	Token   string `json:"token"`
+	Server  string `json:"server"`
+	Version string `json:"version"` // the Houston release it runs, "source <sha>" or "dev"
 }
 
 func (cl *Client) Me(ctx context.Context) (Me, error) {

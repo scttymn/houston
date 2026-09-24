@@ -200,6 +200,15 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
   # The design's Main: pills, services with images, host rows, and LAST BACKUP.
   # docs/plans/live-flight-board.md: the board redraws itself on changes.
+  test "the flight board shows the version" do
+    stub_tunnel
+    ENV["HOUSTON_VERSION"] = "v0.1.0"
+    get root_path
+    assert_select ".board__title > .eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.1.0"
+  ensure
+    ENV.delete("HOUSTON_VERSION")
+  end
+
   test "the flight board listens for changes" do
     stub_tunnel
     make_deploy(make_project("equip"), 1, "go")

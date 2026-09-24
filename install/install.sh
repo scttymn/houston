@@ -13,6 +13,13 @@ set -eu
 
 HOUSTON_DIR="${HOUSTON_DIR:-/opt/houston}"
 HOUSTON_SOURCE="${HOUSTON_SOURCE:-}"
+# A release (docs/plans/releases.md): its images from the registry and its CLI
+# from the GitHub Release. The token is only needed while the repo is private.
+HOUSTON_VERSION="${HOUSTON_VERSION:-}"
+HOUSTON_REPO="${HOUSTON_REPO:-scttymn/houston}"
+HOUSTON_GITHUB_API="${HOUSTON_GITHUB_API:-https://api.github.com}"
+HOUSTON_GITHUB_TOKEN="${HOUSTON_GITHUB_TOKEN:-}"
+HOUSTON_REGISTRY="${HOUSTON_REGISTRY:-ghcr.io}"
 IMAGE="houston/mission-control:local"
 CLOUDFLARED_IMAGE="cloudflare/cloudflared:2026.9.1"
 KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0"
@@ -46,9 +53,59 @@ check_system() {
   if has getenforce && [ "$(getenforce)" = Enforcing ]; then
     fail "SELinux is enforcing, and Houston doesn't label its containers for SELinux yet: set it to permissive (setenforce 0, and SELINUX=permissive in /etc/selinux/config), then run this again"
   fi
-  [ -n "$HOUSTON_SOURCE" ] || fail "set HOUSTON_SOURCE to a Houston checkout (published images come later)"
-  [ -f "$HOUSTON_SOURCE/mission_control/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission_control/Dockerfile"
+  check_release
 }
+
+# check_release: exactly one of a release (HOUSTON_VERSION) or a checkout
+# (HOUSTON_SOURCE). A release must exist before anything is changed.
+check_release() {
+  [ -n "$HOUSTON_VERSION" ] && [ -n "$HOUSTON_SOURCE" ] && fail "set HOUSTON_VERSION or HOUSTON_SOURCE, not both"
+  if [ -n "$HOUSTON_SOURCE" ]; then
+    [ -f "$HOUSTON_SOURCE/mission_control/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission_control/Dockerfile"
+    return 0
+  fi
+  [ -n "$HOUSTON_VERSION" ] || fail "set HOUSTON_VERSION to a release (for example v0.1.0), or HOUSTON_SOURCE to a checkout"
+  printf '%s' "$HOUSTON_VERSION" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.]+)?$' ||
+    fail "HOUSTON_VERSION must be a release tag like v0.1.0"
+  has curl || fail "installing a release needs curl"
+  release_json=$(github "$HOUSTON_GITHUB_API/repos/$HOUSTON_REPO/releases/tags/$HOUSTON_VERSION") ||
+    fail "$HOUSTON_VERSION isn't a Houston release (or the repo is private: set HOUSTON_GITHUB_TOKEN to a token that can read it)"
+  owner=${HOUSTON_REPO%%/*}
+  IMAGE="$HOUSTON_REGISTRY/$owner/houston-mission-control:$HOUSTON_VERSION"
+  RUNNER_IMAGE="$HOUSTON_REGISTRY/$owner/houston-runner:$HOUSTON_VERSION"
+}
+
+# github <url> [accept]: a GitHub API request, with the token when there is
+# one. The token goes to curl on stdin, never on its command line.
+github() {
+  if [ -n "$HOUSTON_GITHUB_TOKEN" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$HOUSTON_GITHUB_TOKEN" |
+      curl -fsSL -K - -H "Accept: ${2:-application/vnd.github+json}" "$1"
+  else
+    curl -fsSL -H "Accept: ${2:-application/vnd.github+json}" "$1"
+  fi
+}
+
+# asset_url <name>: the API URL of the release's asset called name.
+asset_url() {
+  # shellcheck disable=SC2020 # each of , { and } becomes a newline, on purpose
+  printf '%s' "$release_json" | tr ',{}' '\n\n\n' | sed 's/^ *//; s/": *"/":"/' | awk -v want="\"name\":\"$1\"" '
+    /^"url":"[^"]*\/releases\/assets\/[0-9]+"$/ { u = $0; sub(/^"url":"/, "", u); sub(/"$/, "", u) }
+    $0 == want && u != "" { print u; exit }'
+}
+
+# fetch_asset <name> <dest>: downloads one of the release's assets.
+fetch_asset() {
+  url=$(asset_url "$1")
+  [ -n "$url" ] || fail "release $HOUSTON_VERSION has no $1"
+  github "$url" application/octet-stream >"$2" || fail "couldn't download $1 of $HOUSTON_VERSION"
+}
+
+# installed_version: what the flight board will say.
+installed_version() { if [ -n "$HOUSTON_VERSION" ]; then printf '%s' "$HOUSTON_VERSION"; else printf 'source %.7s' "$(source_sha)"; fi; }
+
+# source_sha: the checkout's commit, for the version a source build shows.
+source_sha() { git -C "$HOUSTON_SOURCE" rev-parse HEAD 2>/dev/null || echo unknown; }
 
 # pm_install installs packages with the system's package manager, quietly,
 # and on failure stops with the command to run by hand (dnf -q prints
@@ -229,11 +286,23 @@ write_runner_token() {
   chmod 600 "$home/.config/houston/runner-token"
 }
 
-# The houston CLI, built from the checkout until binaries are published.
+# The houston CLI: the release's binary, checked against its SHA256SUMS, or
+# built from the checkout. A mismatch installs nothing.
 install_cli() {
-  step "Building the houston CLI from $HOUSTON_SOURCE"
   out=$(mktemp -d)
-  docker build --quiet --target release --output "type=local,dest=$out" "$HOUSTON_SOURCE" >/dev/null
+  if [ -n "$HOUSTON_VERSION" ]; then
+    step "Installing the houston CLI $HOUSTON_VERSION"
+    fetch_asset SHA256SUMS "$out/SHA256SUMS"
+    fetch_asset "houston-linux-$arch" "$out/houston-linux-$arch"
+    if ! (cd "$out" && grep " houston-linux-$arch\$" SHA256SUMS | sha256sum -c --status); then
+      rm -rf "$out"
+      fail "houston-linux-$arch doesn't match the release's SHA256SUMS; nothing was installed"
+    fi
+  else
+    step "Building the houston CLI from $HOUSTON_SOURCE"
+    sha=$(source_sha)
+    docker build --quiet --target release --build-arg VERSION="source-$(printf '%.7s' "$sha")" --output "type=local,dest=$out" "$HOUSTON_SOURCE" >/dev/null
+  fi
   install -m 755 "$out/houston-linux-$arch" /usr/local/bin/houston
   ln -sf houston /usr/local/bin/hou
   rm -rf "$out"
@@ -340,12 +409,32 @@ networks:
 EOF
 }
 
+# fetch_images: the release's images, or ones built from the checkout. Right
+# after Docker is installed and before anything is written, so a failed pull
+# or build changes nothing.
+fetch_images() {
+  if [ -n "$HOUSTON_VERSION" ]; then
+    step "Pulling Houston $HOUSTON_VERSION"
+    if [ -n "$HOUSTON_GITHUB_TOKEN" ]; then
+      printf '%s' "$HOUSTON_GITHUB_TOKEN" | docker login "$HOUSTON_REGISTRY" -u houston --password-stdin >/dev/null 2>&1 ||
+        fail "couldn't log in to $HOUSTON_REGISTRY with HOUSTON_GITHUB_TOKEN (it needs read:packages)"
+    fi
+    pulled=1
+    docker pull --quiet "$IMAGE" >/dev/null && docker pull --quiet "$RUNNER_IMAGE" >/dev/null || pulled=0
+    # The token is only for this install: it isn't left in Docker's config.
+    [ -z "$HOUSTON_GITHUB_TOKEN" ] || docker logout "$HOUSTON_REGISTRY" >/dev/null 2>&1 || true
+    [ "$pulled" = 1 ] || fail "couldn't pull $IMAGE and $RUNNER_IMAGE"
+  else
+    sha=$(source_sha)
+    step "Building Mission Control from $HOUSTON_SOURCE"
+    docker build --quiet --target production --build-arg HOUSTON_SOURCE_SHA="$sha" -t "$IMAGE" "$HOUSTON_SOURCE/mission_control" >/dev/null
+    step "Building the runner image"
+    docker build --quiet -t "$RUNNER_IMAGE" -f "$HOUSTON_SOURCE/install/runner.Dockerfile" "$HOUSTON_SOURCE/install" >/dev/null
+  fi
+}
+
 start() {
   docker network inspect kamal >/dev/null 2>&1 || docker network create kamal >/dev/null
-  step "Building Mission Control from $HOUSTON_SOURCE"
-  docker build --quiet --target production -t "$IMAGE" "$HOUSTON_SOURCE/mission_control" >/dev/null
-  step "Building the runner image"
-  docker build --quiet -t "$RUNNER_IMAGE" -f "$HOUSTON_SOURCE/install/runner.Dockerfile" "$HOUSTON_SOURCE/install" >/dev/null
   i=1
   while [ "$i" -le "$RUNNERS" ]; do
     install -d -m 750 -o houston -g houston /var/lib/houston /var/lib/houston/runners "/var/lib/houston/runners/houston-runner-$i"
@@ -383,17 +472,21 @@ report() {
   url="http://${address:-<this server>}:3000"
   if code=$(compose exec -T mission-control bin/rails houston:setup_code 2>/dev/null); then
     say ""
-    say "Houston is running."
+    say "Houston $(installed_version) is running."
     say "Finish setup at  $url"
     say "Setup code       $code"
   else
     say ""
-    say "Houston is running. Setup is already complete; sign in at $url (or admin.<your base domain>)."
+    say "Houston $(installed_version) is running. Setup is already complete; sign in at $url (or admin.<your base domain>)."
   fi
 }
 
+# HOUSTON_INSTALL_LIB=1 loads the functions without running them (tests).
+[ -n "${HOUSTON_INSTALL_LIB:-}" ] && return 0 2>/dev/null
+
 check_system
 install_prereqs
+fetch_images
 create_user
 check_ssh
 write_env

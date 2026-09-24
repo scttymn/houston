@@ -89,6 +89,14 @@ USER 1000:1000
 COPY --chown=rails:rails --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
 COPY --chown=rails:rails --from=build /rails /rails
 
+# Which Houston this is (HoustonVersion): a release's tag, from the release
+# workflow, or a checkout's commit, from the installer. Last, so a new
+# version doesn't rebuild the layers above.
+ARG HOUSTON_VERSION=""
+ARG HOUSTON_SOURCE_SHA=""
+ENV HOUSTON_VERSION=$HOUSTON_VERSION \
+    HOUSTON_SOURCE_SHA=$HOUSTON_SOURCE_SHA
+
 # Entrypoint prepares the database.
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 

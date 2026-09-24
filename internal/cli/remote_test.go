@@ -40,6 +40,7 @@ const garageJSON = `{"name":"garage","status":"go","running_sha":"4be21c0aa11b2c
 
 func TestStatus(t *testing.T) {
 	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/me":              respond(`{"token":"laptop","server":"svnmns.com","version":"v0.1.0"}`),
 		"/api/v1/projects":        respond(`{"projects":[` + garageJSON + `,{"name":"fresh","status":"standby","host":"fresh.svnmns.com","domains":{}}]}`),
 		"/api/v1/projects/garage": respond(garageJSON),
 	})
@@ -62,6 +63,22 @@ func TestStatus(t *testing.T) {
 	var got map[string]any
 	if code != 0 || json.Unmarshal([]byte(out), &got) != nil || got["name"] != "garage" {
 		t.Errorf("--json from the compose name: exit %d\n%s", code, out)
+	}
+}
+
+// The server's version (docs/plans/releases.md, row 3): first, before the
+// projects, from /api/v1/me.
+func TestStatusPrintsServerVersion(t *testing.T) {
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/me":       respond(`{"token":"laptop","server":"svnmns.com","version":"v0.1.0"}`),
+		"/api/v1/projects": respond(`{"projects":[` + garageJSON + `]}`),
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, errOut := run(&fakeDocker{}, "status")
+	first, _, _ := strings.Cut(out, "\n")
+	if code != 0 || first != "Houston v0.1.0 at svnmns.com" || !strings.Contains(out, "garage") {
+		t.Errorf("status: exit %d\n%s%s", code, out, errOut)
 	}
 }
 

@@ -66,6 +66,11 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		return printRaw(ctx, client, path, stdout, stderr)
 	}
 	if name == "" {
+		// Which Houston answered, first. A server too old to say is skipped;
+		// the projects request reports any real problem.
+		if me, err := client.Me(ctx); err == nil && me.Version != "" {
+			fmt.Fprintf(stdout, "Houston %s at %s\n", me.Version, me.Server)
+		}
 		projects, err := client.Projects(ctx)
 		if err != nil {
 			return remoteFailed(err, stderr)
