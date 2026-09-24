@@ -1,14 +1,28 @@
-<%# The deploy's state, and what's serving meanwhile. Replaced live by DeployBroadcast. %>
+<%# The deploy's head (title, state, clock) and what's serving meanwhile, as the design's DeployLog. Replaced live by DeployBroadcast. %>
+<% word = deploy.restore? ? "Restore" : "Deploy" %>
 <div id="deploy_status" class="deploy-status">
-  <div class="hosts">
-    <%= state_chip(deploy.status) %>
-    <span class="mono"><%= deploy.short_sha %> · <%= deploy.ref %></span>
-    <% if deploy.runner %><span class="mono">· <%= deploy.runner %></span><% end %>
+  <div class="deploy-head">
+    <div class="deploy-head__main">
+      <div class="deploy-head__title">
+        <h1 class="disp"><%= word %> #<%= deploy.number %></h1>
+        <%= state_pill(deploy.status) %>
+      </div>
+      <p class="deploy-head__meta"><span class="mono"><%= deploy.short_sha %></span> · <%= deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %><% if deploy.runner %> · runner <span class="mono"><%= deploy.runner %></span><% end %></p>
+    </div>
+    <div class="deploy-head__clock">
+      <% if deploy.status.in?(%w[queued in_flight]) %>
+        <span class="mono eyebrow">MISSION ELAPSED · STARTED <%= deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+        <span class="disp deploy-head__elapsed"><%= mission_elapsed(deploy.duration) %></span>
+      <% else %>
+        <span class="mono eyebrow">TOOK · STARTED <%= deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
+        <span class="disp deploy-head__elapsed"><%= duration_words(deploy.duration) %></span>
+      <% end %>
+    </div>
   </div>
   <% if deploy.status.in?(%w[queued in_flight]) %>
-    <div class="notice notice--hold">
-      <span class="mono"><%= deploy.status == "queued" ? "QUEUED" : "IN FLIGHT" %></span>
-      <span class="notice__text">
+    <div class="serving">
+      <span class="serving__dot"></span>
+      <span>
         <% if running %><span class="mono"><%= running.short_sha %></span> is still serving <%= project.host %>.<% else %>Nothing is serving <%= project.host %> yet.<% end %>
         <% if deploy.status == "queued" %>Waiting for a runner.<% else %>Traffic switches only after <span class="mono"><%= project.health %></span> returns 200 on the new version.<% end %>
       </span>

@@ -2,7 +2,7 @@
   <%= render "shared/brand" %>
   <% if authenticated? %>
     <nav class="topbar__nav">
-      <%= link_to "Projects", root_path, class: ("is-current" if controller_name == "projects") %>
+      <%= link_to "Projects", root_path, class: ("is-current" unless controller_path.start_with?("settings/")) %>
       <%= link_to "Settings", settings_general_path, class: ("is-current" if controller_path.start_with?("settings/")) %>
     </nav>
     <span class="topbar__spacer"></span>
@@ -10,11 +10,11 @@
       <% tunnel = SystemStatus.tunnel %>
       <div class="mono status">
         <span>TUNNEL <%= status_word(tunnel.go?) %></span>
-        <span>REGISTRY <%= status_word(SystemStatus.registry_up?) %></span>
         <% if (expected = ENV["HOUSTON_RUNNERS"].to_i).positive? %>
           <% live = Runner.live_count %>
-          <span>RUNNERS <span class="<%= live >= expected ? "status__go" : "status__nogo" %>"><%= live %>/<%= expected %></span></span>
+          <span>RUNNERS <%= live %>/<%= expected %> <%= status_word(live >= expected) %></span>
         <% end %>
+        <span>REGISTRY <%= status_word(SystemStatus.registry_up?) %></span>
         <span class="status__clock"><%= Time.now.utc.strftime("%H:%M UTC") %></span>
       </div>
     <% end %>

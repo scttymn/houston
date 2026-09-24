@@ -21,6 +21,15 @@ class Setup::CloudflareControllerTest < ActionDispatch::IntegrationTest
     assert_not Installation.connected?
   end
 
+  # The design's step indicator: a finished step shows GO, the current one its number.
+  test "the step indicator marks finished steps GO" do
+    get setup_cloudflare_path
+    assert_select ".steps__step.is-done .steps__number", "GO"
+    assert_select ".steps__step.is-done .steps__name", "ADMIN ACCOUNT"
+    assert_select ".steps__step.is-current .steps__number", "02"
+    assert_select ".steps__step.is-done", 1
+  end
+
   test "shows the Cloudflare form" do
     get setup_cloudflare_path
 

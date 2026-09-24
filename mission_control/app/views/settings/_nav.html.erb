@@ -1,6 +1,9 @@
-<nav class="mono eyebrow crumbs settings-nav">
-  Settings /
-  <%= link_to_unless_current "General", settings_general_path %> ·
-  <%= link_to_unless_current "Storage", settings_storage_locations_path %> ·
-  <%= link_to_unless_current "API tokens", settings_tokens_path %>
+<%# The design's Settings nav: the title, then one link per section, the current one filled. %>
+<nav class="settings-nav" aria-label="Settings sections">
+  <h1 class="disp">Settings</h1>
+  <% [ [ "General", settings_general_path, controller_name == "general" ],
+       [ "Storage", settings_storage_locations_path, controller_name == "storage" ],
+       [ "API tokens", settings_tokens_path, controller_name == "tokens" ] ].each do |label, path, current| %>
+    <%= link_to label, path, "aria-current": ("page" if current) %>
+  <% end %>
 </nav>

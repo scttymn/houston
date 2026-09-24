@@ -11,6 +11,7 @@ class ProjectsController < ApplicationController
     @hooks_route = SystemStatus.route(@installation, "hooks")
     @next_backup = next_backup
     @failed_backups = BackupRun.where(id: BackupRun.group(:project_id).select("MAX(id)")).where(status: "no_go").pluck(:project_id).to_set
+    @last_backups = BackupRun.where(id: BackupRun.where(status: "go").group(:project_id).select("MAX(id)")).index_by(&:project_id)
   end
 
   def show

@@ -20,7 +20,8 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
 
     get settings_storage_locations_path
     assert_response :success
-    assert_select "nav.settings-nav a[href='#{settings_storage_locations_path}']", 0 # the current page isn't a link
+    assert_select "nav.settings-nav a[href='#{settings_storage_locations_path}'][aria-current=page]", "Storage"
+    assert_select ".settings-section .storage-head", /NAME.*TYPE.*LOCATION.*HOLDS.*USED BY.*LAST WRITE/m
     assert_select "[data-location=unas-nfs]", /DEFAULT.*nfs.*10\.0\.1\.20:\/volume1\/houston.*live volumes · backups.*1 project.*22 Sep 03:00.*Last prune failed: .*unable to create lock/m
     assert_select "[data-location=b2-offsite]", /b2.*backups.*not used yet/m
     assert_select "[data-location=b2-offsite]", { text: /live volumes/, count: 0 }

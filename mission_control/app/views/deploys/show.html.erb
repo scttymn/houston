@@ -1,27 +1,20 @@
 <% word = @deploy.restore? ? "Restore" : "Deploy" %>
 <% content_for :title, "#{@project.name} · #{word} ##{@deploy.number}" %>
 <%= turbo_stream_from @deploy %>
-<main class="page board">
-  <nav class="mono eyebrow crumbs"><%= link_to "Projects", root_path %> / <%= link_to @project.name, project_path(@project.name) %> / <%= word %> #<%= @deploy.number %></nav>
-  <div class="board__top">
-    <div class="board__title">
-      <h1 class="disp"><%= word %> #<%= @deploy.number %></h1>
-    </div>
-    <div class="stat">
-      <span class="mono eyebrow">STARTED <%= @deploy.created_at.utc.strftime("%H:%M:%S") %> UTC</span>
-      <span class="disp stat__value"><%= @deploy.finished_at ? duration_words(@deploy.duration) : "—" %></span>
-    </div>
-  </div>
+<main class="page deploy-page">
+  <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <%= link_to @project.name, project_path(@project.name) %> <span>/</span> <span class="crumbs__here"><%= word %> #<%= @deploy.number %></span></nav>
 
   <%= render "deploys/status", deploy: @deploy, project: @project, running: @running %>
 
-  <div class="board__body">
+  <div class="deploy-body">
     <%= render "deploys/steps", deploy: @deploy %>
-    <section class="panel log-panel" data-controller="follow clipboard">
-      <div class="panel__title log-panel__head">
-        <h2 class="disp"><%= @project.name %> · <%= @deploy.short_sha %></h2>
+    <section class="log-panel" data-controller="follow clipboard">
+      <div class="log-panel__head">
+        <% if @deploy.status.in?(%w[queued in_flight]) %><span class="mono log-panel__live">LIVE</span><% end %>
+        <span class="mono log-panel__what"><%= @project.name %> · <%= @deploy.short_sha %></span>
+        <span class="log-panel__spacer"></span>
         <label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"> Follow</label>
-        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+        <button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
       </div>
       <pre id="deploy_log" class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled"><%= @deploy.log %></pre>
     </section>

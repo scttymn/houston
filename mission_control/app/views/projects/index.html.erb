@@ -7,9 +7,13 @@
   <div class="board__top">
     <div class="board__title">
       <span class="mono eyebrow">FLIGHT BOARD · <%= base.upcase %></span>
-      <h1 class="disp">Projects</h1>
+      <div class="board__heading">
+        <h1 class="disp">Projects</h1>
+        <% if @projects.any? %>
+          <%= link_to link_path, class: "button button--primary button--medium" do %><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.8"/></svg>Add project<% end %>
+        <% end %>
+      </div>
     </div>
-    <% if @projects.any? %><%= link_to "Add project", link_path, class: "button button--primary" %><% end %>
     <div class="stats">
       <div class="stat"><span class="mono eyebrow">PROJECTS</span> <span class="disp stat__value"><%= @projects.size %></span></div>
       <% in_flight = @projects.count { |p| p.status == :in_flight } %>
@@ -42,49 +46,63 @@
   <% end %>
 
   <% if @projects.any? %>
-    <section class="panel">
-      <table class="flight">
-        <thead>
-          <tr class="mono eyebrow"><th>STATUS</th><th>PROJECT</th><th>RUNNING SHA</th><th>DOMAINS</th><th>LAST DEPLOY</th></tr>
-        </thead>
-        <tbody>
-          <% @projects.each do |project| %>
-            <% latest, running = project.latest_deploy, project.running_deploy %>
-            <tr data-project="<%= project.name %>">
-              <td><%= state_chip(project.status) %><% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %><% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %></td>
-              <td>
-                <%= link_to project.name, project_path(project.name), class: "flight__name" %>
-                <small class="mono"><%= project.accessories.presence&.join(" · ") || "no services" %></small>
-              </td>
-              <td class="mono">
-                <%= running&.short_sha || "—" %>
-                <small><%= project.status == :in_flight ? "→ #{latest.short_sha}" : project.deploy_rule_words.downcase %></small>
-              </td>
-              <td class="flight__domains">
-                <% ([ project.host(@installation) ] + project.domains).each do |host| %>
-                  <span><%= link_to host, app_url(host), target: "_blank", rel: "noopener noreferrer", class: "mono" %>
-                  <%= render "projects/domain_state", project:, host: %></span>
-                <% end %>
-              </td>
-              <td>
-                <% if latest.nil? %>
-                  <span>Never deployed</span><small>Run houston deploy on the server</small>
-                <% elsif latest.status == "in_flight" %>
-                  <%= link_to "Deploying · #{mission_elapsed(latest.duration)}", project_deploy_path(project.name, latest.number) %>
-                  <small><%= latest.step.presence || "starting" %></small>
-                <% elsif latest.status == "no_go" %>
-                  <%= link_to "Failed #{time_ago_in_words(latest.finished_at)} ago", project_deploy_path(project.name, latest.number) %>
-                  <small><%= latest.short_sha %> · <%= latest.error %></small>
-                <% else %>
-                  <%= link_to "#{time_ago_in_words(latest.finished_at)} ago · #{duration_words(latest.duration)}", project_deploy_path(project.name, latest.number) %>
-                  <small><%= latest.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></small>
-                <% end %>
-              </td>
-            </tr>
-          <% end %>
-        </tbody>
-      </table>
+    <section class="panel flight">
+      <div class="mono flight-head"><span>STATUS</span><span>PROJECT</span><span>RUNNING SHA</span><span>DOMAINS</span><span>LAST DEPLOY</span><span>LAST BACKUP</span></div>
+      <% @projects.each do |project| %>
+        <% latest, running, backup = project.latest_deploy, project.running_deploy, @last_backups[project.id] %>
+        <div class="flight__row flight__row--<%= project.status.to_s.dasherize %>" data-project="<%= project.name %>">
+          <span class="flight__status">
+            <%= state_pill(project.status) %>
+            <% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %>
+            <% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %>
+          </span>
+          <span class="flight__cell">
+            <%= link_to project.name, project_path(project.name), class: "flight__name" %>
+            <small class="flight__services"><%= project.accessories.map { |s| [ s, project.service_image(s) ].compact.join(" · ") }.join(", ").presence || "no services" %></small>
+          </span>
+          <span class="flight__cell">
+            <span class="mono"><%= running&.short_sha || "—" %></span>
+            <small class="<%= "mono flight__next" if project.status == :in_flight %>"><%= project.status == :in_flight ? "→ #{latest.short_sha}" : (project.status == :no_go ? "still serving" : project.deploy_rule_words.downcase.delete_prefix("every commit to ")) %></small>
+          </span>
+          <span class="flight__cell flight__domains">
+            <% project.hostnames(@installation).each do |host| %>
+              <% state = project.domain_states.dig(host, "state") %>
+              <%= link_to app_url(host), target: "_blank", rel: "noopener noreferrer", class: "flight__host host-chip--#{state.to_s.parameterize.presence || "ok"}" do %>
+                <span class="flight__dot"></span><%= host %>
+                <% if state && state != "DNS OK" %><small class="mono domain-state domain-state--<%= state.parameterize %>" title="<%= project.domain_states.dig(host, "reason") %>"><%= state %></small><% end %>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2H10v5.5M10 2L2.5 9.5" stroke="currentColor" stroke-width="1.4"/></svg><span class="visually-hidden">(opens in a new window)</span>
+              <% end %>
+            <% end %>
+          </span>
+          <span class="flight__cell">
+            <% if latest.nil? %>
+              <span>Never deployed</span><small>Deploy on its page, or run houston deploy</small>
+            <% elsif latest.status == "in_flight" %>
+              <%= link_to "Deploying · #{mission_elapsed(latest.duration)}", project_deploy_path(project.name, latest.number), class: "flight__deploying" %>
+              <small><%= latest.step.presence || "starting" %></small>
+            <% elsif latest.status == "no_go" %>
+              <%= link_to "Failed #{time_ago_in_words(latest.finished_at)} ago", project_deploy_path(project.name, latest.number), class: "flight__failed" %>
+              <small><%= latest.short_sha %> · <%= latest.error %></small>
+            <% elsif latest.status == "queued" %>
+              <%= link_to "Queued", project_deploy_path(project.name, latest.number) %>
+              <small><%= latest.short_sha %></small>
+            <% else %>
+              <%= link_to "#{time_ago_in_words(latest.finished_at)} ago · #{duration_words(latest.duration)}", project_deploy_path(project.name, latest.number), class: "flight__plain" %>
+              <small><%= latest.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></small>
+            <% end %>
+          </span>
+          <span class="flight__cell flight__backup">
+            <% if backup %>
+              <span><%= l(backup.finished_at, format: :short) %></span>
+              <small><%= backup.kind %><%= " · #{number_to_human_size(backup.bytes)}" if backup.bytes %></small>
+            <% else %>
+              <span class="muted">—</span>
+            <% end %>
+          </span>
+        </div>
+      <% end %>
     </section>
+    <p class="board__foot">Add a project by linking its repo, or let the first <span class="mono code-chip">houston deploy</span> register it.</p>
   <% else %>
   <div class="board__body">
       <section class="panel empty">

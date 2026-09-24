@@ -32,6 +32,10 @@ class ProjectRestoresTest < ActionDispatch::IntegrationTest
       assert_select ".restore-compare", /Live.*22 Sep 03:00 · auto · 385 MB/m
       assert_select ".restore-note", /keeps serving/
       assert_select ".restore-note", /maintenance page is off/i
+      # The design's Restore: a dialog, with the comparison's NOW and AFTER RESTORE heads.
+      assert_select ".restore__dialog[role=dialog] .restore__banner", /RESTORE · WHOLE PROJECT.*CODE \+ DATA/m
+      assert_select ".restore-compare .restore-compare__head", %w[NOW AFTER\ RESTORE].size
+      assert_select ".restore__phase", 2
       assert_select "input[name=confirm]"
 
       use_fake_git(@git) { post project_restores_path("equip"), params: { snapshot: "33333333", location: "unas-nfs", confirm: "Equip" } }

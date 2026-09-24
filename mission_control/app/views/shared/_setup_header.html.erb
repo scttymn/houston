@@ -4,8 +4,8 @@
   <ol class="steps" aria-label="Setup progress">
     <% [ "Admin account", "Cloudflare", "Storage" ].each_with_index do |name, i| %>
       <% if i > 0 %><li class="steps__line" aria-hidden="true"></li><% end %>
-      <li class="steps__step <%= "is-current" if i + 1 == step %>" <%= "aria-current=step" if i + 1 == step %>>
-        <span class="mono steps__number"><%= format("%02d", i + 1) %></span>
+      <li class="steps__step <%= "is-current" if i + 1 == step %> <%= "is-done" if i + 1 < step %>" <%= "aria-current=step" if i + 1 == step %>>
+        <span class="mono steps__number"><%= i + 1 < step ? "GO" : format("%02d", i + 1) %></span>
         <span class="mono steps__name"><%= name.upcase %></span>
       </li>
     <% end %>

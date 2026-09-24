@@ -1,6 +1,20 @@
 require "test_helper"
 
 class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
+  # The design's Settings: the section nav on the left, the sections beside it.
+  test "settings follow the design" do
+    Installation.current.update!(dns_mode: "per_host")
+    sign_in_as users(:one)
+    get settings_general_path
+    assert_select ".settings > nav.settings-nav h1", /Settings/i
+    assert_equal [ "General", "Storage", "API tokens" ], css_select("nav.settings-nav a").map { |a| a.text.strip }
+    assert_select "nav.settings-nav a[aria-current=page]", "General"
+    assert_select ".settings__body section#cloudflare", /BASE DOMAIN\s+svnmns\.com/
+    assert_select "section#cloudflare", /DNS\s+Host by host/
+    assert_select "section#cloudflare .ingress", /admin\.svnmns\.com.*Mission Control.*hooks\.svnmns\.com.*webhook paths only.*everything else.*Your apps/m
+    assert_select "section#time-zone .inline-form select[name=time_zone]"
+  end
+
   test "the time zone" do
     sign_in_as users(:one)
     get settings_general_path

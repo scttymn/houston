@@ -1,10 +1,12 @@
 <% content_for :title, "#{@location.name} · Storage · Settings" %>
-<main class="page board">
+<main class="settings">
   <%= render "settings/nav" %>
+  <div class="settings__body">
   <div class="board__title">
     <h1 class="disp"><%= @location.name %></h1>
     <p class="notice notice--go"><span class="mono">GO</span><span class="notice__text">Wrote a test file at <span class="mono"><%= @location.where_it_is %></span>. Backups are ready to go here once you've saved its password.</span></p>
   </div>
   <%= render "storage/shown_once", location: @location, download: password_settings_storage_location_path(@location.name, format: :txt),
                                    confirm: acknowledge_settings_storage_location_path(@location.name), submit: "Done", unsaved: @unsaved %>
+  </div>
 </main>

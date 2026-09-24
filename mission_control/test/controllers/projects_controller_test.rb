@@ -198,6 +198,46 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select "h2", { text: /Nothing on the pad yet/i, count: 0 }
   end
 
+  # The design's Main: pills, services with images, host rows, and LAST BACKUP.
+  test "the flight board follows the design" do
+    stub_tunnel
+    equip = make_project("equip", services: %w[app db], domains: %w[equipping.com])
+    equip.update!(details: { "images" => { "db" => "postgres:17" } })
+    make_deploy(equip, 1, "go")
+    BackupRun.create!(project: equip, location: storage_locations(:unas), kind: "auto", reason: "schedule", status: "go",
+                      heartbeat_at: Time.current, finished_at: Time.zone.parse("2026-09-24 03:00"), bytes: 412 * 1024 * 1024, snapshot_id: "a" * 64)
+    ride = make_project("rideclub")
+    make_deploy(ride, 1, "in_flight", step: "release hook")
+
+    get root_path
+    assert_select ".flight-head", /STATUS.*PROJECT.*RUNNING SHA.*DOMAINS.*LAST DEPLOY.*LAST BACKUP/m
+    assert_select "[data-project=equip] .state-pill", "GO"
+    assert_select "[data-project=equip] .flight__services", "db · postgres:17"
+    assert_select "[data-project=equip] a.flight__host[href='https://equipping.com'] .flight__dot"
+    assert_select "[data-project=equip] .flight__backup", /24 Sep 03:00.*auto · 412 MB/m
+    assert_select "[data-project=rideclub].flight__row--in-flight"
+    assert_select "[data-project=rideclub] .flight__backup", /—/
+    assert_select ".board__title a.button[href='/link'] svg"
+    assert_select "p.board__foot", /let the first\s+houston deploy\s+register it/
+  end
+
+  test "the top bar: status in the design's order, and Projects current on project pages" do
+    stub_tunnel
+    Runner.create!(name: "houston-runner-1", last_seen_at: 10.seconds.ago)
+    Runner.create!(name: "houston-runner-2", last_seen_at: 10.seconds.ago)
+    ENV["HOUSTON_RUNNERS"] = "2"
+    get root_path
+    assert_match(/TUNNEL.*RUNNERS 2\/2\s*GO.*REGISTRY/m, css_select(".status").first.text)
+
+    make_project("equip")
+    [ project_path("equip"), link_path ].each do |path|
+      get path
+      assert_select ".topbar__nav a.is-current", "Projects"
+    end
+  ensure
+    ENV.delete("HOUSTON_RUNNERS")
+  end
+
   test "the next backup" do
     stub_tunnel
     Installation.current.update!(time_zone: "Europe/Berlin")

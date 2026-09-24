@@ -44,6 +44,23 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_equal 0, Deploy.where(project: Project.find_by!(name: "garage")).count
   end
 
+  # The design's DeployLog: the pill beside the title, the elapsed clock, the
+  # serving line, and the log's dark head (LIVE while in flight).
+  test "the deploy page follows the design" do
+    make_deploy(@project, 1, "go", sha: "a" * 40)
+    make_deploy(@project, 2, "in_flight", sha: "b" * 40, step: "Build")
+    get project_deploy_path("equip", 2)
+    assert_select ".deploy-head__title h1 + .state-pill", "IN FLIGHT"
+    assert_select ".deploy-head__clock", /MISSION ELAPSED · STARTED \d\d:\d\d:\d\d UTC\s+T\+\d+:\d\d/
+    assert_select "#deploy_status .serving", /aaaaaaa is still serving equip\.svnmns\.com/
+    assert_select ".log-panel .log-panel__head .log-panel__live", "LIVE"
+
+    make_deploy(@project, 3, "go", sha: "c" * 40)
+    get project_deploy_path("equip", 3)
+    assert_select ".log-panel__live", 0
+    assert_select ".deploy-head__clock", /TOOK/
+  end
+
   test "a deploy's page" do
     make_deploy(@project, 1, "go", sha: "a" * 40, log: "Deploy #1 of equip\n")
     make_deploy(@project, 2, "in_flight", sha: "b" * 40, step: "Build", log: "Deploy #2 of equip\nstep output\n")

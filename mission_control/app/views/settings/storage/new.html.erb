@@ -1,6 +1,7 @@
 <% content_for :title, "Add storage · Settings" %>
-<main class="page board">
+<main class="settings">
   <%= render "settings/nav" %>
+  <div class="settings__body">
   <div class="board__title">
     <h1 class="disp">Add storage location</h1>
     <p>Houston writes a test repository there before saving it.</p>
@@ -11,4 +12,5 @@
       <div><%= form.submit "Test and save", class: "button button--primary" %></div>
     <% end %>
   </section>
+  </div>
 </main>

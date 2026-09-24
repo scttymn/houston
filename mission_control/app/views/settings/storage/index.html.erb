@@ -1,19 +1,18 @@
 <% content_for :title, "Storage · Settings" %>
-<main class="page board">
+<main class="settings">
   <%= render "settings/nav" %>
-  <div class="board__top">
-    <div class="board__title">
-      <h1 class="disp">Storage locations</h1>
-      <p>Where backups go, and where live volumes can live. Each location has its own restic password, shown once when it's added.</p>
-    </div>
-    <%= link_to "Add storage location", new_settings_storage_location_path, class: "button button--primary" %>
-  </div>
+  <div class="settings__body">
 
   <% if notice %><div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div><% end %>
   <% if alert %><div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text"><%= alert %></span></div><% end %>
 
-  <section class="panel">
-    <ul class="rows">
+  <section class="settings-section" id="storage">
+    <div class="panel__head">
+      <h2 class="disp panel__title">Storage locations</h2>
+      <%= link_to "Add storage location", new_settings_storage_location_path, class: "button button--primary button--small" %>
+    </div>
+    <div class="mono storage-head"><span>NAME</span><span>TYPE</span><span>LOCATION</span><span>HOLDS</span><span>USED BY</span><span>LAST WRITE</span><span></span></div>
+    <ul class="rows storage-rows">
       <% @locations.each do |location| %>
         <% used = location.projects_using %>
         <% last = location.last_write %>
@@ -35,5 +34,7 @@
         </li>
       <% end %>
     </ul>
+    <p class="panel__row panel__row--muted">Where backups go, and where live volumes can live. Each location has its own restic password, shown once when it's added.</p>
   </section>
+  </div>
 </main>

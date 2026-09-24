@@ -1,16 +1,13 @@
 <% content_for :title, "API tokens · Settings" %>
-<main class="page board">
+<main class="settings">
   <%= render "settings/nav" %>
-  <div class="board__title">
-    <h1 class="disp">API tokens</h1>
-    <p>For the houston CLI with <span class="mono">--server</span>, and for agents. A token can see and change projects and write secrets; it can never read a secret's value.</p>
-  </div>
+  <div class="settings__body">
 
   <% if notice %><div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div><% end %>
 
   <% if @new_token %>
-    <section class="panel" data-controller="clipboard">
-      <h2 class="disp panel__title">Token "<%= @created_name %>"</h2>
+    <section class="settings-section settings-section--new" data-controller="clipboard">
+      <div class="panel__head"><h2 class="disp panel__title">Token "<%= @created_name %>"</h2><span class="mono panel__meta eyebrow eyebrow--signal">SHOWN ONCE</span></div>
       <p class="panel__row">Copy it now: Houston shows it only this once.</p>
       <pre class="mono deploy-key new-token" data-clipboard-target="source"><%= @new_token %></pre>
       <p class="panel__row">
@@ -20,8 +17,9 @@
     </section>
   <% end %>
 
-  <section class="panel">
-    <h2 class="disp panel__title">Tokens</h2>
+  <section class="settings-section" id="tokens">
+    <div class="panel__head"><h2 class="disp panel__title">API tokens</h2></div>
+    <p class="panel__row panel__row--muted">For the houston CLI with <span class="mono">--server</span>, and for agents. A token can see and change projects and write secrets; it can never read a secret's value.</p>
     <% if @tokens.empty? %><p class="panel__row panel__row--muted">No tokens yet.</p><% end %>
     <ul class="rows">
       <% @tokens.each do |token| %>
@@ -33,10 +31,11 @@
         </li>
       <% end %>
     </ul>
-    <%= form_with url: settings_tokens_path, class: "panel__row secret__form", data: { turbo: false } do |f| %>
-      <%= f.text_field :name, placeholder: "Name, e.g. laptop or ci-agent", class: "mono", maxlength: 50 %>
-      <%= f.submit "Create token", class: "button button--small" %>
+    <%= form_with url: settings_tokens_path, class: "panel__row inline-form token-new", data: { turbo: false } do |f| %>
+      <%= f.text_field :name, placeholder: "Name, e.g. laptop or ci-agent", class: "mono", maxlength: 50, "aria-label": "Token name" %>
+      <%= f.submit "New CLI token", class: "button button--primary button--small" %>
       <% if @error %><span class="field__error"><%= @error %></span><% end %>
     <% end %>
   </section>
+  </div>
 </main>

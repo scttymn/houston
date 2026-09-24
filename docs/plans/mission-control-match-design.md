@@ -107,8 +107,43 @@ Where it differs from the design, on purpose:
 - **Found while fixing:** a Save with no draft showed nothing, because its error sat inside the draft-only part of the page. It's a NO-GO notice at the top of the right side now.
 
 
-## Batch 3: every other screen against its artboard (titles only)
-The projects list (`Main`, `ProjectsEmpty`), the deploy log (`DeployLog`), restore (`Restore`), Settings (`Settings`), and first run (`SetupAdmin`, `SetupCloudflare`, `SetupStorage`). An audit table first (artboard vs screen), then the fixes.
+## Batch 3: every other screen against its artboard
+Each screen was rendered from the tests with realistic data, served with the real fonts, and set beside its artboard.
+
+### The audit
+| Screen | Artboard | What differed | Now |
+|---|---|---|---|
+| Flight board | `Main` | Plain-text status; services without images; underlined mono domains; no LAST BACKUP; in-flight rows not tinted; Add project underlined, no + | Status pills; `db · postgres:17`; host rows with dot and ↗; LAST BACKUP (time, kind, size); the in-flight tint; the + button; the "let the first houston deploy register it" note |
+| Empty board | `ProjectsEmpty` | Close; the button was underlined, and it overflowed at 375 | Fixed |
+| Top bar | every artboard | Status order TUNNEL · REGISTRY · RUNNERS; no GO on runners; Projects not current on project pages; overflow on phones | TUNNEL · RUNNERS n/n GO · REGISTRY; Projects current off Settings; it fits a phone |
+| Deploy log | `DeployLog` | The pill under the title; no MISSION ELAPSED clock; an amber banner; narrow steps; a light log head | Pill beside the title; the elapsed clock (TOOK once done); the serving line with its dot; 440px steps, current row amber; the dark log with LIVE |
+| Restore | `Restore` | A left-aligned page panel | The dialog over the dimmed page: the banner, the NOW → AFTER RESTORE grid, the note, the two phases, the confirm row |
+| Settings | `Settings` | A crumb line for nav; a full-width select; a giant Save and token field; a cramped storage list | The section nav on the left (the current one filled), sections as the design's panels, the Cloudflare facts and ingress rules, and the storage table with its head row |
+| First run | `SetupAdmin`, `SetupCloudflare`, `SetupStorage` | Matched, except finished steps showed their number | Finished steps show GO |
+| Every page | | A paragraph row broke its inline text into lines (the rows are flex columns) | `p.panel__row` flows as text |
+
+### AC ↔ test map (Batch 3)
+| # | Acceptance criterion | Test | Lens |
+|---|---|---|---|
+| 1 | The flight board follows Main | `projects_controller_test.rb` `test "the flight board follows the design"` | Parity |
+| 2 | The top bar's order and runner verdict; Projects current on project pages | `projects_controller_test.rb` `test "the top bar: status in the design's order, and Projects current on project pages"` | Parity |
+| 3 | The deploy page follows DeployLog, LIVE only while in flight | `deploy_pages_test.rb` `test "the deploy page follows the design"` | Parity |
+| 4 | Restore is the design's dialog | `project_restores_test.rb` `test "the confirm page and restoring"` (its new assertions; shown failing against the old view first) | Parity |
+| 5 | Settings follows the design, the current section marked | `settings/general_controller_test.rb` `test "settings follow the design"`; `settings/storage_controller_test.rb` (its head row) | Parity |
+| 6 | Finished setup steps show GO | `setup/cloudflare_controller_test.rb` `test "the step indicator marks finished steps GO"` | Parity |
+| 7 | No screen scrolls sideways at 375px | the visual check: all twelve rendered pages measured 375 wide with no element past the edge | Honest surface |
+
+### Batch 3: done
+- **Red first** for rows 1-3, 5 and 6. Row 4's view was written before its test. The test was then run against the old view from git, and it failed.
+- **Green:** the Mission Control suite passes, 297 runs with 0 failures. Rubocop is clean on the whole app, and every Go package passes.
+- **Dead CSS removed:** `.hosts`, `.column`, `.column--side`, `.webhook__actions` and `.secret__form`.
+
+## Later (named, not built)
+From the Settings artboard, features rather than layout:
+- **Cloudflare:** Replace API token, and the zones list (Houston records per zone, their sync state, Export DNS).
+- **Account:** change email and password, signed-in sessions, sign out everywhere else.
+- **Tokens:** the runner's token row, with Rotate.
+- **Header:** the design's account avatar, once there's more than one user.
 
 ## Decisions (made: "go with your recommendations, run all three batches")
 1. Panels the design doesn't have stay, below Secrets and Backup plan, in the design's styles.
