@@ -1,4 +1,5 @@
 <%= link_to root_path, class: "brand" do %>
-  <%= render "shared/logo" %>
+  <%# The lunar module from the patch (patch.svg), in cream for the dark bar. %>
+  <%= image_tag "lander.svg", width: 40, height: 40, alt: "", class: "brand__mark" %>
   <span class="brand__name"><span class="disp">HOUSTON</span><span class="mono">MISSION CONTROL</span></span>
 <% end %>

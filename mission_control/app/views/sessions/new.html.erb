@@ -3,6 +3,7 @@
 
 <main class="signin">
   <%= form_with url: session_path, class: "signin__form" do |form| %>
+    <%= image_tag "patch.svg", width: 320, height: 296, alt: "Houston Mission Control", class: "signin__patch" %>
     <h1 class="disp">Sign in</h1>
     <% if flash[:alert] %><div class="notice notice--nogo" role="alert"><%= flash[:alert] %></div><% end %>
     <% if flash[:notice] %><div class="notice notice--go"><%= flash[:notice] %></div><% end %>

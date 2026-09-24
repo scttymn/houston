@@ -116,6 +116,7 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 
 .signin { display: flex; justify-content: center; padding: 64px 16px; }
 .signin__form { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px; }
+.signin__patch { align-self: center; max-width: 100%; height: auto; margin-bottom: 12px; }
 
 .page { display: flex; flex-direction: column; gap: 16px; padding: 40px 48px; }
 .page h1.disp { font-size: 60px; }

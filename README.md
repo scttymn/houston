@@ -1,3 +1,5 @@
+<p align="center"><img src="mission_control/app/assets/images/patch.svg" width="280" alt="Houston Mission Control"></p>
+
 # Houston
 
 A small self-hosted deploy orchestrator. Each project is one Docker Compose file with an `x-houston` block. One CLI works the same on your laptop and against the server. A web admin, **Mission Control**, handles Cloudflare, secrets, deploys, backups and restores.
