@@ -1,10 +1,12 @@
 require "test_helper"
 require_relative "../support/project_helpers"
 require_relative "../support/fake_docker"
+require_relative "../support/backup_helpers"
 
 class ProjectBackupsTest < ActionDispatch::IntegrationTest
   include ProjectHelpers
   include FakeDockerHelper
+  include BackupHelpers
   include ActiveJob::TestHelper
 
   setup do
@@ -85,11 +87,23 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
 
     Installation.current.update!(time_zone: "Europe/Berlin")
     @project.update!(backup_schedule: "daily 22:15")
-    # Settings doesn't read the repository: it shows even when that's slow or failing.
-    fake = FakeDocker.new { raise "the Settings tab listed the repository" }
-    use_fake_docker(fake) { get project_snapshots_path("equip", kind: "settings") }
+    # The tabs are the same on every tab, counts included, so they don't jump.
+    listing = FakeDocker.new { DockerCommand::Result.new(success: true, output: [ snapshot_json(id: "11111111", time: "2026-09-21T03:00:00Z") ].to_json) }
+    use_fake_docker(listing) { get project_snapshots_path("equip", kind: "settings") }
     assert_response :success
     assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", /Settings/
+    assert_select "#snapshots-list [role=tablist] a", /Scheduled\s*1 \/ 7/
+    assert_select "#snapshots-list [role=tablist] a", /Pre-deploy\s*0 \/ 3/
+    # Each tab keeps room for its bold label, so selecting one doesn't shift the rest.
+    assert_select "#snapshots-list [role=tablist] a .tabs__label[data-label]", 3
+
+    # Settings still shows when the repository can't be read; only the counts go.
+    Snapshots.forget_cache(@project, @project.backup_location) # the listing above is cached
+    failing = FakeDocker.new { failure("Fatal: unable to open repository at /repo: permission denied\n") }
+    use_fake_docker(failing) { get project_snapshots_path("equip", kind: "settings") }
+    assert_response :success
+    assert_select "#snapshots-list .snapshot-settings"
+    assert_select "#snapshots-list [role=tablist] a .mono", 0
     plan = "#snapshots-list .snapshot-settings"
     assert_select plan, /Edit in compose\.yml/
     assert_select plan, /7 scheduled · 3 pre-deploy/
@@ -106,7 +120,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     offsite = StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "sm" }, restic_password: "pw", verified_at: Time.current, acknowledged_at: Time.current)
     StorageLocation.create!(name: "later", kind: "b2", settings: { "bucket" => "sm2" }, restic_password: "pw", verified_at: Time.current)
 
-    get project_snapshots_path("equip", kind: "settings")
+    use_fake_docker(FakeDocker.new { DockerCommand::Result.new(success: true, output: "[]") }) { get project_snapshots_path("equip", kind: "settings") }
     assert_select ".snapshot-settings select[name=location] option", 2 # the default, b2-offsite
     assert_select ".snapshot-settings form[data-turbo-frame=_top]"
     patch project_backup_target_path("equip"), params: { location: "b2-offsite" }
@@ -115,7 +129,7 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     assert_equal offsite, @project.reload.backup_location
     follow_redirect!
     assert_select "turbo-frame#snapshots-list[src='/projects/equip/snapshots?kind=settings']"
-    get project_snapshots_path("equip", kind: "settings")
+    use_fake_docker(FakeDocker.new { DockerCommand::Result.new(success: true, output: "[]") }) { get project_snapshots_path("equip", kind: "settings") }
     assert_select ".snapshot-settings", /Backing up to b2-offsite\. Earlier snapshots stay where they were written/
     assert_equal offsite, BackupRun.request!(@project).location
 

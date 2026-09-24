@@ -5,7 +5,7 @@
   <% else %>
     <nav class="tabs" role="tablist" aria-label="Snapshots">
       <% [ [ "auto", "Scheduled", @project.keep_auto ], [ "deploy", "Pre-deploy", @project.keep_deploy ], [ "settings", "Settings", nil ] ].each do |kind, label, keep| %>
-        <%= link_to project_snapshots_path(@project.name, kind: (kind unless kind == "auto")), role: "tab", "aria-selected": (@kind == kind).to_s, class: "tabs__tab" do %><%= label %><% if keep && @counts %> <span class="mono"><%= @counts.fetch(kind, 0) %> / <%= keep %></span><% end %><% end %>
+        <%= link_to project_snapshots_path(@project.name, kind: (kind unless kind == "auto")), role: "tab", "aria-selected": (@kind == kind).to_s, class: "tabs__tab" do %><span class="tabs__label" data-label="<%= label %>"><%= label %></span><% if keep && @counts %> <span class="mono"><%= @counts.fetch(kind, 0) %> / <%= keep %></span><% end %><% end %>
       <% end %>
     </nav>
     <% if @kind == "settings" %>
