@@ -112,7 +112,7 @@ A static site deploys as `init` writes it. For anything else, **edit the default
 Then check it the way the server will run it:
 
 ```sh
-houston dev                  # the dev stage, code mounted
+houston dev                  # the dev stage, code mounted; says where it answers once it does
 houston test                 # commands.test in a throwaway copy
 houston dev --production     # the production image, locally, with volumes of its own
 houston init                 # again: "already set up" when nothing's missing

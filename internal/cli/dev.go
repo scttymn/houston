@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/scttymn/houston/internal/docker"
@@ -52,9 +55,11 @@ func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int
 		fmt.Fprintf(stderr, "houston: can't write .houston/%s: %v\n", name, err)
 		return exitFailure
 	}
+	stop := announceWhenUp(p, stderr)
 	// -p pins the project name: compose would otherwise let a stray
 	// COMPOSE_PROJECT_NAME (shell or .env) rename the containers.
 	code, err := d.Run(dir, nil, "compose", "-p", projectName, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
+	stop()
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
 		return exitFailure
@@ -189,4 +194,53 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// devProbe asks the app for its health path; any HTTP answer means it's up.
+// A plain TCP check isn't enough: Docker's port forwarding accepts as soon
+// as the container starts, before the app listens.
+var devProbe = func(url string) error {
+	c := http.Client{Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Get(url)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+var devPollEvery = 500 * time.Millisecond
+
+// announceWhenUp prints where the app answers on this machine, once it does:
+// the app's own log names its port inside the container, which compose.yml
+// may publish elsewhere. The returned func stops the probing; it's called
+// when compose returns. Nothing is printed for a port compose.yml doesn't fix.
+func announceWhenUp(p *project.Project, stderr io.Writer) (stop func()) {
+	ports := p.Compose.Services[p.AppService].Ports
+	if len(ports) == 0 || ports[0].Published == "" || strings.Contains(ports[0].Published, "-") {
+		return func() {}
+	}
+	host := ports[0].HostIP
+	if host == "" || host == "0.0.0.0" {
+		host = "localhost"
+	}
+	base := "http://" + host + ":" + ports[0].Published
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(devPollEvery):
+			}
+			if devProbe(base+p.Houston.Health) == nil {
+				fmt.Fprintf(stderr, "houston: %s is up at %s\n", p.Name, base)
+				return
+			}
+		}
+	}()
+	return func() { close(done); wg.Wait() }
 }

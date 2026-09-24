@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeDocker records what Houston asks docker to do.
@@ -388,3 +389,67 @@ func TestCLI_FileFlagAndUsageErrors(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// houston dev says where the app answers on this machine: the app's own
+// log names its port inside the container (Phoenix: "localhost:4000"),
+// while compose.yml publishes it elsewhere (estherpictures: 4001).
+func TestDev_SaysWhereTheAppAnswers(t *testing.T) {
+	defer func(p func(string) error, e time.Duration) { devProbe, devPollEvery = p, e }(devProbe, devPollEvery)
+	devPollEvery = time.Millisecond
+
+	withProbe := func(answerAfter int) (*[]string, chan struct{}) {
+		var urls []string
+		answered := make(chan struct{})
+		n := 0
+		devProbe = func(url string) error {
+			urls = append(urls, url)
+			if n++; n <= answerAfter {
+				return errors.New("connection reset")
+			}
+			close(answered)
+			return nil
+		}
+		return &urls, answered
+	}
+	app := strings.Replace(phoenix, `ports: ["4000:4000"]`, `ports: ["127.0.0.1:4001:4000"]`, 1)
+
+	for _, args := range [][]string{{"dev"}, {"dev", "--production"}} {
+		urls, answered := withProbe(2)
+		_, path := newProject(t, app, map[string]string{".env": "POSTGRES_PASSWORD=x\nSECRET_KEY_BASE=y\n"})
+		d := &fakeDocker{onRun: func() {
+			select {
+			case <-answered:
+			case <-time.After(2 * time.Second):
+			}
+		}}
+		_, _, stderr := run(d, append([]string{"-f", path}, args...)...)
+		if !strings.Contains(stderr, "houston: phoenixapp is up at http://127.0.0.1:4001\n") {
+			t.Errorf("%v: stderr = %q", args, stderr)
+		}
+		if len(*urls) != 3 || (*urls)[0] != "http://127.0.0.1:4001/health" {
+			t.Errorf("%v: probed %v, want the health path on the published port until it answers", args, *urls)
+		}
+	}
+
+	// No host address in ports: localhost.
+	withProbe(0)
+	_, path := newProject(t, phoenix, map[string]string{".env": "POSTGRES_PASSWORD=x\nSECRET_KEY_BASE=y\n"})
+	d := &fakeDocker{onRun: func() { time.Sleep(50 * time.Millisecond) }}
+	if _, _, stderr := run(d, "-f", path, "dev"); !strings.Contains(stderr, "is up at http://localhost:4000\n") {
+		t.Errorf("no host address: stderr = %q", stderr)
+	}
+}
+
+// An app that never answers gets no line, and houston dev still returns
+// when compose does (the probing stops with it).
+func TestDev_NoLineWhenTheAppNeverAnswers(t *testing.T) {
+	defer func(p func(string) error, e time.Duration) { devProbe, devPollEvery = p, e }(devProbe, devPollEvery)
+	devPollEvery = time.Millisecond
+	devProbe = func(string) error { return errors.New("connection refused") }
+	_, path := newProject(t, phoenix, map[string]string{".env": "POSTGRES_PASSWORD=x\nSECRET_KEY_BASE=y\n"})
+	d := &fakeDocker{runExit: 1, onRun: func() { time.Sleep(20 * time.Millisecond) }}
+	code, _, stderr := run(d, "-f", path, "dev")
+	if code != 1 || strings.Contains(stderr, "is up at") {
+		t.Errorf("exit %d, stderr %q", code, stderr)
+	}
+}
