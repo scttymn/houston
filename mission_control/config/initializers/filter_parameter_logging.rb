@@ -6,5 +6,8 @@
 Rails.application.config.filter_parameters += [
   :passw, :email, :secret, :token, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
   # The project page saves a secret as `value`.
-  :value
+  :value,
+  # A deploy's log can echo what the app printed; its error too. The
+  # one-time setup code.
+  :log, :error, :code
 ]

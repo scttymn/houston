@@ -27,6 +27,14 @@ orb delete -f "$name" >/dev/null 2>&1 || true
 orb create ubuntu:noble "$name" >/dev/null
 vm env HOUSTON_SOURCE="$repo" sh "$repo/install/install.sh" >/tmp/houston-e2e-install.log 2>&1 || { tail -20 /tmp/houston-e2e-install.log; exit 1; }
 rails mission-control bin/rails runner 'Installation.current.update!(base_domain: "houston.test", cloudflare_connected_at: Time.current, dns_mode: "wildcard")' >/dev/null
+# A redeploy snapshots the running app's data first, which needs backup
+# storage: a local restic repository, made for real.
+made=$(rails mission-control bin/rails runner '
+  s = StorageSetup.new(kind: "local", name: "local-backups", local_path: "/srv/houston-backups")
+  abort(s.errors.full_messages.to_sentence + s.checks.map(&:label).join) unless s.save
+  s.location.update!(acknowledged_at: Time.current, default: true)
+  puts "made"' 2>&1 | tail -1)
+[ "$made" = made ] || { echo "backup storage: $made"; exit 1; }
 vm docker pull -q curlimages/curl:8.16.0 >/dev/null
 
 echo "== a checkout of the spike fixture, with hooks"

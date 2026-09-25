@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // doc builds a compose file around a minimal valid project. Fields are appended
@@ -325,6 +327,8 @@ func TestLoad_UnsupportedCompose(t *testing.T) {
 		{"privileged", doc{app: "    privileged: true\n"}, "services.app.privileged", "can't run"},
 		{"profiles", doc{services: db + "    profiles: [debug]\n"}, "services.db.profiles", "can't run"},
 		{"extends", doc{services: db + "  db2:\n    extends: { service: db }\n"}, "services.db2.extends", "can't run"},
+		// Refused without reading the other file (security fixes, L10).
+		{"extends another file", doc{services: db + "  db2:\n    extends: { file: /nonexistent/other.yml, service: db }\n"}, "services.db2.extends", "can't run"},
 		{"deploy.replicas", doc{app: "    deploy: { replicas: 2 }\n"}, "services.app.deploy.replicas", "can't run"},
 		{"env_file", doc{app: "    env_file: .env\n"}, "services.app.env_file", "NAME: ${NAME}"},
 		{"top-level secrets", doc{top: "secrets:\n  s: { file: ./s.txt }\n"}, "secrets", "can't run"},
@@ -689,6 +693,85 @@ func TestBuildPathsStayInsideTheCheckout(t *testing.T) {
 		p, dir := repo(tc.build, tc.links)
 		if _, _, err := p.BuildPaths(dir); err == nil {
 			t.Errorf("%s: built anyway", name)
+		}
+	}
+}
+
+// Houston's generated files go in .houston/, which must be plain
+// directories: a repo could commit a symlink there to have Houston write
+// outside the checkout (docs/plans/security-fixes.md, L9).
+func TestGeneratedDirIsAPlainDirectory(t *testing.T) {
+	outside := t.TempDir()
+	dir := t.TempDir()
+	got, err := GeneratedDir(dir, "kamal", "config")
+	if err != nil || got != filepath.Join(dir, ".houston", "kamal", "config") {
+		t.Fatalf("a fresh checkout: %q %v", got, err)
+	}
+	if info, err := os.Stat(got); err != nil || !info.IsDir() {
+		t.Errorf("not created: %v", err)
+	}
+
+	for name, setup := range map[string]func(dir string){
+		".houston is a symlink": func(dir string) { os.Symlink(outside, filepath.Join(dir, ".houston")) },
+		"kamal is a symlink": func(dir string) {
+			os.Mkdir(filepath.Join(dir, ".houston"), 0o755)
+			os.Symlink(outside, filepath.Join(dir, ".houston", "kamal"))
+		},
+		".houston is a file": func(dir string) { os.WriteFile(filepath.Join(dir, ".houston"), nil, 0o644) },
+	} {
+		dir := t.TempDir()
+		setup(dir)
+		if _, err := GeneratedDir(dir, "kamal", "config"); err == nil || !strings.Contains(err.Error(), "must be a plain directory") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("something was written outside the checkout: %v", entries)
+	}
+}
+
+// A compose file that's a symlink is refused, not followed: Mission Control
+// reads a linked repo's compose.yml, and a symlink could point it at a file
+// on the server (security fixes, L10).
+func TestLoadRefusesASymlinkedComposeFile(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret.yml")
+	os.WriteFile(outside, []byte("name: shop\nservices:\n  app:\n    build: .\n"), 0o600)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yml")
+	os.Symlink(outside, path)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "is a symlink") {
+		t.Errorf("a symlinked compose.yml: %v", err)
+	}
+}
+
+// extends is refused without the file it names ever being opened: Mission
+// Control reads linked repos' compose files, and the name could be any file
+// on the server (security fixes, L10). The file is a FIFO, so opening it
+// for reading is visible: a non-blocking writer can then connect.
+func TestExtendsNeverOpensTheOtherFile(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "other.yml")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skip("no FIFOs here:", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yml")
+	os.WriteFile(path, []byte("name: shop\nservices:\n  app:\n    build: .\n    ports: [\"127.0.0.1:3000:3000\"]\n  db2:\n    extends: { file: "+fifo+", service: db }\nx-houston:\n  health: /up\n"), 0o644)
+
+	done := make(chan error, 1)
+	go func() { _, err := Load(path); done <- err }()
+	for {
+		select {
+		case err := <-done:
+			if err == nil || !strings.Contains(err.Error(), "services.db2.extends") {
+				t.Errorf("extends wasn't refused: %v", err)
+			}
+			return
+		case <-time.After(10 * time.Millisecond):
+			if w, err := os.OpenFile(fifo, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+				w.Close()
+				t.Fatal("loading the compose file opened the file extends names")
+			}
 		}
 	}
 }

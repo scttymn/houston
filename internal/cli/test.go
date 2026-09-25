@@ -42,8 +42,8 @@ func runTest(file string, stdout, stderr io.Writer, d docker.Runner) int {
 	if !preflight(d, stderr) {
 		return exitFailure
 	}
-	override := filepath.Join(dir, ".houston", "compose.test.yml")
-	if err := writeGenerated(override, variant.TestOverride(p)); err != nil {
+	override, err := writeGenerated(dir, "compose.test.yml", variant.TestOverride(p))
+	if err != nil {
 		fmt.Fprintf(stderr, "houston: can't write .houston/compose.test.yml: %v\n", err)
 		return exitFailure
 	}

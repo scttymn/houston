@@ -10,7 +10,9 @@ class StorageSetup
 
   HOST = /\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/i
   IPV4 = /\A(?:\d{1,3}\.){3}\d{1,3}\z/
-  ABSOLUTE = %r{\A/(?!.*(?:\A|/)\.\.(?:/|\z))}
+  # Absolute, no .. segment, and no control characters (so no second line
+  # the check wouldn't see).
+  ABSOLUTE = %r{\A/(?!.*(?:\A|/)\.\.(?:/|\z))[^\x00-\x1f]*\z}
   BUCKET = /\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\z/
   ALREADY = /already (exists|initialized)/i
 

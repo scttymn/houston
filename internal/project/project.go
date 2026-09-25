@@ -78,6 +78,14 @@ func Parse(path string, data []byte) (*Project, error) {
 	if err != nil {
 		// compose-go stops at its first error; report it alone rather than
 		// piling Houston's checks on top of a file Docker itself rejects.
+		// Unless the file uses something Houston refuses anyway (extends,
+		// which compose-go is told not to follow): that's what to fix.
+		var keys problems
+		checkTopLevel(raw, &keys)
+		checkServiceKeys(raw, &keys)
+		if len(keys) > 0 {
+			return nil, keys.errors(path)
+		}
 		return nil, problems{{Msg: composeMessage(path, err)}}.errors(path)
 	}
 
@@ -106,6 +114,12 @@ func Parse(path string, data []byte) (*Project, error) {
 }
 
 func readFile(path string, ps *problems) ([]byte, bool) {
+	// Not followed: Mission Control reads linked repos' compose files, and a
+	// symlink could point it at a file on the server.
+	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		ps.add("", "is a symlink; Houston reads only a plain file (point -f at the file itself)")
+		return nil, false
+	}
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		ps.add("", "not found. Run `houston init` to create it")
@@ -214,6 +228,9 @@ func loadCompose(path string, data []byte, raw map[string]any, name string) (*ty
 		o.SkipResolveEnvironment = true
 		o.SkipResolveLabels = true
 		o.SkipInclude = true
+		// Houston refuses extends (checkServiceKeys); compose-go mustn't
+		// read the file it names first.
+		o.SkipExtends = true
 		o.ResolvePaths = false
 		o.SetProjectName(name, true)
 	})
@@ -416,6 +433,29 @@ func checkBuildArgs(path string, v any, ps *problems) {
 			}
 		}
 	}
+}
+
+// GeneratedDir is dir/.houston/<sub...>, where Houston writes its generated
+// files, made as plain directories. A repo could commit .houston (or a
+// directory in it) as a symlink to have Houston write outside the
+// checkout, so a symlink or a file there is refused.
+func GeneratedDir(dir string, sub ...string) (string, error) {
+	path := dir
+	for _, part := range append([]string{".houston"}, sub...) {
+		path = filepath.Join(path, part)
+		info, err := os.Lstat(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			if err := os.Mkdir(path, 0o755); err != nil {
+				return "", err
+			}
+		case err != nil:
+			return "", err
+		case !info.IsDir():
+			return "", fmt.Errorf("%s must be a plain directory (Houston writes its generated files there), not a symlink or a file; remove it from the repo", strings.TrimPrefix(path, dir+"/"))
+		}
+	}
+	return path, nil
 }
 
 // BuildPaths is the app's build context and Dockerfile, resolved (symlinks

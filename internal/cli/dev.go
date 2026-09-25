@@ -50,8 +50,8 @@ func runDev(file string, production bool, stderr io.Writer, d docker.Runner) int
 		projectName = p.Name + "-production"
 		noteBlankOptional(p, values, stderr)
 	}
-	override := filepath.Join(dir, ".houston", name)
-	if err := writeGenerated(override, content); err != nil {
+	override, err := writeGenerated(dir, name, content)
+	if err != nil {
 		fmt.Fprintf(stderr, "houston: can't write .houston/%s: %v\n", name, err)
 		return exitFailure
 	}
@@ -158,11 +158,18 @@ func warnAboutOverrideFiles(dir string, stderr io.Writer) {
 
 // writeGenerated writes a file into .houston/, which ignores itself in git so
 // generated files are never committed, even in repos that never ran init.
-func writeGenerated(path string, data []byte) error {
-	if err := writeAtomic(filepath.Join(filepath.Dir(path), ".gitignore"), []byte("*\n")); err != nil {
-		return err
+// writeGenerated writes .houston/<name> in dir (a plain directory: see
+// project.GeneratedDir), and returns its path.
+func writeGenerated(dir, name string, data []byte) (string, error) {
+	houston, err := project.GeneratedDir(dir)
+	if err != nil {
+		return "", err
 	}
-	return writeAtomic(path, data)
+	if err := writeAtomic(filepath.Join(houston, ".gitignore"), []byte("*\n")); err != nil {
+		return "", err
+	}
+	path := filepath.Join(houston, name)
+	return path, writeAtomic(path, data)
 }
 
 // writeAtomic replaces path with data via a temp file and rename, so a crash

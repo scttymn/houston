@@ -22,3 +22,6 @@ production:
   schedule_backups:
     class: BackupScheduleJob
     schedule: every minute
+  poll_for_changes:
+    class: PollForChangesJob
+    schedule: every 10 minutes

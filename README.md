@@ -171,7 +171,7 @@ houston deploy --server --follow --project app
 
 ## Day to day
 
-- **Push to deploy.** A push rings the webhook. Mission Control reads the repo's refs itself, and a runner fetches the commit, runs `commands.test` (step 00), then deploys. Traffic moves only once the new version passes its health check, so a failed deploy leaves the old version serving.
+- **Push to deploy.** A push rings the webhook. Mission Control reads the repo's refs itself, and a runner fetches the commit, runs `commands.test` (step 00), then deploys. Once a project's pushes arrive, Mission Control also checks its refs every 10 minutes, so a lost webhook only delays a deploy. Traffic moves only once the new version passes its health check, so a failed deploy leaves the old version serving.
 - **A deploy:**
   1. a snapshot of the running version (data and code)
   2. the image built at the commit

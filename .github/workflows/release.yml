@@ -40,7 +40,7 @@ jobs:
         working-directory: mission_control
         run: docker compose run --rm --no-deps -T -e RAILS_ENV=test app sh -c 'bin/rails test && bin/rubocop'
       - name: Installer
-        run: install/test/install-version.sh && install/test/install-bind.sh
+        run: install/test/install-version.sh && install/test/install-bind.sh && install/test/install-ssh-key.sh
 
   images:
     needs: test

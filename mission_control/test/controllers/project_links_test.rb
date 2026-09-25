@@ -387,4 +387,25 @@ class ProjectLinksTest < ActionDispatch::IntegrationTest
       assert_nil Project.find_by(name: "garage")
     end
   end
+
+  # Security fixes, L12: once pushes arrive, a project's webhook secret isn't
+  # shown again, not even by linking the repo again (rotate it to see a new one).
+  test "linking again doesn't show a verified webhook secret" do
+    use_fake_git(FakeGit.new(&responder)) do
+      check
+      read
+      post link_path
+      Project.find_by!(name: "garage").update!(webhook_verified_at: Time.current)
+
+      check
+      read
+      secret = Project.find_by!(name: "garage").webhook_secret
+      assert_select "[data-webhook-secret]", 0
+      assert_no_match secret, response.body
+      assert_select ".link-webhook", /Pushes already arrive/
+
+      post link_path
+      assert_equal secret, Project.find_by!(name: "garage").webhook_secret, "saving keeps the secret the repo's webhook sends"
+    end
+  end
 end

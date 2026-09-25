@@ -74,6 +74,8 @@ mkdir -p /stub && cat > /stub/docker <<'SH' && chmod 755 /stub/docker
 #!/bin/sh
 echo "docker $*" >> /fake/docker.log
 [ "$1" = login ] && echo "stdin: $(cat)" >> /fake/docker.log
+# KILL_ON_PULL: the install is interrupted (TERM) while pulling.
+[ "$1" = pull ] && [ -n "${KILL_ON_PULL:-}" ] && kill -TERM "$PPID" && sleep 1
 exit 0
 SH
 export PATH="/stub:$PATH"
@@ -136,6 +138,11 @@ out=$(LIB_CMD='check_release && fetch_images' lib HOUSTON_VERSION=v0.1.0 HOUSTON
 out=$(LIB_CMD='check_release && fetch_images && echo "image=$IMAGE runner=$RUNNER_IMAGE"' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= 2>&1)
 printf '%s' "$out" | grep -qx "image=ghcr.io/scttymn/houston-mission-control:v0.1.0@$MC_DIGEST runner=ghcr.io/scttymn/houston-runner:v0.1.0@$RUNNER_DIGEST" &&
   ok "compose.yml will name the images by digest" || bad "images: $out"
+
+echo "== interrupted while logged in: logged out anyway"
+: > /fake/docker.log
+out=$(LIB_CMD='check_release && fetch_images' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= HOUSTON_GITHUB_TOKEN=ghp_test KILL_ON_PULL=1 2>&1); code=$?
+[ "$code" != 0 ] && [ "$(tail -1 /fake/docker.log)" = "docker logout ghcr.io" ] && ok "a TERM mid-pull logs out (exit $code)" || bad "exit $code: $(cat /fake/docker.log)"
 
 echo "== an IMAGES that doesn't check out stops the install before anything is pulled"
 refused_images() { # refused_images <want>

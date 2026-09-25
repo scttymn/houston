@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -548,6 +549,7 @@ func (r *run) secrets() string {
 		r.kamalEnv = append(r.kamalEnv, "HOUSTON_S_"+name+"="+carrier)
 		r.kamalArgs = append(r.kamalArgs, "-e", "HOUSTON_S_"+name)
 	}
+	r.report.hide(values)
 	if r.appEnv, err = kamal.AppEnv(r.p, r.generation, values); err != nil {
 		return err.Error()
 	}
@@ -557,14 +559,16 @@ func (r *run) secrets() string {
 func (r *run) writeKamalFiles() error {
 	// .houston/ ignores itself (as houston dev leaves it), so the next deploy
 	// doesn't find the checkout dirty.
-	if err := os.MkdirAll(filepath.Dir(r.kamalDir), 0o755); err != nil {
+	houston, err := project.GeneratedDir(r.dir)
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(r.kamalDir), ".gitignore"), []byte("*\n"), 0o644); err != nil {
+	if err := writeFile(filepath.Join(houston, ".gitignore"), []byte("*\n"), 0o644); err != nil {
 		return err
 	}
-	for _, d := range []string{r.kamalDir, filepath.Join(r.kamalDir, "config"), filepath.Join(r.kamalDir, ".kamal")} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
+	for _, sub := range [][]string{{"kamal"}, {"kamal", "config"}, {"kamal", ".kamal"}} {
+		d, err := project.GeneratedDir(r.dir, sub...)
+		if err != nil {
 			return err
 		}
 		if err := os.Chmod(d, 0o700); err != nil {
@@ -577,17 +581,40 @@ func (r *run) writeKamalFiles() error {
 	return writePrivate(filepath.Join(r.kamalDir, ".kamal", "secrets"), r.secretsFile)
 }
 
-func writePrivate(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+func writePrivate(path string, data []byte) error { return writeFile(path, data, 0o600) }
+
+// writeFile replaces path with a new file, never writing through whatever
+// was there: a symlink the repo committed is removed, not followed.
+func writeFile(path string, data []byte, mode os.FileMode) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 // release runs the release hook in a one-off container of the new image,
 // with the app's environment and volumes, before any traffic moves.
 func (r *run) release(hook string) string {
-	envFile := filepath.Join(r.kamalDir, "release.env")
+	// Outside the checkout, readable only by us, and removed when the hook
+	// ends: a crash doesn't leave the app's secrets in the working tree.
+	f, err := os.CreateTemp("", "houston-release-*.env")
+	if err != nil {
+		return fmt.Sprintf("can't write the release hook's environment: %v", err)
+	}
+	f.Close()
+	envFile := f.Name()
+	defer os.Remove(envFile)
 	var b strings.Builder
 	keys := make([]string, 0, len(r.appEnv))
 	for k := range r.appEnv {
@@ -600,7 +627,6 @@ func (r *run) release(hook string) string {
 	if err := writePrivate(envFile, []byte(b.String())); err != nil {
 		return fmt.Sprintf("can't write the release hook's environment: %v", err)
 	}
-	defer os.Remove(envFile)
 
 	args := []string{"run", "--rm", "--name", r.p.Name + "-release-" + r.sha[:7], "--network", "kamal", "--env-file", envFile}
 	for _, v := range kamal.AppVolumes(r.p, r.generation) {
@@ -737,11 +763,46 @@ type reporter struct {
 	retryEvery time.Duration // between tries of a report that must get through
 	cancel     context.CancelCauseFunc
 
-	mu     sync.Mutex // buf, lastOK, closed
+	mu     sync.Mutex // buf, lastOK, closed, secrets
 	buf    strings.Builder
 	lastOK time.Time
 	closed bool
 	sendMu sync.Mutex // one report at a time, in order
+	// secrets masks secret values in what's sent (hide); nil until they're known.
+	secrets *strings.Replacer
+}
+
+// minHidden: shorter secret values aren't masked, since they'd hide ordinary
+// text ("pw", "true").
+const minHidden = 6
+
+// hide masks each secret's value in the log sent to Mission Control from now
+// on: "[secret NAME]". (A deploy refuses values with line breaks, so a value
+// is one line.) The terminal, the runner's own output, still shows what ran.
+func (r *reporter) hide(values map[string]string) {
+	type secret struct{ value, name string }
+	var found []secret
+	for name, v := range values {
+		if len(v) >= minHidden {
+			found = append(found, secret{v, name})
+		}
+	}
+	// Longest first: a value that contains another is masked whole.
+	sort.Slice(found, func(i, j int) bool {
+		if len(found[i].value) != len(found[j].value) {
+			return len(found[i].value) > len(found[j].value)
+		}
+		return found[i].value < found[j].value
+	})
+	var pairs []string
+	for _, s := range found {
+		pairs = append(pairs, s.value, "[secret "+s.name+"]")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(pairs) > 0 {
+		r.secrets = strings.NewReplacer(pairs...)
+	}
 }
 
 // A log chunk may be at most 256 KiB (Deploy::CHUNK_CAP); stay well under.
@@ -801,6 +862,15 @@ func (r *reporter) send(p mission.Progress) bool {
 	}
 	log := r.buf.String()
 	r.buf.Reset()
+	if r.secrets != nil {
+		// A secret may be split across writes: an unfinished last line
+		// waits for the next report, unless this is the last one.
+		if i := strings.LastIndexByte(log, '\n'); p.Status == "" && i+1 < len(log) && len(log)-(i+1) < chunkSize {
+			r.buf.WriteString(log[i+1:])
+			log = log[:i+1]
+		}
+		log = r.secrets.Replace(log)
+	}
 	r.mu.Unlock()
 
 	for len(log) > chunkSize {

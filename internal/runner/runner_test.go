@@ -101,12 +101,16 @@ func TestRunnerFetchesTheClaimedCommit(t *testing.T) {
 	r, m, g, _ := setup(t)
 	m.jobs = []mission.Job{job(), job()}
 	var keyMode os.FileMode
-	var knownHosts string
+	var knownHosts, keyPath string
+	// Keys an older runner kept in the workspace (security fixes, L4).
+	os.MkdirAll(filepath.Join(r.Workspace, ".keys"), 0o700)
+	os.WriteFile(filepath.Join(r.Workspace, ".keys", "old"), []byte("old key"), 0o600)
 	g.onCall = func(c gitCall) {
 		if c.args[0] == "fetch" {
 			for _, kv := range c.env {
 				if v, ok := strings.CutPrefix(kv, "GIT_SSH_COMMAND="); ok {
 					key := strings.Fields(v)[2]
+					keyPath = key
 					info, _ := os.Stat(key)
 					keyMode = info.Mode().Perm()
 					kh := v[strings.Index(v, "UserKnownHostsFile=")+len("UserKnownHostsFile="):]
@@ -156,6 +160,16 @@ func TestRunnerFetchesTheClaimedCommit(t *testing.T) {
 	}
 	if keyMode != 0o600 || knownHosts != "forgejo ssh-ed25519 AAAAhost\n" {
 		t.Errorf("key mode %o, known_hosts %q", keyMode, knownHosts)
+	}
+	// The key is only on disk while git fetches, and never in the workspace.
+	if strings.HasPrefix(keyPath, r.Workspace) {
+		t.Errorf("the deploy key was written in the workspace: %s", keyPath)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Errorf("the deploy key is still on disk after the fetch: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Workspace, ".keys")); !os.IsNotExist(err) {
+		t.Errorf("an older runner's keys are still in the workspace: %v", err)
 	}
 
 	g.calls = nil

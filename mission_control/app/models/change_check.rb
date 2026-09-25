@@ -20,6 +20,9 @@ class ChangeCheck
 
     wanted = matching(result.refs)
     Project.transaction do
+      # Another check (a webhook, the poll) may have queued since this one
+      # loaded the project: compare with what's seen now, inside the write.
+      @project.reload
       queued = wanted.reject { |ref, sha| @project.seen_refs[ref] == sha }.sort.map { |ref, sha| Deploy.queue!(@project, sha:, ref:) }
       @project.update!(seen_refs: wanted, last_checked_at: Time.current, last_check_error: nil)
       queued

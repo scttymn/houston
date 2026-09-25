@@ -92,14 +92,19 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 
 // fetch puts exactly the claimed commit in <workspace>/<project>, the ref
 // pointing at it. ssh only trusts the host keys Mission Control recorded.
+// The deploy key is on disk only while git runs, in a private temporary
+// directory outside the workspace.
 func (r *Runner) fetch(ctx context.Context, job mission.Job) (string, string) {
 	dir := filepath.Join(r.Workspace, job.Project.Name)
-	keys := filepath.Join(r.Workspace, ".keys")
-	key := filepath.Join(keys, job.Project.Name)
-	knownHosts := key + ".known_hosts"
-	if err := os.MkdirAll(keys, 0o700); err != nil {
+	// Older runners kept every project's key in the workspace.
+	os.RemoveAll(filepath.Join(r.Workspace, ".keys"))
+	keys, err := os.MkdirTemp("", "houston-fetch-")
+	if err != nil {
 		return "", err.Error()
 	}
+	defer os.RemoveAll(keys)
+	key := filepath.Join(keys, "deploy_key")
+	knownHosts := filepath.Join(keys, "known_hosts")
 	deployKey := job.Project.DeployKey
 	if !strings.HasSuffix(deployKey, "\n") {
 		deployKey += "\n"

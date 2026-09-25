@@ -292,12 +292,23 @@ create_user() {
   if [ ! -f "$home/.ssh/id_ed25519" ]; then
     su houston -c "ssh-keygen -q -t ed25519 -N '' -C houston@$(uname -n) -f '$home/.ssh/id_ed25519'"
   fi
-  touch "$home/.ssh/authorized_keys"
-  if ! grep -qF "$(cat "$home/.ssh/id_ed25519.pub")" "$home/.ssh/authorized_keys"; then
-    cat "$home/.ssh/id_ed25519.pub" >>"$home/.ssh/authorized_keys"
+  authorize_key "$home"
+}
+
+# authorize_key <home>: houston's own key may log in only from this server
+# (Kamal connects to 127.0.0.1), without agent or X11 forwarding. An older
+# install's plain line is replaced; other keys are kept.
+authorize_key() {
+  pub=$(cat "$1/.ssh/id_ed25519.pub")
+  entry="from=\"127.0.0.1,::1\",no-agent-forwarding,no-X11-forwarding $pub"
+  keys="$1/.ssh/authorized_keys"
+  touch "$keys"
+  if ! grep -qxF "$entry" "$keys"; then
+    { grep -vF "$pub" "$keys" || true; say "$entry"; } >"$keys.new"
+    mv "$keys.new" "$keys"
   fi
-  chown houston:houston "$home/.ssh/authorized_keys"
-  chmod 600 "$home/.ssh/authorized_keys"
+  chown houston:houston "$keys"
+  chmod 600 "$keys"
 }
 
 random() { head -c 48 /dev/urandom | base64 | tr -d '\n/+='; }
@@ -492,13 +503,17 @@ fetch_images() {
     release_images
     step "Pulling Houston $HOUSTON_VERSION"
     if [ -n "$HOUSTON_GITHUB_TOKEN" ]; then
+      # Interrupted or failed from here on, it still logs out.
+      trap 'docker logout "$HOUSTON_REGISTRY" >/dev/null 2>&1 || true' EXIT
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
       printf '%s' "$HOUSTON_GITHUB_TOKEN" | docker login "$HOUSTON_REGISTRY" -u houston --password-stdin >/dev/null 2>&1 ||
         fail "couldn't log in to $HOUSTON_REGISTRY with HOUSTON_GITHUB_TOKEN (it needs read:packages)"
     fi
     pulled=1
     docker pull --quiet "$IMAGE" >/dev/null && docker pull --quiet "$RUNNER_IMAGE" >/dev/null || pulled=0
     # The token is only for this install: it isn't left in Docker's config.
-    [ -z "$HOUSTON_GITHUB_TOKEN" ] || docker logout "$HOUSTON_REGISTRY" >/dev/null 2>&1 || true
+    [ -z "$HOUSTON_GITHUB_TOKEN" ] || { docker logout "$HOUSTON_REGISTRY" >/dev/null 2>&1 || true; trap - EXIT INT TERM; }
     [ "$pulled" = 1 ] || fail "couldn't pull $IMAGE and $RUNNER_IMAGE"
   else
     sha=$(source_sha)

@@ -57,11 +57,39 @@ class WebhooksControllerTest < ActionDispatch::IntegrationTest
     big = "x" * (5.megabytes + 1)
     assert_no_enqueued_jobs { ring(body: big, headers: { "X-Forgejo-Signature" => hmac(big) }) }
     assert_response :content_too_large
+  ensure
+    Rails.cache.clear
+  end
 
-    Rails.cache.clear # the oversized request counted toward the limit too
-    30.times { ring(headers: { "X-Houston-Token" => WEBHOOK_SECRET }) }
-    assert_response :accepted
-    ring(headers: { "X-Houston-Token" => WEBHOOK_SECRET })
+  # Security fixes, M4: junk from anyone can't block real pushes. Requests
+  # that don't verify are counted per address, before the body is read;
+  # verified ones are counted per project, and never blocked by junk.
+  test "junk is limited per address, and doesn't block real pushes" do
+    junk = { "X-Forwarded-For" => "203.0.113.9", "X-Houston-Token" => "wrong" }
+    WebhooksController::UNVERIFIED.times { ring(headers: junk) }
+    assert_response :not_found
+    ring(headers: junk)
     assert_response :too_many_requests
+    ring(headers: junk.merge("X-Houston-Token" => WEBHOOK_SECRET))
+    assert_response :too_many_requests, "that address is held, even with the secret"
+
+    github = { "X-Forwarded-For" => "140.82.115.1", "X-Hub-Signature-256" => "sha256=#{hmac}" }
+    assert_enqueued_with(job: CheckForChangesJob) { ring(headers: github) }
+    assert_response :accepted, "another address's real push gets through"
+  ensure
+    Rails.cache.clear
+  end
+
+  test "verified pushes are limited per project" do
+    github = { "X-Forwarded-For" => "140.82.115.1", "X-Houston-Token" => WEBHOOK_SECRET }
+    WebhooksController::VERIFIED.times { ring(headers: github) }
+    assert_response :accepted
+    ring(headers: github)
+    assert_response :too_many_requests
+    make_linked_project("other")
+    ring(name: "other", headers: github)
+    assert_response :accepted, "another project has its own count"
+  ensure
+    Rails.cache.clear
   end
 end

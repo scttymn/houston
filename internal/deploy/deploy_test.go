@@ -532,8 +532,14 @@ func TestDeployHappyPath(t *testing.T) {
 	if !strings.Contains(releaseEnv, "DATABASE_URL=postgres://postgres:pw@shop-db/shop\n") || !strings.Contains(releaseEnv, "MODE=production\n") || releaseEnvMode != 0o600 {
 		t.Errorf("release env file (%o):\n%s", releaseEnvMode, releaseEnv)
 	}
-	if _, err := os.Stat(release[slices.Index(release, "--env-file")+1]); !os.IsNotExist(err) {
+	envFile := release[slices.Index(release, "--env-file")+1]
+	if _, err := os.Stat(envFile); !os.IsNotExist(err) {
 		t.Errorf("release env file left behind: %v", err)
+	}
+	// Outside the checkout (security fixes, L5): a crash can't leave the
+	// app's secrets in the repo's working tree.
+	if real, _ := filepath.EvalSymlinks(h.dir); strings.HasPrefix(envFile, h.dir) || strings.HasPrefix(envFile, real) {
+		t.Errorf("release env file is in the checkout: %s", envFile)
 	}
 	if got := h.docker.call("post_deploy").args; !reflect.DeepEqual(got, []string{"exec", "shop-web-" + sha, "sh", "-c", "bin/rails runner 'Cache.warm'"}) {
 		t.Errorf("post_deploy = %v", got)
@@ -1206,5 +1212,30 @@ func TestDeployGeneration2(t *testing.T) {
 	}
 	if inspected == 0 {
 		t.Error("no accessory checked")
+	}
+}
+
+// A committed .houston symlink, or a generated file committed as a symlink,
+// can't make a deploy write outside the checkout (security fixes, L9).
+func TestDeployWritesNothingThroughSymlinks(t *testing.T) {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "authorized_keys")
+	os.WriteFile(target, []byte("mine\n"), 0o600)
+
+	h := newHarness(t, shopCompose)
+	os.Symlink(outside, filepath.Join(h.dir, ".houston"))
+	if code := h.run(); code == 0 || !strings.Contains(h.stderr.String(), "must be a plain directory") {
+		t.Errorf("a .houston symlink: exit %d\n%s", code, h.stderr.String())
+	}
+
+	h = newHarness(t, shopCompose)
+	os.MkdirAll(filepath.Join(h.dir, ".houston", "kamal", "config"), 0o755)
+	os.Symlink(target, filepath.Join(h.dir, ".houston", "kamal", "config", "deploy.yml"))
+	h.run()
+	if data, _ := os.ReadFile(target); string(data) != "mine\n" {
+		t.Errorf("a deploy wrote through a committed symlink: %q", data)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 1 {
+		t.Errorf("something was written outside the checkout: %v", entries)
 	}
 }

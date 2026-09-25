@@ -109,9 +109,14 @@
               <div class="link-webhook__body">
                 <p>Your git host calls this address every time you push. Houston checks the secret, reads the repo's refs itself, and deploys the commit when it matches the deploy rule. Paste both into the repo's webhook settings (GitHub calls the URL "Payload URL").</p>
                 <div class="copy-row"><span class="mono eyebrow">WEBHOOK URL</span><span class="mono copy-row__value">https://hooks.<%= @installation.base_domain %>/<%= found.dig("sync", "name") %></span></div>
-                <div class="copy-row"><span class="mono eyebrow">SECRET</span><span class="mono copy-row__value copy-row__value--dark" data-webhook-secret data-clipboard-target="source"><%= ProjectLinking.new(@link).webhook_secret %></span><button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button></div>
-                <div class="copy-row"><span class="mono eyebrow">SEND</span><span>Push events, as <span class="mono">application/json</span></span></div>
-                <p class="link-webhook__waiting">Waiting for the first push. The secret is shown in full only until one arrives.</p>
+                <% linking = ProjectLinking.new(@link) %>
+                <% if linking.pushes_arrive? %>
+                  <p>Pushes already arrive with this project's secret, so it isn't shown again. Rotate it on the project page to get a new one.</p>
+                <% else %>
+                  <div class="copy-row"><span class="mono eyebrow">SECRET</span><span class="mono copy-row__value copy-row__value--dark" data-webhook-secret data-clipboard-target="source"><%= linking.webhook_secret %></span><button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button></div>
+                  <div class="copy-row"><span class="mono eyebrow">SEND</span><span>Push events, as <span class="mono">application/json</span></span></div>
+                  <p class="link-webhook__waiting">Waiting for the first push. The secret is shown in full only until one arrives.</p>
+                <% end %>
               </div>
             </section>
           <% end %>

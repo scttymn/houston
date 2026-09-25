@@ -28,6 +28,9 @@ class ProjectLinking
     existing&.webhook_secret.presence || @link.webhook_secret.presence
   end
 
+  # Once a project's pushes arrive, Add project doesn't show its secret again.
+  def pushes_arrive? = existing&.webhook_verified_at.present?
+
   def save!
     raise Refused, "Read the file first: Houston saves what it read from the repo." unless @link&.found?
 

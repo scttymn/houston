@@ -275,3 +275,24 @@ func TestTestEnvKeepsOnlyWhatDockerNeeds(t *testing.T) {
 		}
 	}
 }
+
+// A repo that commits .houston as a symlink can't have houston test (or
+// dev) write outside the checkout (docs/plans/security-fixes.md, L9).
+func TestTest_RefusesASymlinkedHoustonDir(t *testing.T) {
+	dir, path := newProject(t, phoenixWithTest, nil)
+	outside := t.TempDir()
+	os.Symlink(outside, filepath.Join(dir, ".houston"))
+	d := &fakeDocker{runResult: byCommand(ok(0), ok(0))}
+
+	code, _, stderr := run(d, "-f", path, "test")
+	if code == 0 || !strings.Contains(stderr, "must be a plain directory") || len(d.runs) != 0 {
+		t.Errorf("exit %d, %d docker runs: %s", code, len(d.runs), stderr)
+	}
+	code, _, stderr = run(d, "-f", path, "dev")
+	if code == 0 || !strings.Contains(stderr, "must be a plain directory") {
+		t.Errorf("dev: exit %d: %s", code, stderr)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("written outside the checkout: %v", entries)
+	}
+}
