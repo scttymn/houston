@@ -76,6 +76,12 @@ Settings shows what Cloudflare actually has: the tunnel and each connection, the
   - Repair's results, the token field and the Repair button
   - No overflow from 320 to 1280 px.
 
+- **The live check (11), 2026-09-24:**
+  - v0.3.0 (edf1f2f) released green. The server updated with the README's version-free `curl …/install.sh | sudo sh`: it found "The latest release is v0.3.0", and Mission Control and both runners run `…:v0.3.0`.
+  - `houston cloudflare` from the laptop and Settings › Cloudflare in the browser both show the tunnel `houston-svnmns` (healthy), its **4 connections (DFW16, MCI01, MCI03, DFW15**, cloudflared 2026.9.1), and the 4 routes with no drift.
+  - Houston's 7 records all point at this server: admin, hooks, equip, valleybuiltcrossfit, estherpictures (.svnmns.com), and estherpictures.com and its www.
+  - The four apps each answered 10 × 200.
+
 ## Later (named, not built)
 - **Several base domains, rather than changing the one.** Your idea: the server serves several (`svnmns.com`, `example.dev`, …), each with its own zone, admin and hooks names, and each project picks one (defaulting to the first). Moving to a new domain becomes gradual: add it, move projects one at a time with both names working, and retire the old one when nothing uses it. It also lets one server host separate groups of apps. The token check and Repair here already work zone by zone, so they carry over.
   - Changing the one base domain in place touches every webhook URL, every CLI login, the admin sign-in, Cloudflare Access, and apps that name their own host (valleybuiltcrossfit's `APP_HOST`, estherpictures' `check_origin`).
