@@ -111,7 +111,7 @@ houston logs --server --project <name>
 1. Add it to `x-houston.domains`, for example `[example.com, www.example.com]`. The app should redirect www to the apex itself, if that's what they want.
 2. **HUMAN, before deploying:**
    - The domain's zone must be in the same Cloudflare account.
-   - Houston's Cloudflare token needs Zone › DNS › Edit on that zone. A token scoped to the base domain only can see the zone but not change it.
+   - Houston's Cloudflare token needs Zone › DNS › Edit on that zone. A token scoped to the base domain only can see the zone but not change it. The human widens it in Cloudflare, or makes a new one and sets it with `houston cloudflare token` (stdin), which checks every zone before replacing the old token.
    - If the domain already has records pointing elsewhere (the old host), the human deletes them when they're ready to switch. Houston won't.
 3. Push. `houston status` shows each domain's state:
    - `DNS OK`: pointed at Houston.
@@ -144,5 +144,6 @@ There's no import command yet. The steps that worked, each with the human's OK:
 ## Reference
 - **Commands:** `houston --help`, and `houston <command> --help` for any command.
 - **Exit codes:** `0` done, `1` failed, `2` usage or a bad compose file. `--follow`: `0` GO, `1` NO-GO.
-- **Machine-readable:** `--json` on `status`, `deploys`, `deploys show`, `snapshots` and `inspect`.
+- **Machine-readable:** `--json` on `status`, `deploys`, `deploys show`, `snapshots`, `inspect` and `cloudflare`.
+- **Cloudflare:** `houston cloudflare` (the tunnel, its routes, Houston's records), and `houston cloudflare repair` after anyone changed the tunnel or records by hand (exit 1 if something couldn't be put back).
 - **Status words:** GO, QUEUED, IN FLIGHT, NO-GO (the previous version still serves), HOLD (something blocks the next deploy, usually a secret with no value), STANDBY (linked, never deployed).

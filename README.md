@@ -185,7 +185,7 @@ x-houston:
 
 On the next deploy, Houston points each one at its tunnel with a proxied CNAME (an apex works through Cloudflare's CNAME flattening), commented `managed-by:houston project:<name>`. For that:
 - **The domain's zone must be in the same Cloudflare account.**
-- **Houston's Cloudflare token needs Zone › DNS › Edit on that zone,** not only on the base domain. With a token scoped to the base domain alone, Houston can see the zone but not change it, and the domain shows CAN'T CHECK.
+- **Houston's Cloudflare token needs Zone › DNS › Edit on that zone,** not only on the base domain. With a token scoped to the base domain alone, Houston can see the zone but not change it, and the domain shows CAN'T CHECK. Widen the token in Cloudflare, or give Houston a new one in **Settings › Cloudflare** (or `houston cloudflare token`, from stdin): it's checked against every zone before it replaces the old one.
 - **An existing record for the name** (the old host's) is never overwritten: the domain shows NO-GO until you delete that record in Cloudflare, then deploy again. So you choose the moment it switches.
 
 `houston status --project app` shows each domain's state: DNS OK, DNS PENDING (the nameservers aren't on Cloudflare yet), ZONE NOT IN CLOUDFLARE YET, or NO-GO with the reason. Redirecting `www` to the apex is up to the app.
@@ -212,6 +212,16 @@ houston restore <snapshot> --confirm app --follow
   4. the old data is removed
 
   A failed restore leaves the running version untouched.
+
+## Cloudflare
+
+**Settings › Cloudflare** shows the tunnel and each of its connections (the data centre, cloudflared's version, since when), the tunnel's live routes (marked DRIFT where they differ from Houston's), and Houston's DNS records in every zone, each with its project and whether it points at this server or another one. From there you can replace the API token (checked first; the old one stays if anything fails) and **Repair**, which pushes the routes and re-points Houston's own records.
+
+```sh
+houston cloudflare                 # the same view (--json)
+houston cloudflare token < token   # a new API token, from stdin
+houston cloudflare repair          # exit 1 if anything couldn't be put back
+```
 
 ## Maintenance page
 
