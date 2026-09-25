@@ -38,19 +38,18 @@ func TestInit_DefaultsRun(t *testing.T) {
 	if out, err := exec.Command(bin, "-f", composeFile, "init").CombinedOutput(); err != nil {
 		t.Fatalf("houston init: %v\n%s", err, out)
 	}
-	// The host side of the published port only: 8080 on this machine may be
-	// taken by something else. The app still listens on 8080 in its container.
+	// No host port (docs/plans/dev-localhost.md): houston dev serves it by
+	// name, so nothing on this machine can collide with it.
 	written, err := os.ReadFile(composeFile)
 	must(t, err)
-	if !bytes.Contains(written, []byte(`ports: ["127.0.0.1:8080:8080"]`)) {
-		t.Fatalf("init didn't write the default ports:\n%s", written)
+	if !bytes.Contains(written, []byte(`expose: ["8080"]`)) || bytes.Contains(written, []byte("ports:")) {
+		t.Fatalf("init didn't write expose, or wrote a host port:\n%s", written)
 	}
-	must(t, os.WriteFile(composeFile, bytes.Replace(written, []byte(`ports: ["127.0.0.1:8080:8080"]`), []byte(`ports: ["127.0.0.1::8080"]`), 1), 0o644))
 
 	// Each variant serves index.html on 8080 inside the app container.
-	serves := func(overrides ...string) {
+	serves := func(project string, overrides ...string) {
 		t.Helper()
-		args := []string{"compose", "-p", name, "--project-directory", dir, "-f", composeFile}
+		args := []string{"compose", "-p", project, "--project-directory", dir, "-f", composeFile}
 		for _, o := range overrides {
 			args = append(args, "-f", o)
 		}
@@ -63,7 +62,7 @@ func TestInit_DefaultsRun(t *testing.T) {
 		}
 		t.Errorf("GET / didn't serve index.html: %v %q", err, body)
 	}
-	dev := func(args ...string) func() {
+	dev := func(project string, args ...string) func() {
 		t.Helper()
 		var out bytes.Buffer
 		cmd := exec.Command(bin, append([]string{"-f", composeFile, "dev"}, args...)...)
@@ -72,7 +71,7 @@ func TestInit_DefaultsRun(t *testing.T) {
 		must(t, cmd.Start())
 		exited := make(chan error, 1)
 		go func() { exited <- cmd.Wait() }()
-		for deadline := time.Now().Add(3 * time.Minute); !serviceRunning(name, "app"); time.Sleep(time.Second) {
+		for deadline := time.Now().Add(3 * time.Minute); !serviceRunning(project, "app"); time.Sleep(time.Second) {
 			select {
 			case err := <-exited:
 				t.Fatalf("houston dev %v exited early (%v):\n%s", args, err, out.String())
@@ -93,8 +92,8 @@ func TestInit_DefaultsRun(t *testing.T) {
 		}
 	}
 
-	stop := dev()
-	serves()
+	stop := dev(name)
+	serves(name)
 	stop()
 
 	// No commands.test: houston test passes without running anything.
@@ -102,11 +101,12 @@ func TestInit_DefaultsRun(t *testing.T) {
 		t.Errorf("houston test: %v\n%s", err, out)
 	}
 
-	stop = dev("--production")
+	// --production is its own Compose project, with volumes of its own.
+	stop = dev(name+"-production", "--production")
 	production := filepath.Join(dir, ".houston", "compose.production.yml")
-	serves(production)
+	serves(name+"-production", production)
 	for _, path := range []string{"/.env", "/.git/HEAD", "/compose.yml", "/Dockerfile"} {
-		out, err := exec.Command("docker", "compose", "-p", name, "--project-directory", dir, "-f", composeFile, "-f", production,
+		out, err := exec.Command("docker", "compose", "-p", name+"-production", "--project-directory", dir, "-f", composeFile, "-f", production,
 			"exec", "-T", "app", "wget", "-qO-", "http://127.0.0.1:8080"+path).CombinedOutput()
 		if err == nil || !bytes.Contains(out, []byte("404")) {
 			t.Errorf("GET %s from the production image: %v %q (want 404)", path, err, out)

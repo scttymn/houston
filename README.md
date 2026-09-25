@@ -105,7 +105,7 @@ houston init
 | File | When it's missing | When it's there |
 |---|---|---|
 | `Dockerfile` (the one `build:` names) | Stages `base`, `dev`, `test` and `production`, serving the folder as a static site on port 8080 | An unnamed final stage is named `production`, and a missing `production`, `dev` or `test` is added, each starting as a copy of production |
-| `compose.yml` | One `app` service built from the Dockerfile, published on `127.0.0.1:8080`, the folder mounted for dev, and an `x-houston` block | A missing `x-houston` block is added; an existing one gets only the required keys it lacks |
+| `compose.yml` | One `app` service built from the Dockerfile, exposing the port it listens on (`expose: ["8080"]`, no host port), the folder mounted for dev, and an `x-houston` block | A missing `x-houston` block is added; an existing one gets only the required keys it lacks |
 | `.dockerignore` | `.git`, `.env`, `.houston` and the build files | Whichever of `.git`, `.env` and `.houston` it doesn't already exclude |
 | `.env` / `.gitignore` | One line per variable the compose file references / `/.env` | Missing lines added |
 
@@ -113,13 +113,13 @@ A static site deploys as `init` writes it. For anything else, **edit the default
 
 - **The `dev` and `test` stages:** your dev tools and dev dependencies, and a command that serves the code `houston dev` mounts. Keep compiled dependencies out of the mounted folder.
 - **The `app` service:**
-  - your port
+  - the port it listens on in its container (`expose`), with no host port: `houston dev` serves it by name
   - the variables the app needs (`${NAME}` when the server must have it, `${NAME:-}` when dev can do without)
   - named volumes for data
   - other services (Postgres, Redis) with their images and volumes
 - **`x-houston`:**
   - `health`: a path that answers 200 without a login
-  - `app_port`: the port production listens on, when it isn't the one in `ports`
+  - `app_port`: the port production listens on, when it isn't the one in `expose`
   - `commands.console`, `commands.test`
   - `hooks.release` (migrations, run before traffic switches)
   - `domains`, `deploy` (which branch or tag deploys), `backups`
@@ -129,11 +129,16 @@ A static site deploys as `init` writes it. For anything else, **edit the default
 Then check it the way the server will run it:
 
 ```sh
-houston dev                  # the dev stage, code mounted; says where it answers once it does
+houston dev                  # the dev stage, code mounted, at http://<name>.localhost
 houston test                 # commands.test in a throwaway copy
-houston dev --production     # the production image, locally, with volumes of its own
+houston dev --production     # the production image, locally, at http://<name>-production.localhost
 houston init                 # again: "already set up" when nothing's missing
 ```
+
+**No ports in dev.** `houston dev` runs one small proxy container, `houston-dev-proxy` (kamal-proxy, as on the server), on port 80. Each `houston dev` registers its app there by name, so any number of projects run side by side with no host ports to pick or collide.
+- **Branches get their own copy.** On another branch (a git worktree, say), the app is at `http://<branch>.<name>.localhost`, as its own Compose project with its own volumes. On its first run, those start as a copy of main's data, taken with main paused for the seconds the copy lasts, so nothing a branch does touches main. `houston dev --fresh` copies main's data again. `--as <name>` names an instance yourself.
+- **A branch's name has two levels**, and some frameworks' development host checks allow only one under `.localhost` (Rails, for one). If the app refuses it, `houston dev` says so; allow `.<name>.localhost` in the app's development settings. For Rails: `config.hosts << ".<name>.localhost"`.
+- `HOUSTON_DEV_PORT=8080` moves the proxy off port 80 (the app is then at `<name>.localhost:8080`), and `--ports` also publishes `compose.yml`'s `ports`, for a tool that needs one.
 
 `docker compose up` still works on its own, since the file is plain Compose.
 

@@ -305,6 +305,7 @@ func TestInit_AddsTheAppPortOnlyWhenNeeded(t *testing.T) {
 		{"no ports", "", true},
 		{"two ports", "    ports: [\"3000:3000\", \"3035:3035\"]\n", true},
 		{"one port", "    ports: [\"3000:3000\"]\n", false},
+		{"one exposed port", "    expose: [\"3000\"]\n", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := app(t, "static", "demo")

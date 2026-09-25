@@ -60,10 +60,15 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 			},
 		}
 	}
-	dev := command("dev", "Run the project locally (dev build target, code mounted)", func() int {
-		return runDev(file, production, stderr, d)
+	var devOpts devOptions
+	dev := command("dev", "Run the project locally at http://<name>.localhost (a branch: <branch>.<name>.localhost), dev build target, code mounted", func() int {
+		devOpts.production = production
+		return runDev(file, devOpts, stderr, d)
 	})
 	dev.Flags().BoolVar(&production, "production", false, "run the production build target instead, with the code baked into the image")
+	dev.Flags().BoolVar(&devOpts.keepPorts, "ports", false, "also publish compose.yml's ports, as plain docker compose does")
+	dev.Flags().StringVar(&devOpts.as, "as", "", "name this instance (<name>.<project>.localhost) instead of taking the git branch")
+	dev.Flags().BoolVar(&devOpts.fresh, "fresh", false, "on a branch: replace its data with a new copy of main's")
 	var consoleOnServer bool
 	consoleCmd := command("console", "Run x-houston.commands.console in the running app (--server: on the server, over SSH on the LAN)", func() int {
 		if consoleOnServer {

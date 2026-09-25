@@ -59,7 +59,7 @@ houston init
   - `production` is the existing final stage.
   - Keep compiled dependencies out of the mounted folder.
 - **The `app` service:**
-  - The published port: check the Dockerfile's `EXPOSE`, since `init` may guess wrong. If the laptop's port is taken, publish another (`127.0.0.1:4001:4000`).
+  - The port it listens on in its container, as `expose: ["<port>"]`: check the Dockerfile's `EXPOSE`, since `init` may guess wrong. No host port: `houston dev` serves the app at `http://<name>.localhost`, so projects never collide.
   - The variables: `${NAME}` when the server must have it, `${NAME:-}` when dev can do without.
   - Non-secret settings as literals (a canonical host, for example).
   - A named volume for every path holding data (databases, uploads).
@@ -74,10 +74,10 @@ Then check it the way the server will run it:
 ```sh
 houston inspect                # what Houston reads; exit 2 names any problem in compose.yml
 houston test                   # exits with the test command's code
-houston dev --production       # the real production image, locally
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:<published port><health path>   # must be 200
+houston dev --production       # the real production image, at http://<name>-production.localhost
+curl -s -o /dev/null -w "%{http_code}\n" http://<name>-production.localhost<health path>   # must be 200
 ```
-Stop `houston dev --production` afterwards (`docker compose -p <name>-production down`). Before committing, **read "Things that bit us"** below, and check each one.
+`houston dev` prints the address once the app passes its health path. Stop `houston dev --production` afterwards (Ctrl-C, or `docker compose -p <name>-production down`). Before committing, **read "Things that bit us"** below, and check each one.
 
 Commit the changes on a branch, and open a PR for the human to review and merge.
 
@@ -139,7 +139,9 @@ There's no import command yet. The steps that worked, each with the human's OK:
   - `SECRET_KEY_BASE` must be at least 64 bytes.
 - **Rails:** `RAILS_MASTER_KEY` should be `${RAILS_MASTER_KEY:-}`, optional, because `houston test` gives required variables random values, and Rails can't decrypt with a random key. Set it on the server before the first deploy.
 - **The health path must not redirect.** Put it ahead of www or HTTPS redirects, since the check hits the container directly over http.
-- **Ports:** `init` may guess the wrong port, and the laptop's port may already be taken. Publishing another locally changes nothing on the server.
+- **Ports:** `init` may guess the wrong port: `expose` must be the one the dev server listens on.
+- **Branch names are two levels deep** (`<branch>.<name>.localhost`). A development host check that allows only one level under `.localhost` refuses them, and `houston dev` says "answered 403 Forbidden". Rails: add `config.hosts << ".<name>.localhost"` to `config/environments/development.rb`. Vite: `server.allowedHosts: [".localhost"]`. Django: `ALLOWED_HOSTS` needs `.localhost`.
+- **An app that builds absolute URLs from a configured host** (mailer links, OAuth callbacks) needs `<name>.localhost` there in development.
 - **A gem that needs a system library** (like `ruby-vips`) may break CI jobs that just boot the app. `require: false` lets the framework load it lazily.
 
 ## Reference

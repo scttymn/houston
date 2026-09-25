@@ -12,7 +12,7 @@ import (
 // every other key as a commented example of what can be set.
 const defaultXHouston = `x-houston:
   health: /
-  # app_port: 8080                # the port the app listens on, when it has no single ` + "`ports`" + ` entry
+  # app_port: 8080                # production's port, when the production image listens elsewhere
   # domains: [example.com]
   # deploy: { on: commit, branch: main }
   # commands:
@@ -24,7 +24,7 @@ const defaultXHouston = `x-houston:
 `
 
 // appPortLine is the app_port init adds when Houston can't tell the port
-// from `ports` (none, or several); indented by the caller.
+// from `expose` or `ports` (none, or several); indented by the caller.
 const appPortLine = "app_port: 8080                # the port your app listens on; change it"
 
 // defaultCompose is the compose.yml `houston init` writes where there's none.
@@ -34,11 +34,11 @@ func defaultCompose(name string) string {
 services:
   app:
     build: { context: ., target: dev }
-    ports: ["127.0.0.1:8080:8080"] # this machine only: in dev the folder is mounted and served
+    expose: ["8080"]               # the port the app listens on; houston dev serves it at http://%s.localhost
     volumes:
       - .:/app
 
-`, name) + defaultXHouston
+`, name, name) + defaultXHouston
 }
 
 // upsertXHouston adds what Houston requires to an existing compose file: a
@@ -59,7 +59,7 @@ func upsertXHouston(src string) (content string, added []string, appended bool, 
 	if key == nil {
 		block := defaultXHouston
 		if needPort {
-			block = strings.Replace(block, "  # app_port: 8080                # the port the app listens on, when it has no single `ports` entry\n", "  "+appPortLine+"\n", 1)
+			block = strings.Replace(block, "  # app_port: 8080                # production's port, when the production image listens elsewhere\n", "  "+appPortLine+"\n", 1)
 		}
 		eol := "\n"
 		if strings.Contains(src, "\r\n") {
@@ -113,8 +113,8 @@ func upsertXHouston(src string) (content string, added []string, appended bool, 
 }
 
 // appNeedsPort reports whether the one service with build: has no single
-// `ports` entry. With no built service, or several, it's false: Parse says
-// which is the problem.
+// `expose` or `ports` entry. With no built service, or several, it's false:
+// Parse says which is the problem.
 func appNeedsPort(top *yaml.Node) bool {
 	_, services := entry(top, "services")
 	if services == nil || services.Kind != yaml.MappingNode {
@@ -129,8 +129,11 @@ func appNeedsPort(top *yaml.Node) bool {
 	if len(built) != 1 {
 		return false
 	}
-	_, ports := entry(built[0], "ports")
-	return ports == nil || ports.Kind != yaml.SequenceNode || len(ports.Content) != 1
+	one := func(key string) bool {
+		_, list := entry(built[0], key)
+		return list != nil && list.Kind == yaml.SequenceNode && len(list.Content) == 1
+	}
+	return !one("expose") && !one("ports")
 }
 
 // entry is a mapping's key and value nodes for name, or nils.

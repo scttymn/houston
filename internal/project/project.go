@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
@@ -25,10 +26,14 @@ import (
 type Project struct {
 	Name       string
 	AppService string
-	AppPort    int
-	Variables  []Variable // sorted by name
-	Houston    Houston
-	Compose    *types.Project
+	// DevPort is the port the app listens on in its container in dev
+	// (expose, or a published port's target); AppPort is production's
+	// (x-houston.app_port, defaulting to DevPort).
+	DevPort   int
+	AppPort   int
+	Variables []Variable // sorted by name
+	Houston   Houston
+	Compose   *types.Project
 }
 
 type VariableKind int
@@ -98,7 +103,17 @@ func Parse(path string, data []byte) (*Project, error) {
 	vars := collectVariables(raw, hosts, &ps)
 
 	h, xPort, hasXPort := parseHouston(raw, filepath.Dir(path), &ps)
-	port := appPort(model, app, xPort, hasXPort, &ps)
+	devPort := containerPort(model, app, hasXPort, &ps)
+	port := devPort
+	if hasXPort {
+		port = xPort
+	}
+	if devPort == 0 {
+		devPort = port
+	}
+	if app != "" && port == 0 && !hasProblem(ps, "services."+app+".expose") {
+		ps.add("services."+app+".expose", "Houston needs the port the app listens on in its container: expose it (`expose: [\"3000\"]`), or set x-houston.app_port")
+	}
 
 	if len(ps) > 0 {
 		return nil, ps.errors(path)
@@ -106,6 +121,7 @@ func Parse(path string, data []byte) (*Project, error) {
 	return &Project{
 		Name:       name,
 		AppService: app,
+		DevPort:    devPort,
 		AppPort:    port,
 		Variables:  vars,
 		Houston:    h,
@@ -347,7 +363,7 @@ func checkTopLevel(raw map[string]any, ps *problems) {
 }
 
 var allowedServiceKeys = map[string]bool{
-	"image": true, "build": true, "environment": true, "volumes": true, "ports": true,
+	"image": true, "build": true, "environment": true, "volumes": true, "ports": true, "expose": true,
 	"depends_on": true, "command": true, "healthcheck": true, "restart": true, "deploy": true,
 }
 
@@ -595,19 +611,42 @@ func HostVar(service string) string {
 	return strings.ToUpper(strings.ReplaceAll(service, "-", "_")) + "_HOST"
 }
 
-func appPort(model *types.Project, app string, xPort int, hasXPort bool, ps *problems) int {
-	if hasXPort {
-		return xPort
-	}
+// containerPort is the port the app service listens on in its container:
+// expose's one entry, else the target of ports' one entry, else 0. With
+// x-houston.app_port set, several published ports are fine.
+func containerPort(model *types.Project, app string, hasXPort bool, ps *problems) int {
 	if app == "" {
 		return 0
 	}
-	ports := model.Services[app].Ports
-	if len(ports) != 1 {
-		ps.add("services."+app+".ports", "Houston needs the port the app listens on: publish exactly one, or set x-houston.app_port")
-		return 0
+	svc := model.Services[app]
+	if len(svc.Expose) > 0 {
+		if len(svc.Expose) != 1 {
+			ps.add("services."+app+".expose", "expose one port: the one the app listens on (Houston routes to it)")
+			return 0
+		}
+		port, err := strconv.Atoi(strings.SplitN(svc.Expose[0], "/", 2)[0])
+		if err != nil || port < 1 || port > 65535 {
+			ps.add("services."+app+".expose", "%q isn't a port", svc.Expose[0])
+			return 0
+		}
+		return port
 	}
-	return int(ports[0].Target)
+	if len(svc.Ports) == 1 {
+		return int(svc.Ports[0].Target)
+	}
+	if len(svc.Ports) > 1 && !hasXPort {
+		ps.add("services."+app+".ports", "Houston needs the port the app listens on: publish one, expose it (`expose: [\"3000\"]`), or set x-houston.app_port")
+	}
+	return 0
+}
+
+func hasProblem(ps problems, path string) bool {
+	for _, p := range ps {
+		if p.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedKeys[V any](m map[string]V) []string {

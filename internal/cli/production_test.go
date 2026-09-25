@@ -34,7 +34,7 @@ func TestDevProduction_RunsCompose(t *testing.T) {
 		if !strings.Contains(atRun, "target: production") {
 			t.Errorf("override when compose ran =\n%s", atRun)
 		}
-		if stderr != "" {
+		if withoutUpLine(stderr) != "" {
 			t.Errorf("unexpected stderr: %s", stderr)
 		}
 	})
@@ -55,11 +55,11 @@ func TestDevProduction_RunsCompose(t *testing.T) {
 			t.Errorf("stderr = %s", stderr)
 		}
 		_, path = newProject(t, app, map[string]string{".env": "APP_KEY=abc\nTOKEN=t\n"})
-		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production"); stderr != "" {
+		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev", "--production"); withoutUpLine(stderr) != "" {
 			t.Errorf("note shown although it's set: %s", stderr)
 		}
 		_, path = newProject(t, app, map[string]string{".env": "APP_KEY=\nTOKEN=t\n"})
-		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev"); stderr != "" {
+		if _, _, stderr := run(&fakeDocker{}, "-f", path, "dev"); withoutUpLine(stderr) != "" {
 			t.Errorf("plain dev shows a production note: %s", stderr)
 		}
 		two := strings.Replace(app, "      MODE: ${MODE:-dev}\n", "      OTHER: ${OTHER:-}\n", 1)

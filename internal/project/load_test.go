@@ -280,7 +280,7 @@ func TestLoad_AppServiceAndPort(t *testing.T) {
 	})
 	t.Run("no ports without x-houston.app_port", func(t *testing.T) {
 		d := doc{appBase: "    build: .\n"}
-		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.ports", "x-houston.app_port")
+		assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.expose", "expose: [\"3000\"]")
 	})
 	t.Run("x-houston.app_port overrides ports", func(t *testing.T) {
 		d := doc{appBase: "    build: .\n    ports: [\"3000:3000\", \"3001:3001\"]\n", xh: "  health: /up\n  app_port: 3001\n"}
@@ -774,4 +774,30 @@ func TestExtendsNeverOpensTheOtherFile(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The port the app listens on in its container, with no host port needed
+// (docs/plans/dev-localhost.md, row 1): expose, or a published port's
+// target. Production's is x-houston.app_port, defaulting to it.
+func TestAppPorts(t *testing.T) {
+	for _, tc := range []struct {
+		name, app, xh string
+		dev, prod     int
+	}{
+		{"expose", "    build: .\n    expose: [\"3000\"]\n", "", 3000, 3000},
+		{"expose, and production elsewhere", "    build: .\n    expose: [\"3000\"]\n", "  app_port: 80\n", 3000, 80},
+		{"a published port's target", "    build: .\n    ports: [\"127.0.0.1:3001:3000\"]\n", "", 3000, 3000},
+		{"equip's shape", "    build: .\n    ports: [\"127.0.0.1:3000:3000\"]\n", "  app_port: 80\n", 3000, 80},
+		{"expose wins over ports", "    build: .\n    expose: [\"4000\"]\n    ports: [\"3000:3000\"]\n", "", 4000, 4000},
+		{"only x-houston.app_port", "    build: .\n", "  app_port: 8080\n", 8080, 8080},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mustLoad(t, writeCompose(t, doc{appBase: tc.app, xh: "  health: /up\n" + tc.xh}.String()))
+			if p.DevPort != tc.dev || p.AppPort != tc.prod {
+				t.Errorf("DevPort %d, AppPort %d; want %d, %d", p.DevPort, p.AppPort, tc.dev, tc.prod)
+			}
+		})
+	}
+	d := doc{appBase: "    build: .\n    expose: [\"3000\", \"3001\"]\n"}
+	assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.expose", "one port")
 }

@@ -3,13 +3,13 @@ name: demo
 services:
   app:
     build: { context: ., target: dev }
-    ports: ["127.0.0.1:8080:8080"] # this machine only: in dev the folder is mounted and served
+    expose: ["8080"]               # the port the app listens on; houston dev serves it at http://demo.localhost
     volumes:
       - .:/app
 
 x-houston:
   health: /
-  # app_port: 8080                # the port the app listens on, when it has no single `ports` entry
+  # app_port: 8080                # production's port, when the production image listens elsewhere
   # domains: [example.com]
   # deploy: { on: commit, branch: main }
   # commands:
