@@ -603,3 +603,39 @@ x-houston:
 		t.Errorf("deploy.yml's label = %v, want %s", got, first)
 	}
 }
+
+// An accessory's limits reach the server too, as they do in houston dev
+// (docker compose applies them to every service): a capped database on a
+// shared server is capped. Its config label changes with them, so a
+// running accessory is rebooted onto the new limit (volumes kept).
+func TestAccessoryResourceLimits(t *testing.T) {
+	compose := func(limits string) *project.Project {
+		return parse(t, `name: shop
+services:
+  app:
+    build: .
+    ports: ["80:80"]
+  db:
+    image: postgres:17
+    healthcheck:
+      test: ["CMD", "pg_isready"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    `+limits+`
+volumes: { pgdata: {} }
+x-houston:
+  health: /up
+`)
+	}
+	capped := compose(`deploy: { resources: { limits: { cpus: "1.5", memory: 2g } } }`)
+	opts, _ := dig(config(t, capped, target), "accessories", "db", "options").(map[string]any)
+	if opts["cpus"] != "1.5" || opts["memory"] != "2g" || opts["health-cmd"] == nil {
+		t.Errorf("db options = %#v, want its limits and its health check", opts)
+	}
+	plain := compose(``)
+	if opts, _ := dig(config(t, plain, target), "accessories", "db", "options").(map[string]any); opts["cpus"] != nil || opts["memory"] != nil {
+		t.Errorf("an uncapped db got limits: %#v", opts)
+	}
+	if AccessoryLabels(capped, 1)["db"] == AccessoryLabels(plain, 1)["db"] {
+		t.Error("adding a limit didn't change the accessory's label, so a running db wouldn't be rebooted onto it")
+	}
+}

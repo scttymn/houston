@@ -40,6 +40,7 @@ vm docker pull -q curlimages/curl:8.16.0 >/dev/null
 echo "== a checkout of the spike fixture, with hooks"
 as_houston "rm -rf ~/spike && cp -r '$repo/internal/kamal/testdata/spike' ~/spike && cd ~/spike &&
   printf '  hooks:\n    release: date >> /data/released\n    post_deploy: touch /www/post_deploy\n' >> compose.yml &&
+  sed -i '/image: postgres:17/a\    deploy: { resources: { limits: { memory: 512m } } }' compose.yml &&
   git init -q -b main && git add -A && git -c user.name=e2e -c user.email=e2e@houston.test commit -qm 'spike'"
 commit() { as_houston "cd ~/spike && $1 && git add -A && git -c user.name=e2e -c user.email=e2e@houston.test commit -qm '$2' && git rev-parse HEAD"; }
 deploy() { as_houston 'cd ~/spike && houston deploy' >"$1" 2>&1; }
@@ -73,6 +74,7 @@ through_proxy spike.houston.test /env/lookup | grep -q Address && ok "spike-db r
 [ -n "$(vm docker run --rm -v spike_data:/d busybox:1.37 cat /d/released 2>/dev/null)" ] && ok "the release hook wrote to the data volume" || bad "release hook"
 [ "$(through_proxy spike.houston.test /post_deploy /dev/null '%{http_code}')" = 200 ] && ok "post_deploy ran in the new container" || bad "post_deploy"
 as_houston 'cd ~/spike && git status --porcelain' | grep -q . && bad "the checkout is dirty after a deploy" || ok "the checkout stays clean (.houston ignores itself)"
+[ "$(vm docker inspect spike-db --format '{{.HostConfig.Memory}}' 2>&1)" = 536870912 ] && ok "the database accessory runs with its memory limit (512m)" || bad "spike-db's memory limit: $(vm docker inspect spike-db --format '{{.HostConfig.Memory}}' 2>&1)"
 
 echo "== a zero-downtime redeploy"
 second=$(commit 'echo two > version.txt' 'two')

@@ -287,7 +287,7 @@ func (g *generator) config(t Target) deployYAML {
 			Cmd:     cmd,
 			Env:     e,
 			Volumes: volumes,
-			Options: g.healthOptions(path+".healthcheck", svc.HealthCheck),
+			Options: withLimits(g.healthOptions(path+".healthcheck", svc.HealthCheck), svc),
 		}
 		// Kamal skips booting an accessory whose container exists (spike
 		// S10); houston deploy compares this label to spot a changed config.
@@ -517,6 +517,23 @@ func (g *generator) volumes(svc types.ServiceConfig) []string {
 		out = append(out, spec)
 	}
 	return out
+}
+
+// withLimits adds svc's resource limits to an accessory's options, as the
+// app's get them: docker compose applies them to every service, so houston
+// dev and the server agree.
+func withLimits(opts map[string]string, svc types.ServiceConfig) map[string]string {
+	l := limits(svc)
+	if len(l) == 0 {
+		return opts
+	}
+	if opts == nil {
+		opts = map[string]string{}
+	}
+	for k, v := range l {
+		opts[k] = v
+	}
+	return opts
 }
 
 func limits(svc types.ServiceConfig) map[string]string {
