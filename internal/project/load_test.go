@@ -613,3 +613,82 @@ func TestRepoComposeFilesLoad(t *testing.T) {
 		t.Errorf("found no compose.yml with x-houston; the walk is wrong")
 	}
 }
+
+// A build stays inside the repo (security fixes, batch 1): only a relative
+// context and dockerfile, a target and args with values; nothing that reaches
+// the runner's files, network or SSH agent, and no build arg left for Compose
+// to fill in from the runner's environment.
+func TestBuildStaysInTheRepo(t *testing.T) {
+	compose := func(build string) string {
+		return "name: shop\nservices:\n  app:\n    build: " + build + "\n    ports: [\"127.0.0.1:3000:3000\"]\nx-houston:\n  health: /up\n"
+	}
+	for _, build := range []string{`.`, `{ context: ., target: production }`, `{ context: app, dockerfile: docker/Dockerfile.prod, args: { RUBY: "3.4" } }`, `{ context: ., args: [ "NODE_ENV=production" ] }`} {
+		mustLoad(t, writeCompose(t, compose(build)))
+	}
+	for _, tc := range []struct{ build, path, want string }{
+		{`/home/houston/.ssh`, "services.app.build.context", "inside the repo"},
+		{`{ context: /home/houston/.ssh }`, "services.app.build.context", "inside the repo"},
+		{`{ context: ../other }`, "services.app.build.context", "inside the repo"},
+		{`{ context: ., dockerfile: ../../Dockerfile }`, "services.app.build.dockerfile", "inside the repo"},
+		{`{ context: ., dockerfile: /etc/Dockerfile }`, "services.app.build.dockerfile", "inside the repo"},
+		{`{ context: ., additional_contexts: { k: /home/houston/.ssh } }`, "services.app.build.additional_contexts", "can't"},
+		{`{ context: ., ssh: [ default ] }`, "services.app.build.ssh", "can't"},
+		{`{ context: ., network: host }`, "services.app.build.network", "can't"},
+		{`{ context: ., dockerfile_inline: "FROM scratch" }`, "services.app.build.dockerfile_inline", "can't"},
+		{`{ context: ., args: [ HOUSTON_TOKEN ] }`, "services.app.build.args", "a value"},
+		{`{ context: ., args: { HOUSTON_TOKEN: } }`, "services.app.build.args", "a value"},
+	} {
+		problems := loadProblems(t, writeCompose(t, compose(tc.build)))
+		found := false
+		for _, p := range problems {
+			if p.Path == tc.path && strings.Contains(p.Msg, tc.want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("build: %s — want a problem at %s mentioning %q, got %+v", tc.build, tc.path, tc.want, problems)
+		}
+	}
+}
+
+// The context and Dockerfile resolve (symlinks too) inside the checkout, or
+// nothing is built: a repo's symlink can't point the build at the runner.
+func TestBuildPathsStayInsideTheCheckout(t *testing.T) {
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "id_ed25519"), []byte("secret"), 0o600)
+	os.WriteFile(filepath.Join(outside, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
+
+	repo := func(build string, links map[string]string) (*Project, string) {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
+		for name, target := range links {
+			if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		path := filepath.Join(dir, "compose.yml")
+		os.WriteFile(path, []byte("name: shop\nservices:\n  app:\n    build: "+build+"\n    ports: [\"127.0.0.1:3000:3000\"]\nx-houston:\n  health: /up\n"), 0o644)
+		return mustLoad(t, path), dir
+	}
+
+	p, dir := repo(`.`, nil)
+	context, dockerfile, err := p.BuildPaths(dir)
+	real, _ := filepath.EvalSymlinks(dir)
+	if err != nil || context != real || dockerfile != filepath.Join(real, "Dockerfile") {
+		t.Errorf("a plain build: %q %q %v", context, dockerfile, err)
+	}
+	for name, tc := range map[string]struct {
+		build string
+		links map[string]string
+	}{
+		"a context symlinked out":    {`{ context: ctx }`, map[string]string{"ctx": outside}},
+		"a Dockerfile symlinked out": {`{ context: ., dockerfile: Dockerfile.link }`, map[string]string{"Dockerfile.link": filepath.Join(outside, "Dockerfile")}},
+		"a missing context":          {`{ context: nope }`, nil},
+		"a dangling Dockerfile link": {`{ context: ., dockerfile: Dockerfile.link }`, map[string]string{"Dockerfile.link": filepath.Join(outside, "nope")}},
+	} {
+		p, dir := repo(tc.build, tc.links)
+		if _, _, err := p.BuildPaths(dir); err == nil {
+			t.Errorf("%s: built anyway", name)
+		}
+	}
+}

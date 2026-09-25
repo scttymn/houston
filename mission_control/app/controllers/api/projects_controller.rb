@@ -19,6 +19,7 @@ class Api::ProjectsController < Api::BaseController
     sync = ProjectSync.new(payload)
     return render json: { error: "compose.yml doesn't match what Houston expects", errors: sync.errors }, status: :unprocessable_entity unless sync.valid?
     return check(sync, payload) if payload.key?("restore_deploy")
+    return if payload.key?("claimed_deploy") && !claim_matches?(payload)
 
     if (existing = Project.find_by(name: payload["name"]))
       # A restore owns the project's config until it's done: its safety
@@ -49,6 +50,27 @@ class Api::ProjectsController < Api::BaseController
   end
 
   private
+    # A runner's sync names the deploy it claimed, with that deploy's token:
+    # the repo's compose.yml must name the claimed deploy's project, so one
+    # repo can't sync as another project.
+    def claim_matches?(payload)
+      claimed = Deploy.find_by(id: payload["claimed_deploy"])
+      unless claimed
+        render json: { error: "no such deploy" }, status: :unprocessable_entity
+        return false
+      end
+      unless claimed.owned_by?(request.headers["X-Houston-Deploy-Token"])
+        render json: { error: "that token isn't this deploy's" }, status: :forbidden
+        return false
+      end
+      unless claimed.project.name == payload["name"]
+        render json: { error: "compose.yml names project #{payload["name"].inspect}, but deploy ##{claimed.number} is for #{claimed.project.name}; nothing was synced" },
+               status: :unprocessable_entity
+        return false
+      end
+      true
+    end
+
     def check(sync, payload)
       restore = Deploy.find_by(id: payload["restore_deploy"])
       return render json: { error: "no such restore" }, status: :unprocessable_entity unless restore&.restore? && restore.project.name == payload["name"]

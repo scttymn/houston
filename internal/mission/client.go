@@ -102,6 +102,9 @@ type SyncRequest struct {
 	// with the restore and applied at its switch; nothing is stored now.
 	RestoreDeploy int    `json:"restore_deploy,omitempty"`
 	DeployToken   string `json:"-"`
+	// ClaimedDeploy: a runner's deploy, whose project this compose.yml must
+	// be (DeployToken proves the deploy is the caller's).
+	ClaimedDeploy int `json:"claimed_deploy,omitempty"`
 	// ServingGeneration is the data generation of the app kamal-proxy
 	// routes to, as a runner read it (0: none, or it can't say). Mission
 	// Control catches up to it after a restore that switched but never said so.
@@ -162,7 +165,7 @@ type DomainState struct {
 func (c *Client) Sync(ctx context.Context, req SyncRequest) (SyncResult, error) {
 	var res SyncResult
 	var headers map[string]string
-	if req.RestoreDeploy != 0 {
+	if req.RestoreDeploy != 0 || req.ClaimedDeploy != 0 {
 		headers = map[string]string{"X-Houston-Deploy-Token": req.DeployToken}
 	}
 	status, body, err := c.do(ctx, http.MethodPost, "/api/projects/sync", headers, req)

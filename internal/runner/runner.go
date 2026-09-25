@@ -84,6 +84,7 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 	o.Ref = job.Ref
 	claimed := job.Deploy
 	o.Claimed = &claimed
+	o.Project = job.Project.Name
 	o.RunTests = true
 	r.Deploy(ctx, o)
 	return true, nil

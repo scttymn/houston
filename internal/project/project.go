@@ -351,11 +351,119 @@ func checkServiceKeys(raw map[string]any, ps *problems) {
 				ps.add(base+".env_file", "write `NAME: ${NAME}` under environment instead, so Houston knows the app needs NAME on the server")
 			case k == "deploy":
 				checkDeployKeys(base+".deploy", keys[k], ps)
+			case k == "build":
+				checkBuild(base+".build", keys[k], ps)
 			case !allowedServiceKeys[k]:
 				ps.add(base+"."+k, "Houston can't run `%s` on the server", k)
 			}
 		}
 	}
+}
+
+// allowedBuildKeys: a build reaches only the repo's own files. No
+// additional_contexts, ssh, secrets or network (they reach the runner), no
+// dockerfile_inline, and every build arg has its value in the file.
+var allowedBuildKeys = map[string]bool{"context": true, "dockerfile": true, "target": true, "args": true}
+
+func checkBuild(path string, v any, ps *problems) {
+	switch build := v.(type) {
+	case string:
+		checkInsideRepo(path+".context", build, ps)
+	case map[string]any:
+		for _, k := range sortedKeys(build) {
+			switch {
+			case !allowedBuildKeys[k]:
+				ps.add(path+"."+k, "Houston can't use `build.%s`: a build reaches only the repo's own files (context, dockerfile, target and args)", k)
+			case k == "context" || k == "dockerfile":
+				s, _ := build[k].(string)
+				checkInsideRepo(path+"."+k, s, ps)
+			case k == "args":
+				checkBuildArgs(path+".args", build[k], ps)
+			}
+		}
+	}
+}
+
+// checkInsideRepo: a relative path that stays in the repo (no .., no ~, no
+// URL). Symlinks are checked when the build runs (BuildPaths).
+func checkInsideRepo(path, value string, ps *problems) {
+	clean := filepath.Clean(value)
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") || strings.Contains(value, "://") || strings.Contains(value, "@") ||
+		clean == ".." || strings.HasPrefix(clean, "../") {
+		ps.add(path, "must be a path inside the repo (relative, without ..), not %q", value)
+	}
+}
+
+// checkBuildArgs: NAME=value or NAME: value. A bare NAME is filled in from
+// the environment Compose runs in, which on a runner is Houston's.
+func checkBuildArgs(path string, v any, ps *problems) {
+	bare := func() {
+		ps.add(path, "each build arg needs a value in the file (NAME=value): a bare NAME is filled in from the server's environment")
+	}
+	switch args := v.(type) {
+	case []any:
+		for _, a := range args {
+			if s, _ := a.(string); !strings.Contains(s, "=") {
+				bare()
+				return
+			}
+		}
+	case map[string]any:
+		for _, k := range sortedKeys(args) {
+			if args[k] == nil {
+				bare()
+				return
+			}
+		}
+	}
+}
+
+// BuildPaths is the app's build context and Dockerfile, resolved (symlinks
+// too) and checked to be inside the checkout at dir. A deploy and houston
+// test build nothing else: a repo can't point the build at the runner's files.
+func (p *Project) BuildPaths(dir string) (context, dockerfile string, err error) {
+	build := p.Compose.Services[p.AppService].Build
+	ctx, file := ".", "Dockerfile"
+	if build != nil && build.Context != "" {
+		ctx = build.Context
+	}
+	if build != nil && build.Dockerfile != "" {
+		file = build.Dockerfile
+	}
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", "", err
+	}
+	inside := func(what, path string) (string, error) {
+		real, err := filepath.EvalSymlinks(path)
+		if errors.Is(err, fs.ErrNotExist) && what == "Dockerfile" {
+			// A missing Dockerfile fails the build itself; a dangling symlink
+			// (it could be made to point anywhere) is refused.
+			if _, lerr := os.Lstat(path); lerr != nil {
+				return path, nil
+			}
+		}
+		if err != nil {
+			return "", fmt.Errorf("the build %s %s isn't in the checkout", what, strings.TrimPrefix(path, dir+"/"))
+		}
+		if rel, err := filepath.Rel(root, real); err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+			return "", fmt.Errorf("the build %s %s resolves outside the checkout (to %s); nothing was built", what, strings.TrimPrefix(path, dir+"/"), real)
+		}
+		return real, nil
+	}
+	if !filepath.IsAbs(ctx) {
+		ctx = filepath.Join(dir, ctx)
+	}
+	if context, err = inside("context", ctx); err != nil {
+		return "", "", err
+	}
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(context, file)
+	}
+	if dockerfile, err = inside("Dockerfile", file); err != nil {
+		return "", "", err
+	}
+	return context, dockerfile, nil
 }
 
 // checkDeployKeys allows only deploy.resources.limits.{cpus,memory}.

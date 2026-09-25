@@ -33,10 +33,15 @@ func runTest(file string, stdout, stderr io.Writer, d docker.Runner) int {
 		fmt.Fprintln(stdout, "houston: no x-houston.commands.test; nothing to run")
 		return 0
 	}
+	dir := filepath.Dir(abs)
+	// The build stays in the checkout (symlinks included), as a deploy's does.
+	if _, _, err := p.BuildPaths(dir); err != nil {
+		fmt.Fprintf(stderr, "houston test: %v\n", err)
+		return exitUsage
+	}
 	if !preflight(d, stderr) {
 		return exitFailure
 	}
-	dir := filepath.Dir(abs)
 	override := filepath.Join(dir, ".houston", "compose.test.yml")
 	if err := writeGenerated(override, variant.TestOverride(p)); err != nil {
 		fmt.Fprintf(stderr, "houston: can't write .houston/compose.test.yml: %v\n", err)
@@ -68,20 +73,14 @@ var dockersOwn = map[string]bool{
 	"DOCKER_CONFIG": true, "DOCKER_CERT_PATH": true, "DOCKER_TLS_VERIFY": true,
 }
 
-// testEnv is Houston's environment minus every variable the compose file
-// references, plus a random value for each required secret. Service hosts and
-// optional variables stay unset so their defaults apply. Docker's own
-// variables always pass through.
+// testEnv is only Docker's own variables from Houston's environment, plus a
+// random value for each required secret. Nothing else passes through: on a
+// runner that environment holds HOUSTON_TOKEN, which a repo's build must never
+// see. Service hosts and optional variables stay unset so their defaults apply.
 func testEnv(environ []string, vars []project.Variable) []string {
-	referenced := map[string]bool{}
-	for _, v := range vars {
-		if !dockersOwn[v.Name] {
-			referenced[v.Name] = true
-		}
-	}
 	var env []string
 	for _, kv := range environ {
-		if name, _, _ := strings.Cut(kv, "="); !referenced[name] {
+		if name, _, _ := strings.Cut(kv, "="); dockersOwn[name] {
 			env = append(env, kv)
 		}
 	}

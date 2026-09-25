@@ -402,6 +402,7 @@ type harness struct {
 	exec    *fakeExec
 	claimed *mission.Deploy
 	tests   bool
+	project string // the claimed job's project, as a runner passes it
 	// snapshotEvery: how often the pre-deploy snapshot is polled.
 	snapshotEvery time.Duration
 }
@@ -442,6 +443,9 @@ func newHarness(t *testing.T, compose string) *harness {
 	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(compose), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// The accessories' running labels match deploy.yml unless a test says not.
 	p, err := project.Load(filepath.Join(dir, "compose.yml"))
 	if err != nil {
@@ -473,6 +477,7 @@ func (h *harness) run() int {
 		HeartbeatEvery: h.timing.HeartbeatEvery,
 		FenceAfter:     h.timing.FenceAfter,
 		Claimed:        h.claimed,
+		Project:        h.project,
 		RunTests:       h.tests,
 		Houston:        "/usr/local/bin/houston",
 		SnapshotEvery:  h.snapshotEvery,
@@ -551,6 +556,52 @@ func TestDeployHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(h.mission.log(), "output of build") || !strings.Contains(h.stdout.String(), "output of build") {
 		t.Error("step output should reach both the terminal and the deploy's log")
+	}
+}
+
+// A runner deploys the project it claimed: a compose.yml naming another
+// project stops before anything is synced (security fixes, batch 1).
+func TestDeployRefusesAComposeForAnotherProject(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.claimed = &mission.Deploy{ID: 9, Number: 4, Token: "t"}
+	h.project = "equip"
+	if code := h.run(); code == 0 {
+		t.Fatalf("deployed shop for a claimed equip deploy")
+	}
+	if slices.Contains(h.mission.calls, "sync") || len(h.docker.whats()) > 0 {
+		t.Errorf("synced or built anyway: %v %v", h.mission.calls, h.docker.whats())
+	}
+	if f := h.mission.final(); f.Status != "no_go" || !strings.Contains(f.Error, `names project "shop"`) || !strings.Contains(f.Error, "equip") {
+		t.Errorf("final = %+v", f)
+	}
+}
+
+// A claimed deploy's sync carries the claim, so Mission Control can check
+// the compose.yml is that deploy's project.
+func TestClaimedDeploySyncCarriesTheClaim(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.claimed = &mission.Deploy{ID: 9, Number: 4, Token: "t"}
+	h.project = "shop"
+	h.run()
+	if len(h.mission.syncs) == 0 || h.mission.syncs[0].ClaimedDeploy != 9 || h.mission.syncs[0].DeployToken != "t" {
+		t.Errorf("syncs = %+v", h.mission.syncs)
+	}
+}
+
+// A context symlinked out of the checkout builds nothing.
+func TestDeployRefusesABuildOutsideTheCheckout(t *testing.T) {
+	h := newHarness(t, strings.Replace(shopCompose, "build: { context: ., target: dev }", "build: { context: ctx, target: dev }", 1))
+	if err := os.Symlink(t.TempDir(), filepath.Join(h.dir, "ctx")); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.run(); code == 0 {
+		t.Fatal("built a context outside the checkout")
+	}
+	if slices.Contains(h.docker.whats(), "build") {
+		t.Errorf("docker build ran: %v", h.docker.whats())
+	}
+	if f := h.mission.final(); f.Status != "no_go" || !strings.Contains(f.Error, "outside") {
+		t.Errorf("final = %+v", f)
 	}
 }
 

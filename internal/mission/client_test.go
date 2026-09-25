@@ -298,9 +298,23 @@ func TestRestoreSyncCarriesItsToken(t *testing.T) {
 		}
 		io.WriteString(w, `{"project":"shop","host":"shop.svnmns.com","generation":1}`)
 	})
+	var claims []any
+	c = server(t, func(w http.ResponseWriter, r *http.Request, body map[string]any) {
+		tokens = append(tokens, r.Header.Get("X-Houston-Deploy-Token"))
+		claims = append(claims, body["claimed_deploy"])
+		if _, sent := body["DeployToken"]; sent {
+			t.Errorf("the token is in the body: %v", body)
+		}
+		io.WriteString(w, `{"project":"shop","host":"shop.svnmns.com","generation":1}`)
+	})
 	c.Sync(context.Background(), SyncRequest{Name: "shop", RestoreDeploy: 9, DeployToken: "tok"})
 	c.Sync(context.Background(), SyncRequest{Name: "shop"})
-	if !reflect.DeepEqual(tokens, []string{"tok", ""}) {
+	// A runner's claimed deploy proves its claim the same way (security fixes, batch 1).
+	c.Sync(context.Background(), SyncRequest{Name: "shop", ClaimedDeploy: 12, DeployToken: "claim-tok"})
+	if !reflect.DeepEqual(tokens, []string{"tok", "", "claim-tok"}) {
 		t.Errorf("tokens %q", tokens)
+	}
+	if claims[2] != float64(12) || claims[1] != nil {
+		t.Errorf("claimed_deploy %v", claims)
 	}
 }

@@ -421,6 +421,34 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_equal before, project.reload.attributes.except("updated_at")
   end
 
+  # A runner's sync names the deploy it claimed (security audit H1): a
+  # repo whose compose.yml names another project can't rewrite that
+  # project, and only the claim's own token counts.
+  test "a claimed deploy's sync is for its own project" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional))
+    victim = Project.find_by!(name: "equip")
+    before = victim.reload.attributes.except("updated_at")
+    attacker = make_project("other")
+    claimed, token, = Deploy.start!(attacker, sha: "c" * 40, ref: "refs/heads/main")
+
+    sync(equip_payload(variables: optional, services: %w[app evil], claimed_deploy: claimed.id), token:)
+    assert_response :unprocessable_entity
+    assert_match "deploy ##{claimed.number} is for other", json["error"]
+    assert_equal before, victim.reload.attributes.except("updated_at")
+
+    { "no token" => nil, "another token" => "not-its-token" }.each do |name, t|
+      sync(equip_payload(name: "other", variables: optional, claimed_deploy: claimed.id), token: t)
+      assert_response :forbidden, name
+    end
+    sync(equip_payload(name: "other", variables: optional, claimed_deploy: 0), token:)
+    assert_response :unprocessable_entity
+
+    sync(equip_payload(name: "other", variables: optional, claimed_deploy: claimed.id), token:)
+    assert_response :success
+    assert_equal "other", json["project"]
+  end
+
   # What serves is the truth: a restore that switched traffic but never got
   # to say so is caught up by the next sync, deploy or restore. Which restore
   # it was is what kamal-proxy routes to: its generation and its commit.

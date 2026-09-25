@@ -83,6 +83,9 @@ type Options struct {
 	// Claimed is a deploy houston runner already claimed: it isn't started
 	// again, and every failure finishes it NO-GO.
 	Claimed *mission.Deploy
+	// Project is the claimed job's project: a compose.yml naming another
+	// is refused before anything is synced or built.
+	Project string
 	// RunTests runs x-houston.commands.test first (step 00) with Houston.
 	RunTests bool
 	Houston  string // this binary, for houston test
@@ -116,6 +119,10 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	if err != nil {
 		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
 	}
+	if o.Project != "" && p.Name != o.Project {
+		msg := fmt.Sprintf("compose.yml names project %q, but this deploy is for %q; nothing was synced or built", p.Name, o.Project)
+		return early(exitUsage, "houston deploy: "+msg+"\n", msg)
+	}
 	abs, err := filepath.Abs(o.File)
 	if err != nil {
 		return early(exitUsage, fmt.Sprintf("houston deploy: %v\n", err), err.Error())
@@ -130,6 +137,9 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	req := mission.RequestFor(p)
 	if restore {
 		req.RestoreDeploy, req.DeployToken = o.Claimed.ID, o.Claimed.Token
+	} else if o.Claimed != nil {
+		// Mission Control checks the claimed deploy is this project's.
+		req.ClaimedDeploy, req.DeployToken = o.Claimed.ID, o.Claimed.Token
 	}
 	if serving, known := routed(d.Docker, p.Name); known {
 		req.ServingGeneration, req.ServingSHA = serving.generation, serving.sha
@@ -489,19 +499,11 @@ func first(s string, n int) string {
 // build builds the app's image at the commit and pushes it to Houston's
 // registry. Returns why it couldn't.
 func (r *run) build() string {
-	build := r.p.Compose.Services[r.p.AppService].Build
-	context, dockerfile := ".", "Dockerfile"
-	if build != nil && build.Context != "" {
-		context = build.Context
-	}
-	if build != nil && build.Dockerfile != "" {
-		dockerfile = build.Dockerfile
-	}
-	if !filepath.IsAbs(context) {
-		context = filepath.Join(r.dir, context)
-	}
-	if !filepath.IsAbs(dockerfile) {
-		dockerfile = filepath.Join(context, dockerfile)
+	// Only the checkout: a context or Dockerfile resolving outside it
+	// (a symlink to the runner's files) builds nothing.
+	context, dockerfile, err := r.p.BuildPaths(r.dir)
+	if err != nil {
+		return err.Error()
 	}
 	// Kamal only deploys images labelled service=<name> (its own builder
 	// adds the label; Houston builds the image itself).

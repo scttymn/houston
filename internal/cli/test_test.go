@@ -256,3 +256,22 @@ func TestTest_KeepsDockersOwnEnvironment(t *testing.T) {
 		t.Errorf("app secrets must still get throwaway values")
 	}
 }
+
+// houston test runs the repo's build with only what Docker needs from this
+// environment: a runner's HOUSTON_TOKEN (or anything else) never reaches a
+// build arg or a service (security fixes, batch 1).
+func TestTestEnvKeepsOnlyWhatDockerNeeds(t *testing.T) {
+	env := envMap(testEnv([]string{"PATH=/usr/bin", "HOME=/home/houston", "DOCKER_HOST=unix:///var/run/docker.sock",
+		"DOCKER_CONFIG=/var/lib/houston/runners/houston-runner-1/.docker", "HOUSTON_TOKEN=runner-secret", "HOUSTON_URL=http://mission-control:80",
+		"AWS_SECRET_ACCESS_KEY=x", "SECRET_KEY_BASE=from-the-runner"}, nil))
+	for _, name := range []string{"PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG"} {
+		if _, ok := env[name]; !ok {
+			t.Errorf("%s dropped; Docker needs it", name)
+		}
+	}
+	for _, name := range []string{"HOUSTON_TOKEN", "HOUSTON_URL", "AWS_SECRET_ACCESS_KEY", "SECRET_KEY_BASE"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("%s reached the test build", name)
+		}
+	}
+}
