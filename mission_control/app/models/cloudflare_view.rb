@@ -10,10 +10,54 @@ class CloudflareView
 
   TIMEOUT = 5
   PAGE = 100
+  # Settings shows the last answer at once, and asks again once it's this old.
+  STALE_AFTER = 5.minutes
 
-  attr_reader :tunnel, :connections, :routes, :missing_routes, :records, :problems
+  attr_reader :tunnel, :connections, :routes, :missing_routes, :records, :problems, :checked_at
 
-  def self.fetch(installation = Installation.current) = new(installation).tap(&:load)
+  # Asks Cloudflare now. A complete answer is kept for Settings (last); one
+  # with problems is shown over the last good one, which stays kept.
+  def self.fetch(installation = Installation.current)
+    view = new(installation).tap(&:load)
+    if view.problems.empty?
+      Rails.cache.write(cache_key(installation), { "view" => view.to_h.as_json, "checked_at" => Time.current.iso8601 })
+    elsif (kept = last(installation))
+      view.fill_from(kept)
+    end
+    view
+  end
+
+  # The last complete answer, or nil. No call to Cloudflare.
+  def self.last(installation = Installation.current)
+    kept = Rails.cache.read(cache_key(installation)) or return
+    new(installation).tap { |v| v.restore(kept["view"], Time.zone.parse(kept["checked_at"])) }
+  end
+
+  # After the token or the routes changed, the next look asks Cloudflare.
+  def self.forget(installation = Installation.current) = Rails.cache.delete(cache_key(installation))
+
+  def self.cache_key(installation) = [ "cloudflare-view", installation.tunnel_id ]
+  private_class_method :cache_key
+
+  def stale? = checked_at.nil? || checked_at < STALE_AFTER.ago
+
+  # A failed check shows the parts that failed from the last good answer.
+  def fill_from(kept)
+    @tunnel ||= kept.tunnel
+    @connections = kept.connections if @connections.empty?
+    @routes, @missing_routes = kept.routes, kept.missing_routes if @routes.empty? && @missing_routes.empty?
+    @records = kept.records if @records.empty?
+    @checked_at = kept.checked_at
+  end
+
+  def restore(h, checked_at)
+    @tunnel = h["tunnel"] && Tunnel.new(**h["tunnel"].symbolize_keys.merge(created_at: time(h.dig("tunnel", "created_at"))))
+    @connections = h["connections"].map { |c| Connection.new(**c.symbolize_keys.merge(since: time(c["since"]))) }
+    @routes = h["routes"].map { |r| Route.new(**r.symbolize_keys) }
+    @missing_routes = h["missing_routes"].map { |r| Route.new(**r.symbolize_keys) }
+    @records = h["records"].map { |r| Record.new(**r.symbolize_keys) }
+    @checked_at = checked_at
+  end
 
   def initialize(installation)
     @installation = installation
@@ -28,6 +72,7 @@ class CloudflareView
     part("tunnel") { load_tunnel }
     part("routes") { load_routes }
     part("records") { load_records }
+    @checked_at = Time.current
     self
   end
 

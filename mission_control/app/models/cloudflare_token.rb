@@ -25,6 +25,7 @@ class CloudflareToken
 
     @installation.update!(cloudflare_api_token: @token)
     Rails.cache.delete([ "system_status/tunnel", @installation.tunnel_id ])
+    CloudflareView.forget(@installation)
     true
   end
 

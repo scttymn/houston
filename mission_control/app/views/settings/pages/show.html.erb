@@ -51,37 +51,58 @@
           <span><%= status_word(tunnel.go?) %><% if tunnel.connections.positive? %> <span class="mono muted">· <%= tunnel.connections %> CONN</span><% end %></span></div>
       </div>
       <% if @installation.tunnel_id.present? %>
-        <turbo-frame id="cloudflare-live" src="<%= settings_cloudflare_path %>" loading="lazy">
-          <p class="panel__row panel__row--muted">Asking Cloudflare for the tunnel, its routes and Houston's records…</p>
-        </turbo-frame>
-
-        <% if @repair_results %>
-          <div class="cf-block">
-            <span class="mono facts-strip__label">REPAIR</span>
-            <ul class="rows cf-repair">
-              <% @repair_results.each do |r| %>
-                <li><span class="mono"><%= r.item %></span><span class="mono state state--<%= r.state.in?(%w[OK DNS\ OK]) ? "go" : "nogo" %>"><%= r.state %></span><span class="muted"><%= r.reason %></span></li>
-              <% end %>
-            </ul>
-          </div>
+        <% if (kept = CloudflareView.last(@installation)) %>
+          <%= render "settings/cloudflare/live", view: kept %>
+        <% else %>
+          <turbo-frame id="cloudflare-live" src="<%= settings_cloudflare_path %>" loading="lazy">
+            <p class="panel__row panel__row--muted">Asking Cloudflare for the tunnel, its routes and Houston's records…</p>
+          </turbo-frame>
         <% end %>
 
-        <div class="cf-actions">
-          <%= form_with url: token_settings_cloudflare_path, method: :patch, class: "inline-form cf-token", data: { turbo: false } do |f| %>
-            <%= f.label :api_token, "Replace the API token", class: "mono facts-strip__label" %>
-            <%= f.password_field :api_token, autocomplete: "off", class: "mono", placeholder: "The new token's value" %>
-            <%= f.submit "Check and replace", class: "button button--small" %>
-          <% end %>
-          <% if @token_checks %>
-            <% @token_checks.each do |c| %>
-              <p class="check"><span class="mono check__state check__state--<%= c.ok ? "go" : "nogo" %>"><%= c.ok ? "GO" : "NO-GO" %></span><span><%= c.label %></span></p>
+        <div class="cf-row cf-token-row">
+          <div class="cf-row__text">
+            <h3 class="cf-row__title">API token</h3>
+            <p>Houston's Cloudflare API token needs Account · Cloudflare Tunnel · Edit, and Zone · DNS · Edit on the zones Houston serves. A new one is checked before it's saved, and the old one stays in use until the new one passes.</p>
+            <details class="cf-token-help">
+              <summary>More</summary>
+              <ul>
+                <li><strong>Account · Cloudflare Tunnel · Edit</strong>: to run this server's tunnel and set its routes (which names go to Mission Control, which to your apps).</li>
+                <li><strong>Zone · DNS · Edit</strong>: to point names at the tunnel. It's needed on the zone of your base domain, <span class="mono"><%= base %></span>, and on the zone of every custom domain your projects use. <strong>All zones</strong> is simplest, and covers domains you add later.</li>
+                <li>Houston changes only DNS records it made, which it comments <span class="mono">managed-by:houston</span>, and never any other record.</li>
+              </ul>
+              <p>Make one in Cloudflare under <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">My Profile › API Tokens ↗</a>: Create Token, then Create Custom Token, with the permissions above.</p>
+            </details>
+            <%= form_with url: token_settings_cloudflare_path, method: :patch, class: "inline-form cf-token", data: { turbo: false } do |f| %>
+              <%= f.password_field :api_token, autocomplete: "off", class: "mono", placeholder: "New API token", "aria-label": "New API token" %>
+              <%= f.button "Check and replace", class: "button button--small" %>
             <% end %>
-            <p class="muted">The old token is still in use.</p>
-          <% end %>
-          <%= button_to "Repair routes and records", repair_settings_cloudflare_path, class: "button button--small", form: { class: "cf-repair-form", data: { turbo: false } } %>
+            <% if @token_checks %>
+              <% @token_checks.each do |c| %>
+                <p class="check"><span class="mono check__state check__state--<%= c.ok ? "go" : "nogo" %>"><%= c.ok ? "GO" : "NO-GO" %></span><span><%= c.label %></span></p>
+              <% end %>
+              <p class="muted">The old token is still in use.</p>
+            <% end %>
+          </div>
+        </div>
+
+        <div class="cf-row cf-repair-row">
+          <div class="cf-row__text">
+            <h3 class="cf-row__title">Repair</h3>
+            <p>If someone changed the tunnel or Houston's DNS records in Cloudflare, this puts Houston's routes and records back. Anything else is left alone.</p>
+            <% if @repair_results %>
+              <table class="cf-table cf-repair">
+                <thead><tr><th>Item</th><th>Result</th><th>Details</th></tr></thead>
+                <tbody>
+                  <% @repair_results.each do |r| %>
+                    <tr><td class="mono" data-label="Item"><%= r.item %></td><td data-label="Result"><span class="mono state state--<%= r.state.in?(%w[OK DNS\ OK]) ? "go" : "nogo" %>"><%= r.state %></span></td><td class="muted" data-label="Details"><%= r.reason %></td></tr>
+                  <% end %>
+                </tbody>
+              </table>
+            <% end %>
+          </div>
+          <%= button_to "Repair routes and records", repair_settings_cloudflare_path, class: "button button--small", form: { class: "cf-row__action", data: { turbo: false } } %>
         </div>
       <% end %>
-      <p class="panel__row panel__row--muted">The new token needs Account · Cloudflare Tunnel · Edit, and Zone · DNS · Edit on <%= base %> and on every project domain's zone. Houston only touches DNS records commented <span class="mono">managed-by:houston</span>.</p>
     </section>
 
     <section class="settings-section" id="port">

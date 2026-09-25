@@ -1,56 +1,69 @@
-<%# What Cloudflare has, read after the page loads (CloudflareView). %>
-<turbo-frame id="cloudflare-live">
+<%# What Cloudflare has (CloudflareView): the last answer, shown at once;
+    asked again in the background when it's old (src), or on Check now. %>
+<turbo-frame id="cloudflare-live" <%= tag.attributes(src: (settings_cloudflare_path if view.stale?), loading: ("lazy" if view.stale?)) %>>
+  <p class="cf-checked">
+    <span>Checked <%= view.checked_at ? "#{time_ago_in_words(view.checked_at)} ago" : "just now" %></span>
+    <%= link_to "Check now", settings_cloudflare_path, class: "button button--small", data: { turbo_frame: "cloudflare-live" } %>
+  </p>
+
   <% if view.problems.any? %>
     <div class="notice notice--hold cf-problems">
       <span class="mono">HOLD</span>
-      <span class="notice__text">Cloudflare didn't answer everything: <%= view.problems.join("; ") %>.</span>
+      <span class="notice__text">Cloudflare didn't answer everything: <%= view.problems.join("; ") %>.<%= " Showing what it said before." if view.tunnel || view.records.any? %></span>
     </div>
   <% end %>
 
   <% if (t = view.tunnel) %>
     <div class="cf-block cf-tunnel" data-controller="clipboard">
       <span class="mono facts-strip__label">TUNNEL</span>
-      <div class="cf-tunnel__line">
-        <span class="mono"><%= t.name %></span>
-        <span class="mono state state--<%= t.status == "healthy" ? "go" : "hold" %>"><%= t.status %></span>
-        <span class="muted">since <%= t.created_at ? l(t.created_at, format: :short) : "—" %></span>
-      </div>
-      <div class="cf-tunnel__line">
-        <code class="mono muted" data-clipboard-target="source"><%= t.id %></code>
-        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy ID</button>
-      </div>
-      <ul class="rows cf-connections">
-        <% view.connections.each do |c| %>
-          <li><span class="mono"><%= c.colo %></span><span class="mono muted">cloudflared <%= c.version %></span><span class="mono muted"><%= c.origin %></span><span class="muted"><%= c.since ? "connected #{time_ago_in_words(c.since)} ago" : "" %></span></li>
-        <% end %>
-      </ul>
+      <dl class="cf-facts">
+        <dt>Name</dt><dd><span class="mono"><%= t.name %></span> <span class="mono state state--<%= t.status == "healthy" ? "go" : "hold" %>"><%= t.status %></span></dd>
+        <dt>Created</dt><dd><%= t.created_at ? l(t.created_at, format: :short) : "—" %></dd>
+        <dt>Tunnel ID</dt><dd><code class="mono" data-clipboard-target="source"><%= t.id %></code> <button type="button" class="button button--small" aria-label="Copy tunnel ID" data-action="clipboard#copy" data-clipboard-target="button">Copy</button></dd>
+      </dl>
+      <table class="cf-table cf-connections">
+        <thead><tr><th>Data center</th><th>cloudflared</th><th>From</th><th>Connected</th></tr></thead>
+        <tbody>
+          <% view.connections.each do |c| %>
+            <tr><td class="mono" data-label="Data center"><%= c.colo %></td><td class="mono" data-label="cloudflared"><%= c.version %></td><td class="mono" data-label="From"><%= c.origin %></td><td data-label="Connected"><%= c.since ? "#{time_ago_in_words(c.since)} ago" : "—" %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
     </div>
   <% end %>
 
-  <% if view.routes.any? || view.missing_routes.any? %>
+  <% rows = cloudflare_route_rows(view) %>
+  <% if rows.any? %>
     <div class="cf-block">
-      <span class="mono facts-strip__label">ROUTES<%= " · DRIFT: REPAIR PUTS THEM BACK" if view.drift? %></span>
-      <ul class="rows cf-routes">
-        <% view.routes.each do |r| %>
-          <li><span class="mono"><%= r.hostname || "everything else" %><%= " #{r.path}" if r.path %></span><span class="rule__arrow">→</span><span class="mono muted"><%= r.service %></span><% if r.drift %><span class="mono state state--nogo">DRIFT</span><% end %></li>
-        <% end %>
-        <% view.missing_routes.each do |r| %>
-          <li><span class="mono"><%= r.hostname || "everything else" %><%= " #{r.path}" if r.path %></span><span class="rule__arrow">→</span><span class="mono muted"><%= r.service %></span><span class="mono state state--nogo">MISSING</span></li>
-        <% end %>
-      </ul>
+      <span class="mono facts-strip__label">ROUTES · WHERE THE TUNNEL SENDS EACH NAME<%= " · DRIFT: REPAIR PUTS THEM BACK" if view.drift? %></span>
+      <table class="cf-table cf-routes">
+        <thead><tr><th>Hostname</th><th>Path</th><th>Goes to</th></tr></thead>
+        <tbody>
+          <% rows.each do |r| %>
+            <tr>
+              <td data-label="Hostname"><%= r.hostname ? tag.span(r.hostname, class: "mono") : "Every other name" %></td>
+              <td data-label="Path"><%= r.path.start_with?("/") ? tag.span(r.path, class: "mono") : r.path %></td>
+              <td data-label="Goes to"><span><%= r.goes_to %><% if r.service %> <small class="mono muted"><%= r.service %></small><% end %><% if r.state %> <span class="mono state state--nogo"><%= r.state.to_s.upcase %></span><% end %></span></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
     </div>
   <% end %>
 
   <div class="cf-block">
-    <span class="mono facts-strip__label">HOUSTON'S DNS RECORDS</span>
+    <span class="mono facts-strip__label">HOUSTON'S DNS RECORDS · ONLY THESE, COMMENTED MANAGED-BY:HOUSTON</span>
     <% if view.records.empty? %>
       <p class="muted">None found.</p>
     <% else %>
-      <ul class="rows cf-records">
-        <% view.records.each do |r| %>
-          <li><span class="mono"><%= r.name %></span><span class="mono muted"><%= r.project %></span><span class="<%= r.here ? "" : "muted" %>"><%= r.here ? "this server" : "another server" %></span><span class="muted"><%= r.proxied ? "proxied" : "DNS only" %></span></li>
-        <% end %>
-      </ul>
+      <table class="cf-table cf-records">
+        <thead><tr><th>Name</th><th>For</th><th>Points at</th><th>Proxy</th></tr></thead>
+        <tbody>
+          <% cloudflare_record_rows(view).each do |r| %>
+            <tr><td class="mono" data-label="Name"><%= r.name %></td><td data-label="For"><%= cloudflare_record_for(r) %></td><td data-label="Points at" class="<%= "muted" unless r.here %>"><%= r.here ? "this server" : "another server" %></td><td data-label="Proxy"><%= r.proxied ? "proxied" : "DNS only" %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
     <% end %>
   </div>
 </turbo-frame>

@@ -68,4 +68,35 @@ class CloudflareViewTest < ActiveSupport::TestCase
     assert_match(/routes: couldn't reach Cloudflare/, view.problems.join("\n"))
     assert_equal 0, view.records.size, "the records part still ran (no managed records)"
   end
+
+  # Settings shows the last answer at once (no waiting, no empty panel), and
+  # refreshes it in the background once it's old.
+  test "the last answer is kept, and a failed check never replaces a good one" do
+    Rails.cache.clear
+    assert_nil CloudflareView.last
+
+    stub_tunnel_details
+    stub_live_ingress
+    fresh = CloudflareView.fetch
+    kept = CloudflareView.last
+    assert_equal fresh.to_h, kept.to_h
+    assert_in_delta Time.current, kept.checked_at, 1
+    assert_not kept.stale?
+    travel CloudflareView::STALE_AFTER + 1.second
+    assert CloudflareView.last.stale?
+
+    WebMock.reset!
+    stub_tunnel_details(status: 403)
+    stub_request(:get, %r{#{API}/accounts/#{ACCOUNT}/cfd_tunnel/#{TUNNEL}/configurations}).to_timeout
+    stub_zones([])
+    failed = CloudflareView.fetch
+    assert failed.problems.any?
+    assert_equal fresh.to_h, CloudflareView.last.to_h, "the good answer stays"
+    assert_equal fresh.tunnel, failed.tunnel, "and what failed is shown over it"
+
+    Installation.current.update!(tunnel_id: "another-tunnel")
+    assert_nil CloudflareView.last, "a new tunnel's answer isn't the old one's"
+  ensure
+    Rails.cache.clear
+  end
 end

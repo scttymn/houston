@@ -18,6 +18,7 @@ class Settings::CloudflareController < ApplicationController
 
   def repair
     @repair_results = CloudflareRepair.run
+    CloudflareView.forget
     render_settings_page
   end
 end

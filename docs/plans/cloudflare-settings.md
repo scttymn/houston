@@ -86,3 +86,23 @@ Settings shows what Cloudflare actually has: the tunnel and each connection, the
 - **Several base domains, rather than changing the one.** Your idea: the server serves several (`svnmns.com`, `example.dev`, …), each with its own zone, admin and hooks names, and each project picks one (defaulting to the first). Moving to a new domain becomes gradual: add it, move projects one at a time with both names working, and retire the old one when nothing uses it. It also lets one server host separate groups of apps. The token check and Repair here already work zone by zone, so they carry over.
   - Changing the one base domain in place touches every webhook URL, every CLI login, the admin sign-in, Cloudflare Access, and apps that name their own host (valleybuiltcrossfit's `APP_HOST`, estherpictures' `check_origin`).
 - Switch the DNS mode (wildcard vs host by host).
+
+## Rethink (2026-09-25, after v0.4.0)
+- **Direction:** "the cloudflare section … is a bit of a mess". It started empty and cached nothing. "Copy ID" didn't say what it copied. Routes and records were headless sub-tables. The token field was one long box with a dangling button. Later: the help should list the permissions, with "More" for the details and a link to Cloudflare, and name no one's domains (only the base domain configured here).
+- **Design:**
+  - `CloudflareView.fetch` keeps a complete answer in Rails.cache (solid_cache, so it survives restarts), keyed by tunnel. A failed check shows its failed parts from the last good answer and never replaces it.
+  - `last` and `stale?` (older than 5 minutes). Settings renders the last answer at once, and the frame asks again (lazy src) only when it's old. "Check now" reloads the frame.
+  - A new token and Repair `forget` the kept answer.
+  - The panel: labelled tunnel facts (Name, Created, Tunnel ID with "Copy"), then headed tables. Connections: Data center, cloudflared, From, Connected. Routes: Hostname, Path, Goes to, in words, with the address in small print. Records: Name, For, Points at, Proxy, with Houston's own names first and each project's together. At 600 px and below, rows stack with their labels.
+  - **Token row:** what's needed, "More" (each permission and why, "All zones" is simplest, the configured base domain, Cloudflare's API Tokens page), then the field and "Check and replace". No other buttons.
+  - **Repair row:** what it does, one button, and results as a table.
+  - The dead `.ingress` CSS is removed.
+- **Tests** (`settings/cloudflare_controller_test`, `cloudflare_view_test`, `cloudflare_token_test`):
+  - shown at once and refreshed when old
+  - a good answer kept over a failed check, and per tunnel
+  - every table's headings and rows in words
+  - the token row: its one button, a link, and no domain but the configured base
+  - the repair row and its table
+  - the kept answer forgotten after a new token and after Repair
+- **Mutation check:** all 11 caught.
+- **Visual check:** the production image, seeded with placeholder domains, at 1280 and 375 px. Phone rows first split the small-print address into the label column; fixed by wrapping the cell.

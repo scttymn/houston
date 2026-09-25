@@ -35,8 +35,10 @@ class CloudflareTokenTest < ActiveSupport::TestCase
 
   test "a token that passes every check replaces the old one" do
     new_token_sees
+    Rails.cache.write([ "cloudflare-view", Installation.current.tunnel_id ], { "view" => CloudflareView.new(Installation.current).to_h.as_json, "checked_at" => Time.current.iso8601 })
     token = CloudflareToken.new(NEW)
     assert token.replace
+    assert_nil CloudflareView.last, "Settings asks Cloudflare again with the new token"
     assert token.checks.all?(&:ok)
     assert_equal [ "Account · Seven Moons", "Cloudflare Tunnel · this server's tunnel", "Zone · DNS on svnmns.com", "Zone · DNS on estherpictures.com" ], token.checks.map(&:label)
     assert_equal NEW, Installation.current.reload.cloudflare_api_token
