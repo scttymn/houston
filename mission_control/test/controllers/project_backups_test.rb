@@ -92,8 +92,14 @@ class ProjectBackupsTest < ActionDispatch::IntegrationTest
     use_fake_docker(listing) { get project_snapshots_path("equip", kind: "settings") }
     assert_response :success
     assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", /Settings/
-    assert_select "#snapshots-list [role=tablist] a", /Scheduled\s*1 \/ 7/
-    assert_select "#snapshots-list [role=tablist] a", /Pre-deploy\s*0 \/ 3/
+    assert_select "#snapshots-list [role=tablist] a", "Scheduled"
+    assert_select "#snapshots-list [role=tablist] a", "Pre-deploy"
+    # The counts, with the plan's own keep numbers, are in each tab's note.
+    use_fake_docker(listing) { get project_snapshots_path("equip") }
+    assert_select "#snapshots-list", %r{kept 1 / 7}
+    use_fake_docker(listing) { get project_snapshots_path("equip", kind: "deploy") }
+    assert_select "#snapshots-list", %r{kept 0 / 3}
+    use_fake_docker(listing) { get project_snapshots_path("equip", kind: "settings") }
     # Each tab keeps room for its bold label, so selecting one doesn't shift the rest.
     assert_select "#snapshots-list [role=tablist] a .tabs__label[data-label]", 3
 

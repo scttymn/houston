@@ -36,15 +36,17 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
   end
 
   # (A project always has storage once setup is finished: its gate needs a default.)
-  test "tabs by kind with counts" do
+  test "tabs by kind; the counts are in each tab's note" do
     sign_in_as users(:one)
     fake = listing(snapshot_json(id: "11111111", time: "2026-09-21T03:00:00Z"),
                    snapshot_json(id: "33333333", time: "2026-09-22T12:31:00Z", kind: "deploy", reason: "deploy", deploy: 7))
     use_fake_docker(fake) { get project_snapshots_path("equip") }
     assert_select "#snapshots-list [role=tablist] a", 3
     assert_select "#snapshots-list [role=tablist] a:last-child", "Settings"
-    assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", /Scheduled\s*1 \/ 14/
-    assert_select "#snapshots-list [role=tablist] a[aria-selected=false]", /Pre-deploy\s*1 \/ 10/
+    assert_select "#snapshots-list [role=tablist] a[aria-selected=true]", "Scheduled"
+    assert_select "#snapshots-list [role=tablist]", { text: %r{/}, count: 0 }, "no counts in the tabs: they pushed the tabs off a phone's screen; the notes say them"
+    assert_select "#snapshots-list", %r{kept 1 / 14}
+    assert_select "#snapshots-list [role=tablist] a[aria-selected=false]", "Pre-deploy"
   end
 
   test "the panel says why it has nothing" do
