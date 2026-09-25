@@ -23,7 +23,7 @@ import (
 
 const (
 	sha         = "0123456789abcdef0123456789abcdef01234567"
-	kamalImage  = "ghcr.io/basecamp/kamal:v2.12.0"
+	kamalImage  = "ghcr.io/basecamp/kamal:v2.12.0@sha256:7b5be276aa17bbe122887f6a1ff12865f4848111989699b9786083be95d98415"
 	shopCompose = `name: shop
 services:
   app:

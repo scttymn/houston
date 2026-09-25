@@ -8,7 +8,8 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 
 - [`docs/agents.md`](docs/agents.md): for an AI agent setting up an app with Houston (the steps, the checks, and where to stop for you). Agents working on Houston itself read [`AGENTS.md`](AGENTS.md).
 - [`docs/plans/`](docs/plans): how each part was built, with what was tested and found.
-- [Releases](https://github.com/scttymn/houston/releases): the CLI for macOS and Linux, and the installer. Mission Control's and the runner's images are on ghcr.io.
+- [Releases](https://github.com/scttymn/houston/releases): the CLI for macOS and Linux, and the installer. Mission Control's and the runner's images are on ghcr.io, and the installer pulls them by the digests each release lists.
+- [`SECURITY.md`](SECURITY.md): how to report a vulnerability, and what Houston trusts.
 
 ## What you need
 

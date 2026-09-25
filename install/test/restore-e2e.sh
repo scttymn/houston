@@ -192,7 +192,7 @@ echo "== the maintenance page stays up through a restore; going back with the sa
 rails 'Project.find_by!(name: "spike").update!(maintenance_since: Time.current, maintenance_by: "e2e")' >/dev/null
 page() { vm curl -s -o /dev/null -w '%{http_code}' -H 'Host: spike.houston.test' http://127.0.0.1:3000/; }
 [ "$(page)" = 503 ] && ok "Mission Control answers spike.houston.test with its maintenance page (503)" || bad "page: $(page)"
-registry=$(vm docker ps -q --filter ancestor=registry:3 | head -n1)
+registry=$(vm docker ps -q --filter "ancestor=$(sed -n 's/^REGISTRY_IMAGE="\(.*\)"$/\1/p' "$repo/install/install.sh")" | head -n1)
 vm docker exec "$registry" rm -rf "/var/lib/registry/docker/registry/v2/repositories/spike/_manifests/tags/$second"
 vm docker rmi -f "127.0.0.1:5000/spike:$second" >/dev/null 2>&1
 vm docker pull -q "127.0.0.1:5000/spike:$second" >/dev/null 2>&1 && bad "the registry still has ${second:0:7}" || ok "${second:0:7}'s image is gone from the host and the registry"

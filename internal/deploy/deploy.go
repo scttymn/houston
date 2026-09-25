@@ -25,7 +25,7 @@ import (
 )
 
 // KamalImage is the Kamal houston deploy runs, pinned (spike: Kamal 2.12.0).
-const KamalImage = "ghcr.io/basecamp/kamal:v2.12.0"
+const KamalImage = "ghcr.io/basecamp/kamal:v2.12.0@sha256:7b5be276aa17bbe122887f6a1ff12865f4848111989699b9786083be95d98415"
 
 const (
 	DefaultTimeout = 30 * time.Minute

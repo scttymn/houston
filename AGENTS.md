@@ -16,6 +16,7 @@ docker compose --progress quiet run --rm cli gofmt -l internal cmd   # must prin
 bin/test-integration                                # Go tests that drive real Docker
 cd mission_control && docker compose run --rm --no-deps -T -e RAILS_ENV=test app sh -c 'bin/rails test && bin/rubocop'
 install/test/install-version.sh                     # the installer's release path, in a container
+install/test/install-bind.sh                        # where port 3000 listens, in a container
 ```
 - Don't install Go, Ruby or gems on the host.
 - `bin/release` builds the CLI for all four platforms into `dist/`, and `bin/install` puts this machine's in `~/.local/bin`.

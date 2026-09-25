@@ -21,9 +21,11 @@ HOUSTON_GITHUB_API="${HOUSTON_GITHUB_API:-https://api.github.com}"
 HOUSTON_GITHUB_TOKEN="${HOUSTON_GITHUB_TOKEN:-}"
 HOUSTON_REGISTRY="${HOUSTON_REGISTRY:-ghcr.io}"
 IMAGE="houston/mission-control:local"
-CLOUDFLARED_IMAGE="cloudflare/cloudflared:2026.9.1"
-KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0"
-REGISTRY_IMAGE="registry:3"
+# Other projects' images, pinned by digest: a moved tag can't change what
+# runs. KAMAL_IMAGE is the one houston deploy runs (internal/deploy).
+CLOUDFLARED_IMAGE="cloudflare/cloudflared:2026.9.1@sha256:b269e8abd07a5bf6f3f4be65d5050b2174eca89c56a0241a8ff32a16aec454e4"
+KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0@sha256:7b5be276aa17bbe122887f6a1ff12865f4848111989699b9786083be95d98415"
+REGISTRY_IMAGE="registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649"
 RUNNER_IMAGE="houston/runner:local"
 RUNNERS="${HOUSTON_RUNNERS:-2}"
 # Where Mission Control's port 3000 listens (an IPv4 address). Unset: open to
@@ -118,6 +120,35 @@ fetch_asset() {
   url=$(asset_url "$1")
   [ -n "$url" ] || fail "release $HOUSTON_VERSION has no $1"
   github "$url" application/octet-stream >"$2" || fail "couldn't download $1 of $HOUSTON_VERSION"
+}
+
+# release_images: IMAGE and RUNNER_IMAGE by digest, from the release's
+# IMAGES, checked against its SHA256SUMS. A release from before IMAGES
+# (v0.3.0 and older) is pulled by tag.
+release_images() {
+  if [ -z "$(asset_url IMAGES)" ]; then
+    step "$HOUSTON_VERSION lists no image digests; pulling by tag"
+    return 0
+  fi
+  dir=$(mktemp -d)
+  fetch_asset SHA256SUMS "$dir/SHA256SUMS"
+  fetch_asset IMAGES "$dir/IMAGES"
+  if ! (cd "$dir" && grep " IMAGES\$" SHA256SUMS | sha256sum -c --status); then
+    rm -rf "$dir"
+    fail "IMAGES doesn't match the release's SHA256SUMS; nothing was pulled"
+  fi
+  mc=$(sed -n 1p "$dir/IMAGES")
+  runner=$(sed -n 2p "$dir/IMAGES")
+  rm -rf "$dir"
+  by_digest "$mc" "$IMAGE"
+  by_digest "$runner" "$RUNNER_IMAGE"
+  IMAGE=$mc RUNNER_IMAGE=$runner
+}
+
+# by_digest <ref> <image>: ref must be image@sha256:<digest>.
+by_digest() {
+  printf '%s' "$1" | grep -Eqx "$(printf '%s' "$2" | sed 's/[.]/[.]/g')@sha256:[0-9a-f]{64}" ||
+    fail "IMAGES names $1, not $2 by digest; nothing was pulled"
 }
 
 # installed_version: what the flight board will say.
@@ -458,6 +489,7 @@ EOF
 # or build changes nothing.
 fetch_images() {
   if [ -n "$HOUSTON_VERSION" ]; then
+    release_images
     step "Pulling Houston $HOUSTON_VERSION"
     if [ -n "$HOUSTON_GITHUB_TOKEN" ]; then
       printf '%s' "$HOUSTON_GITHUB_TOKEN" | docker login "$HOUSTON_REGISTRY" -u houston --password-stdin >/dev/null 2>&1 ||

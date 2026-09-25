@@ -1,0 +1,16 @@
+# Keeps the release workflow's pinned actions current (they're pinned by
+# commit, so nothing moves under a tag). Gems and Go modules get security
+# updates through GitHub's Dependabot alerts, not routine version PRs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # A new version waits a week before it's proposed, time for a bad
+    # release to be noticed and pulled.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

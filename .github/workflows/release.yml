@@ -1,10 +1,14 @@
 # A release (docs/plans/releases.md): pushing a tag like v0.1.0 tests Houston,
 # then publishes it at that version:
 #   - ghcr.io/<owner>/houston-mission-control:<tag> and houston-runner:<tag>
-#   - a GitHub Release with the CLI binaries, install.sh and SHA256SUMS
-# A server installs or updates with HOUSTON_VERSION=<tag> (install/install.sh).
+#   - a GitHub Release with the CLI binaries, install.sh, IMAGES (both images
+#     by digest) and SHA256SUMS over them all
+# A server installs or updates with HOUSTON_VERSION=<tag> (install/install.sh),
+# pulling the images by the digests in IMAGES.
 # Nothing is published unless the tests pass, and the Release comes last, so
 # a Release always has its images.
+# Actions are pinned by commit (Dependabot keeps them current), and no
+# checkout keeps the token in .git/config.
 name: release
 
 on:
@@ -21,7 +25,9 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # The same commands as locally: the Go toolchain in compose.yml's cli
       # service, and Mission Control in its own compose file.
       - name: Go tests
@@ -34,7 +40,7 @@ jobs:
         working-directory: mission_control
         run: docker compose run --rm --no-deps -T -e RAILS_ENV=test app sh -c 'bin/rails test && bin/rubocop'
       - name: Installer
-        run: install/test/install-version.sh
+        run: install/test/install-version.sh && install/test/install-bind.sh
 
   images:
     needs: test
@@ -42,17 +48,23 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      mission_control: ${{ steps.mission_control.outputs.digest }}
+      runner: ${{ steps.runner.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # amd64 only for now (the plan's "arm64 images later").
       - name: Mission Control
-        uses: docker/build-push-action@v7
+        id: mission_control
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: mission_control
           target: production
@@ -62,7 +74,8 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/houston-mission-control:${{ github.ref_name }}
           push: true
       - name: Runner
-        uses: docker/build-push-action@v7
+        id: runner
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: install
           file: install/runner.Dockerfile
@@ -76,13 +89,25 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - name: CLI binaries, the installer and SHA256SUMS
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: CLI binaries, the installer, IMAGES and SHA256SUMS
+        env:
+          OWNER: ${{ github.repository_owner }}
+          MISSION_CONTROL_DIGEST: ${{ needs.images.outputs.mission_control }}
+          RUNNER_DIGEST: ${{ needs.images.outputs.runner }}
         run: |
+          case "$MISSION_CONTROL_DIGEST $RUNNER_DIGEST" in
+            sha256:*" sha256:"*) ;;
+            *) echo "the images job gave no digests"; exit 1 ;;
+          esac
           docker build --target release --build-arg VERSION="$GITHUB_REF_NAME" --output type=local,dest=dist .
           cp install/install.sh dist/
-          (cd dist && sha256sum houston-* install.sh > SHA256SUMS)
-          cat dist/SHA256SUMS
+          printf 'ghcr.io/%s/houston-mission-control:%s@%s\nghcr.io/%s/houston-runner:%s@%s\n' \
+            "$OWNER" "$GITHUB_REF_NAME" "$MISSION_CONTROL_DIGEST" "$OWNER" "$GITHUB_REF_NAME" "$RUNNER_DIGEST" > dist/IMAGES
+          (cd dist && sha256sum houston-* install.sh IMAGES > SHA256SUMS)
+          cat dist/IMAGES dist/SHA256SUMS
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
