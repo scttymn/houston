@@ -34,7 +34,11 @@ module MissionControl
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     # lib/backup holds scripts for helper containers, not code to load.
-    config.autoload_lib(ignore: %w[assets tasks backup])
+    config.autoload_lib(ignore: %w[assets tasks backup middleware])
+
+    # Before anything reads the client's address, host or scheme.
+    require_relative "../lib/middleware/forwarded_headers"
+    config.middleware.insert_before 0, ForwardedHeaders
 
     # Configuration for the application, engines, and railties goes here.
     #

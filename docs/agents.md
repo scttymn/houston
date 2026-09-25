@@ -33,6 +33,7 @@ curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.s
   2. A Cloudflare API token (Account › Cloudflare Tunnel › Edit, and Zone › DNS › Edit on the domain).
   3. Backup storage, and a restic password shown once, which they must save.
 - **Check:** `https://admin.<their domain>/up` answers 200.
+- **HUMAN:** then run the installer again. Once Cloudflare is connected, it closes port 3000 to the network (it binds `127.0.0.1`). Until then the flight board shows a HOLD for it.
 
 ## 2. The CLI, and logging in
 Download the CLI (`darwin` or `linux`, `arm64` or `amd64`), and check its checksum. This is the latest release. If the server is pinned to an older one, use `releases/download/<tag>/…` for both files, and match `houston status`'s version.

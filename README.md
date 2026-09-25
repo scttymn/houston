@@ -4,7 +4,7 @@
 
 A small self-hosted deploy orchestrator. Each project is one Docker Compose file with an `x-houston` block. One CLI works the same on your laptop and against the server. A web admin, **Mission Control**, handles Cloudflare, secrets, deploys, backups and restores.
 
-Houston ties proven tools together rather than reinventing them: Docker runs everything, Compose describes the app, Kamal deploys it, restic backs it up, and a Cloudflare Tunnel is the only way in. It knows no frameworks. A static site, Rails, Phoenix or anything else that builds a Docker image works the same way.
+Houston ties proven tools together rather than reinventing them: Docker runs everything, Compose describes the app, Kamal deploys it, restic backs it up, and a Cloudflare Tunnel is how the internet reaches it. It knows no frameworks. A static site, Rails, Phoenix or anything else that builds a Docker image works the same way.
 
 - [`docs/agents.md`](docs/agents.md): for an AI agent setting up an app with Houston (the steps, the checks, and where to stop for you). Agents working on Houston itself read [`AGENTS.md`](AGENTS.md).
 - [`docs/plans/`](docs/plans): how each part was built, with what was tested and found.
@@ -13,7 +13,7 @@ Houston ties proven tools together rather than reinventing them: Docker runs eve
 ## What you need
 
 - **A Linux server that installs packages with apt, dnf or pacman:** Debian, Ubuntu and their derivatives; Fedora and the RHEL family (RHEL, Rocky, Alma, CentOS Stream); Arch and its derivatives. The installer adds what's missing (Docker, git, an SSH server) with that package manager. SELinux must be permissive for now.
-- **An address your browser can reach** for first-run setup, before the Cloudflare tunnel exists: on your LAN, over a VPN, or a VPS's public IP (the setup code guards the page). After setup, everything goes through Cloudflare.
+- **An address your browser can reach** for first-run setup, before the Cloudflare tunnel exists: on your LAN, over a VPN, or a VPS's public IP (the setup code guards the page). After setup, everything goes through Cloudflare, and rerunning the installer closes that address.
 - **A Cloudflare account with a domain** (the *base domain*). Apps are served at `<name>.<base>`, and Mission Control at `admin.<base>`.
 - **Docker with Compose on your laptop.** That's all the CLI needs.
 - **Somewhere for backups:** a path on the server, an NFS export, or S3, B2 or SFTP.
@@ -62,6 +62,14 @@ Open the URL. The three steps:
 3. **Default backup storage:** a location, a test write, and a restic password shown **once**. Save the password before you continue: without it the backups can't be read.
 
 Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of it is optional and recommended. Keep `hooks.<base>` outside Access.
+
+**Then close port 3000: run the installer again.** Port 3000 is plain HTTP, open to your network for setup. Once Cloudflare is connected, a rerun binds it to `127.0.0.1`, so Mission Control answers only at `admin.<base>` and on the server itself. Until then the flight board says it's open. If you need Mission Control without Cloudflare, go through SSH:
+
+```sh
+ssh -L 3000:127.0.0.1:3000 you@<server>    # then open http://localhost:3000
+```
+
+`HOUSTON_BIND=<IPv4 address>` chooses where port 3000 listens: `0.0.0.0` opens it again, or give a VPN address. Sign-ins end after two weeks unused, and after 30 days at most. A sign-in made on port 3000 doesn't work at `admin.<base>`, and the other way round.
 
 ## 3. Install the CLI (your laptop)
 

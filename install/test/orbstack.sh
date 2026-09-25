@@ -93,6 +93,7 @@ elif [ -f "$cf_file" ]; then
   vm rm -f /tmp/cf-token
   if [ "$step2" = "302 http://$ip:3000/" ]; then
     ok "step 2 created the tunnel, its routes and DNS"
+    cf_connected=yes
     connected=""
     for _ in $(seq 1 30); do
       if vm sh -c 'docker compose -f /opt/houston/compose.yml logs cloudflared 2>&1 | grep -q "Registered tunnel connection"'; then connected=yes; break; fi
@@ -158,7 +159,14 @@ vm env HOUSTON_SOURCE="$repo" sh "$repo/install/install.sh" | tee /tmp/houston-i
 env_after=$(vm sha256sum /opt/houston/.env)
 if [ "$env_before" = "$env_after" ]; then ok ".env kept byte-for-byte"; else bad ".env changed on rerun"; fi
 if grep -q "Setup is already complete" /tmp/houston-install-2.log; then ok "rerun says setup is already complete"; else bad "rerun output"; fi
-check "Mission Control still answers after the rerun" vm curl -fsS -o /dev/null "http://$ip:3000/up"
+# Once Cloudflare is connected, the rerun closes port 3000 to the network.
+if [ -n "${cf_connected:-}" ]; then
+  closed() { ! vm curl -fsS -o /dev/null --max-time 5 "http://$ip:3000/up"; }
+  check "the rerun closed port 3000 to the network" closed
+  check "Mission Control still answers on 127.0.0.1" vm curl -fsS -o /dev/null "http://127.0.0.1:3000/up"
+else
+  check "Mission Control still answers on the LAN address (setup isn't finished)" vm curl -fsS -o /dev/null "http://$ip:3000/up"
+fi
 
 echo
 if [ "$failures" -eq 0 ]; then echo "PASS ($distro)"; else echo "FAIL: $failures check(s) ($distro)"; exit 1; fi
