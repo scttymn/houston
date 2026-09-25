@@ -25,14 +25,8 @@ module Authentication
       Current.session ||= find_session_by_cookie
     end
 
-    # A session works only the way it was made (through the tunnel or not),
-    # and only until it ends. Cloudflare adds Cf-Ray to every request it
-    # forwards, and a client can't remove it.
     def find_session_by_cookie
-      session = Session.find_by(id: cookies.signed[:session_id]) if cookies.signed[:session_id]
-      return unless session && session.tunnel == through_tunnel?
-      return session.destroy && nil if session.ended?
-      session.tap(&:used!)
+      Session.resume(cookies.signed[:session_id], tunnel: through_tunnel?)
     end
 
     def through_tunnel? = request.headers["Cf-Ray"].present?

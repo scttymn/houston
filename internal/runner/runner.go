@@ -79,8 +79,13 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 		r.Mission.Report(ctx, job.Deploy, mission.Progress{Log: "NO-GO: " + msg + "\n", Status: "no_go", Error: msg})
 		return true, nil
 	}
+	file, msg := composeFile(dir, job.Project.ComposePath)
+	if msg != "" {
+		r.Mission.Report(ctx, job.Deploy, mission.Progress{Log: "NO-GO: " + msg + "\n", Status: "no_go", Error: msg})
+		return true, nil
+	}
 	o := r.Base
-	o.File = filepath.Join(dir, filepath.FromSlash(job.Project.ComposePath))
+	o.File = file
 	o.Ref = job.Ref
 	claimed := job.Deploy
 	o.Claimed = &claimed
@@ -88,6 +93,25 @@ func (r *Runner) RunOnce(ctx context.Context) (bool, error) {
 	o.RunTests = true
 	r.Deploy(ctx, o)
 	return true, nil
+}
+
+// composeFile is compose_path in the checkout at dir. The deploy treats its
+// folder as the checkout (builds and .houston are relative to it), so it
+// must stay inside: no .., and no folder on the way that's a symlink.
+func composeFile(dir, composePath string) (string, string) {
+	rel := filepath.FromSlash(composePath)
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Sprintf("the compose path %q leaves the checkout; nothing was run", composePath)
+	}
+	path := dir
+	parts := strings.Split(rel, string(filepath.Separator))
+	for _, part := range parts[:len(parts)-1] {
+		path = filepath.Join(path, part)
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Sprintf("the compose path %q goes through a symlink (%s); nothing was run", composePath, strings.TrimPrefix(path, dir+"/"))
+		}
+	}
+	return filepath.Join(dir, rel), ""
 }
 
 // fetch puts exactly the claimed commit in <workspace>/<project>, the ref

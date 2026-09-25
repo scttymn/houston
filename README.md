@@ -70,7 +70,7 @@ Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of
 ssh -L 3000:127.0.0.1:3000 you@<server>    # then open http://localhost:3000
 ```
 
-`HOUSTON_BIND=<IPv4 address>` chooses where port 3000 listens: `0.0.0.0` opens it again, or give a VPN address. Sign-ins end after two weeks unused, and after 30 days at most. A sign-in made on port 3000 doesn't work at `admin.<base>`, and the other way round.
+`HOUSTON_BIND=<IPv4 address>` chooses where port 3000 listens: `0.0.0.0` opens it again, or give a VPN address. Give it on every run: without it, the installer decides again. Sign-ins end after two weeks unused, and after 30 days at most. A sign-in made on port 3000 doesn't work at `admin.<base>`, and the other way round.
 
 ## 3. Install the CLI (your laptop)
 

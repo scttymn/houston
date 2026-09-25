@@ -76,6 +76,14 @@ class WebhooksControllerTest < ActionDispatch::IntegrationTest
     github = { "X-Forwarded-For" => "140.82.115.1", "X-Hub-Signature-256" => "sha256=#{hmac}" }
     assert_enqueued_with(job: CheckForChangesJob) { ring(headers: github) }
     assert_response :accepted, "another address's real push gets through"
+
+    # Junk sent through GitHub (a webhook pointed at another path) arrives
+    # from GitHub's own addresses: it holds only that path.
+    WebhooksController::UNVERIFIED.times { ring(name: "nothing", headers: github) }
+    ring(name: "nothing", headers: github)
+    assert_response :too_many_requests
+    assert_enqueued_with(job: CheckForChangesJob) { ring(headers: github) }
+    assert_response :accepted, "the same address's real push to another project gets through"
   ensure
     Rails.cache.clear
   end

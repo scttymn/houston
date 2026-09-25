@@ -54,7 +54,12 @@ class ForwardedHeaders
     tunnel = visitor.present? && self.class.tunnel_addresses.call.include?(peer)
     env["REMOTE_ADDR"] = tunnel ? visitor : peer
     FORWARDING.each { |name| env.delete(name) }
-    SCHEME.each { |name| env.delete(name) } if env["HTTP_CF_RAY"].blank?
+    if env["HTTP_CF_RAY"].blank?
+      SCHEME.each { |name| env.delete(name) }
+      # Puma already set these from the client's X-Forwarded-Proto.
+      env["rack.url_scheme"] = "http"
+      env.delete("HTTPS")
+    end
     @app.call(env)
   end
 

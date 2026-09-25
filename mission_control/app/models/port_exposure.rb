@@ -8,16 +8,17 @@ module PortExposure
   EVERYWHERE = [ "", "0.0.0.0", "::" ].freeze
 
   def self.open?
-    Rails.cache.fetch([ "port-exposure", Socket.gethostname ], expires_in: 1.hour) { read }
+    Rails.cache.fetch([ "port-exposure", Socket.gethostname ], expires_in: 1.hour, skip_nil: true) { read } || false
   end
 
+  # true or false; nil when docker can't say (not cached).
   def self.read
     result = DockerCommand.run("inspect", "--format", "{{json .HostConfig.PortBindings}}", Socket.gethostname, timeout: 5)
-    return false unless result.success
+    return nil unless result.success
     bindings = JSON.parse(result.output)
     bindings.is_a?(Hash) && bindings.values.flatten.compact.any? { |binding| binding["HostIp"].to_s.in?(EVERYWHERE) }
   rescue JSON::ParserError
-    false
+    nil
   end
   private_class_method :read
 end

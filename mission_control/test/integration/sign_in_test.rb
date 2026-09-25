@@ -49,8 +49,9 @@ class SignInTest < ActionDispatch::IntegrationTest
     assert_no_match(/;\s*secure/i, session_cookie_header, "plain http (LAN first run) must still work")
 
     delete session_path
+    # https reaches Mission Control only through Cloudflare, which adds Cf-Ray.
     https!
-    post session_path, params: { email_address: @admin.email_address, password: "password" }
+    post session_path, params: { email_address: @admin.email_address, password: "password" }, headers: { "Cf-Ray" => "8f-MCI", "X-Forwarded-Proto" => "https" }
     assert_match(/;\s*secure/i, session_cookie_header)
   end
 

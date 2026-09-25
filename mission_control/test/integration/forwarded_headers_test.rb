@@ -52,15 +52,37 @@ class ForwardedHeadersTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "failed sign-ins have a cap across every address" do
-    SessionsController::EVERYONE.times { |i| sign_in_attempt("X-Forwarded-For" => "10.0.#{i / 200}.#{i % 200}") }
-    assert_equal "Try again later.", sign_in_attempt("X-Forwarded-For" => "10.9.9.9")
+  # A cap on failed sign-ins through the tunnel, from every address
+  # together (so many addresses can't guess without limit). Successful ones
+  # don't count, and it never locks out the server itself (ssh -L).
+  test "failed sign-ins through the tunnel have a cap across every address" do
+    with_cloudflared_at(CLOUDFLARED) do
+      visitor = ->(i) { { "X-Forwarded-For" => CLOUDFLARED, "Cf-Ray" => "8f-MCI", "Cf-Connecting-Ip" => "198.51.#{i / 200}.#{i % 200}" } }
+      SessionsController::EVERYONE.times { |i| sign_in_attempt(visitor.(i)) }
+      assert_equal "Try again later.", sign_in_attempt(visitor.(9_000))
+      assert_match "another", sign_in_attempt("X-Forwarded-For" => "172.18.0.1"), "on the server itself (ssh -L), no global cap"
+    end
+  end
+
+  test "successful sign-ins don't count toward the cap" do
+    with_cloudflared_at(CLOUDFLARED) do
+      (SessionsController::EVERYONE + 1).times do |i|
+        post session_path, params: { email_address: users(:one).email_address, password: "password" },
+                           headers: { "X-Forwarded-For" => CLOUDFLARED, "Cf-Ray" => "8f-MCI", "Cf-Connecting-Ip" => "198.51.#{i / 200}.#{i % 200}" }
+      end
+      assert_response :redirect
+      assert_no_match "sign-in", response.location
+    end
   end
 
   test "https counts only from the tunnel" do
     post session_path, params: { email_address: users(:one).email_address, password: "password" },
                        headers: { "X-Forwarded-For" => "192.168.0.5", "X-Forwarded-Proto" => "https" }
     assert_no_match(/secure/i, response.headers["Set-Cookie"].to_s, "a LAN request saying https is still http")
+    # Puma sets rack.url_scheme from X-Forwarded-Proto before any middleware.
+    post session_path, params: { email_address: users(:one).email_address, password: "password" },
+                       headers: { "X-Forwarded-For" => "192.168.0.5", "X-Forwarded-Proto" => "https" }, env: { "rack.url_scheme" => "https", "HTTPS" => "on" }
+    assert_no_match(/secure/i, response.headers["Set-Cookie"].to_s, "not even when Puma already believed it")
 
     with_cloudflared_at(CLOUDFLARED) do
       post session_path, params: { email_address: users(:one).email_address, password: "password" },

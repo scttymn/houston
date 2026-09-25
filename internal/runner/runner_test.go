@@ -365,3 +365,30 @@ func TestRunPrunesTheBuildCacheHourly(t *testing.T) {
 		t.Errorf("prunes on the first pass = %v, want one", d.prunes)
 	}
 }
+
+// The deploy treats compose.yml's folder as the checkout (builds and
+// .houston are relative to it), so compose_path must stay in the checkout:
+// no folder on the way may be a symlink, and no .. (security fixes, review).
+func TestRunnerKeepsComposePathInTheCheckout(t *testing.T) {
+	for name, setupRepo := range map[string]func(r *Runner, j *mission.Job){
+		"a symlinked folder": func(r *Runner, j *mission.Job) {
+			outside := t.TempDir()
+			os.WriteFile(filepath.Join(outside, "compose.yml"), []byte("name: garage\n"), 0o644)
+			os.MkdirAll(filepath.Join(r.Workspace, "garage"), 0o755)
+			os.Symlink(outside, filepath.Join(r.Workspace, "garage", "deploy"))
+		},
+		"..": func(r *Runner, j *mission.Job) { j.Project.ComposePath = "../other/compose.yml" },
+	} {
+		r, m, _, deploys := setup(t)
+		j := job()
+		setupRepo(r, &j)
+		m.jobs = []mission.Job{j}
+		r.RunOnce(context.Background())
+		if len(*deploys) != 0 {
+			t.Errorf("%s: deployed anyway", name)
+		}
+		if len(m.reports) != 1 || m.reports[0].Status != "no_go" || !strings.Contains(m.reports[0].Error, "compose") {
+			t.Errorf("%s: reports %+v", name, m.reports)
+		}
+	}
+}

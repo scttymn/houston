@@ -9,6 +9,17 @@ class Session < ApplicationRecord
 
   belongs_to :user
 
+  # The session a cookie names, if it works for this request: made the same
+  # way (tunnel: the request came through Cloudflare, which adds Cf-Ray),
+  # and not ended. An ended one is deleted. Pages and the live updates both
+  # come through here.
+  def self.resume(id, tunnel:)
+    session = find_by(id:) if id
+    return unless session && session.tunnel == tunnel
+    return session.destroy && nil if session.ended?
+    session.tap(&:used!)
+  end
+
   def ended?
     created_at < LIFETIME.ago || (last_active_at || created_at) < IDLE.ago
   end

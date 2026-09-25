@@ -257,6 +257,8 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     Rails.cache.clear
     use_fake_docker(FakeDocker.new { failure("permission denied") }) { get root_path }
     assert_select ".port-notice", 0, "unknown: no notice"
+    use_fake_docker(bindings.(%({"80/tcp":[{"HostIp":"","HostPort":"3000"}]}))) { get root_path }
+    assert_select ".port-notice", 1, "unknown isn't remembered: asked again"
   ensure
     ENV.delete("HOUSTON_VERSION")
     Rails.cache.clear

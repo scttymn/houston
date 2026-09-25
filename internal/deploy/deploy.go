@@ -566,6 +566,13 @@ func (r *run) writeKamalFiles() error {
 	if err := writeFile(filepath.Join(houston, ".gitignore"), []byte("*\n"), 0o644); err != nil {
 		return err
 	}
+	// Kamal's working directory holds only what's generated here: Kamal runs
+	// hooks from .kamal/hooks and reads .kamal/secrets-common, so anything a
+	// repo commits under .houston/kamal goes first. (RemoveAll removes a
+	// symlink, not what it points at.)
+	if err := os.RemoveAll(filepath.Join(houston, "kamal")); err != nil {
+		return err
+	}
 	for _, sub := range [][]string{{"kamal"}, {"kamal", "config"}, {"kamal", ".kamal"}} {
 		d, err := project.GeneratedDir(r.dir, sub...)
 		if err != nil {

