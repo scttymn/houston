@@ -12,7 +12,7 @@ class ApiV1AuthTest < ActionDispatch::IntegrationTest
     travel_to(Time.utc(2026, 9, 23, 12)) do
       me(headers: { "Cf-Ray" => "8a1b2c3d-MCI", "Cf-Connecting-Ip" => "203.0.113.9" })
       assert_response :success
-      assert_equal({ "token" => "laptop", "server" => "svnmns.com", "version" => HoustonVersion.current, "latest" => nil }, json)
+      assert_equal({ "token" => "laptop", "server" => "svnmns.com", "version" => HoustonVersion.current, "latest" => nil, "updating" => nil }, json)
     end
     assert_equal Time.utc(2026, 9, 23, 12), @record.reload.last_used_at
 

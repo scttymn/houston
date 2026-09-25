@@ -25,3 +25,6 @@ production:
   poll_for_changes:
     class: PollForChangesJob
     schedule: every 10 minutes
+  settle_server_update:
+    class: ServerUpdateJob
+    schedule: every minute

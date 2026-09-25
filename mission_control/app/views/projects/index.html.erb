@@ -47,12 +47,35 @@
     <% end %>
   <% end %>
 
+  <% server_update = ServerUpdate.shown %>
+  <% if server_update&.status == "running" %>
+    <div class="notice notice--hold server-update">
+      <span class="mono">UPDATING</span>
+      <span class="notice__text">Updating to <%= server_update.to_version %> since <%= server_update.started_at.in_time_zone(@installation.zone).strftime("%H:%M %Z") %>. Mission Control restarts on the way; deploys and backups wait.<% if server_update.long? %> It's taking long: see <span class="mono">docker logs houston-update</span> on the server.<% end %></span>
+    </div>
+  <% elsif server_update %>
+    <div class="notice <%= server_update.status == "go" ? "notice--go" : "notice--nogo" %> server-update">
+      <span class="mono"><%= server_update.status == "go" ? "GO" : "NO-GO" %></span>
+      <span class="notice__text"><% if server_update.status == "go" %>Updated to <%= server_update.to_version %>.<% elsif server_update.status == "rolled_back" %>The update to <%= server_update.to_version %> failed, so this server went back to <%= server_update.from_version %>.<% else %>The update to <%= server_update.to_version %> failed. This server runs <%= HoustonVersion.current %>.<% end %></span>
+      <% if server_update.status != "go" && server_update.log.present? %>
+        <pre class="mono server-update__log"><%= server_update.log %></pre>
+      <% end %>
+    </div>
+  <% end %>
+
   <% if (newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release)) %>
     <div class="notice notice--hold update-notice" data-controller="clipboard">
       <span class="mono">UPDATE</span>
-      <span class="notice__text"><%= newer %> is out. This server runs <%= HoustonVersion.current %>. On the server:</span>
+      <span class="notice__text"><%= newer %> is out. This server runs <%= HoustonVersion.current %>.</span>
       <%= link_to "Release notes ↗", @installation.latest_release_url, target: "_blank", rel: "noopener noreferrer" %>
+      <% unless server_update&.status == "running" %>
+        <%= form_with url: server_update_path, class: "update-notice__start" do %>
+          <%= hidden_field_tag :version, newer, id: nil %>
+          <button type="submit" class="button button--small button--primary" data-turbo-confirm="Update this server to <%= newer %>? Mission Control restarts on the way, and deploys and backups wait until it's done. If <%= newer %> doesn't install, the server goes back to <%= HoustonVersion.current %>.">Update to <%= newer %></button>
+        <% end %>
+      <% end %>
       <div class="update-notice__run">
+        <span class="update-notice__or">Or on the server:</span>
         <code class="mono update-notice__command" data-clipboard-target="source"><%= LatestRelease.update_command(newer) %></code>
         <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
       </div>

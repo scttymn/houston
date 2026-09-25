@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_25_060000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_000000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -189,6 +189,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_060000) do
     t.text "value"
     t.index ["project_id", "key"], name: "index_secrets_on_project_id_and_key", unique: true
     t.index ["project_id"], name: "index_secrets_on_project_id"
+  end
+
+  create_table "server_updates", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.string "from_version", null: false
+    t.text "log"
+    t.datetime "started_at", null: false
+    t.string "status", default: "running", null: false
+    t.string "to_version", null: false
+    t.datetime "updated_at", null: false
+    t.index ["status"], name: "index_server_updates_one_running", unique: true, where: "status = 'running'"
   end
 
   create_table "sessions", force: :cascade do |t|

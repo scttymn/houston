@@ -9,14 +9,12 @@ module PortSwitch
   class Refused < StandardError; end
 
   HELPER = "houston-port-3000"
-  CONFIG_FILES = "com.docker.compose.project.config_files"
-  WORKING_DIR = "com.docker.compose.project.working_dir"
 
   # Saves the choice and starts the helper. Refused, with nothing saved,
   # when it can't be applied.
   def self.set!(open:)
-    labels = own_labels
-    config, dir = labels[CONFIG_FILES].to_s.split(",").first, labels[WORKING_DIR]
+    labels = OwnContainer.labels
+    config, dir = labels[OwnContainer::CONFIG_FILES].to_s.split(",").first, labels[OwnContainer::WORKING_DIR]
     raise Refused, "can't change it from here: this Mission Control wasn't started by Houston's installer" if config.blank? || dir.blank?
     image = ENV["HOUSTON_RUNNER_IMAGE"].presence or
       raise Refused, "can't change it from here yet: run the installer once more (it tells Mission Control the runner image to do it with)"
@@ -30,13 +28,4 @@ module PortSwitch
     Installation.current.update!(port_open: open)
     Rails.logger.info("Port 3000 is #{open ? "opening to the network" : "closing to the network"}: Mission Control restarts")
   end
-
-  def self.own_labels
-    result = DockerCommand.run("inspect", "--format", "{{json .Config.Labels}}", Socket.gethostname, timeout: 5)
-    labels = result.success ? JSON.parse(result.output) : {}
-    labels.is_a?(Hash) ? labels : {}
-  rescue JSON::ParserError
-    {}
-  end
-  private_class_method :own_labels
 end

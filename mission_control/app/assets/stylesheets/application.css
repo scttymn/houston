@@ -188,6 +188,11 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .update-notice { flex-wrap: wrap; }
 .update-notice__run { flex: 1 1 100%; display: flex; align-items: center; gap: 12px; }
 .update-notice__command { flex: 1; min-width: 0; overflow-wrap: anywhere; padding: 6px 10px; background: rgba(0, 0, 0, 0.06); font-size: 12px; }
+.update-notice__start { margin: 0 0 0 auto; }
+.update-notice__or { font-size: 13px; white-space: nowrap; }
+.server-update { flex-wrap: wrap; }
+.server-update .notice__text { flex: 1 1 0; min-width: 12em; }
+.server-update__log { flex: 1 1 100%; margin: 0; max-height: 16em; overflow: auto; padding: 8px 10px; background: rgba(0, 0, 0, 0.06); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .notice a { color: inherit; white-space: nowrap; }
 .board__body { display: flex; gap: 24px; align-items: flex-start; }
 .empty { flex-grow: 1; min-width: 0; }
@@ -204,9 +209,9 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .commands__copy { position: absolute; top: 8px; right: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--muted); background: var(--ink-2); color: #E8E4D8; font: 12px var(--text); cursor: pointer; }
 .preflight { width: 400px; flex-shrink: 0; }
 .preflight ul { margin: 0; padding: 0; list-style: none; }
-.preflight li { display: grid; grid-template-columns: 84px 1fr; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
+.preflight li { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--rule); }
 .preflight li > span:last-child { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
-.preflight small { font-size: 12px; color: var(--muted); }
+.preflight small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .state { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; padding-top: 2px; }
 .state--go { color: var(--go-fg); }
 .state--hold { color: var(--hold-fg); }
@@ -667,6 +672,9 @@ a.button--primary { color: var(--on-dark); }
 @media (max-width: 720px) {
   .notice { flex-wrap: wrap; }
   .notice a { white-space: normal; }
+  .update-notice__run { flex-wrap: wrap; }
+  .update-notice__or { flex: 1 1 100%; }
+  .update-notice__start { margin: 0; }
   .empty__head { flex-wrap: wrap; padding: 20px; }
   .empty__head h2 { font-size: 32px; }
   .path { padding: 20px; }

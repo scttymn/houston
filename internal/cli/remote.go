@@ -70,7 +70,9 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		// the projects request reports any real problem.
 		if me, err := client.Me(ctx); err == nil && me.Version != "" {
 			line := fmt.Sprintf("Houston %s at %s", me.Version, me.Server)
-			if me.Latest != "" {
+			if me.Updating != "" {
+				line += fmt.Sprintf(" (updating to %s)", me.Updating)
+			} else if me.Latest != "" {
 				line += fmt.Sprintf(" (%s available)", me.Latest)
 			}
 			fmt.Fprintln(stdout, line)

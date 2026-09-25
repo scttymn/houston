@@ -10,6 +10,9 @@ module UpdateNotice
     c && l && (l <=> c) == 1 ? latest : nil
   end
 
+  # A release's tag (vX.Y.Z), not a prerelease, a checkout's build or dev.
+  def self.release?(version) = numbers(version).present?
+
   def self.numbers(version) = version.to_s.match(RELEASE)&.captures&.map(&:to_i)
   private_class_method :numbers
 end

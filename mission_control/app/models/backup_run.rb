@@ -81,6 +81,8 @@ class BackupRun < ApplicationRecord
   def self.claim!(run)
     token = SecureRandom.urlsafe_base64(32)
     transaction do
+      # Mission Control restarts while the server updates: a backup waits.
+      return :busy if ServerUpdate.running?
       run.project.backup_runs.running.where(heartbeat_at: ...STALE_AFTER.ago).find_each(&:abandon!)
       return :busy if run.project.backup_runs.running.where.not(id: run.id).exists?
       # While a restore is queued or in flight, only its own runs (its safety

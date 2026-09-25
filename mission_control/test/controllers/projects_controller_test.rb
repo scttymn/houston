@@ -228,6 +228,54 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     ENV.delete("HOUSTON_VERSION")
   end
 
+  # docs/plans/update-from-mission-control.md, row 9.
+  test "the flight board updates the server" do
+    travel_to Time.utc(2026, 9, 25, 22, 54)
+    stub_tunnel
+    ENV["HOUSTON_VERSION"] = "v0.4.2"
+    Installation.current.update!(latest_release: "v0.4.3", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.4.3")
+    get root_path
+    assert_select ".update-notice" do
+      assert_select "form[action='#{server_update_path}'][method=post]" do
+        assert_select "input[name=version][value='v0.4.3']", 1
+        assert_select "button[data-turbo-confirm*='Mission Control restarts']", "Update to v0.4.3"
+      end
+      assert_select "[data-clipboard-target=source]", /HOUSTON_VERSION=v0\.4\.3/, "the command stays for SSH"
+    end
+
+    update = ServerUpdate.create!(to_version: "v0.4.3", from_version: "v0.4.2", status: "running", started_at: Time.zone.parse("2026-09-25 22:51:00 UTC"))
+    get root_path
+    assert_select ".update-notice form", 0, "no second update while one runs"
+    assert_select ".server-update.notice--hold .notice__text", /Updating to v0\.4\.3 since 22:51 UTC\. Mission Control restarts on the way; deploys and backups wait\./
+    assert_select ".server-update", { text: /taking long/, count: 0 }
+    update.update!(started_at: 25.minutes.ago)
+    get root_path
+    assert_select ".server-update .notice__text", /taking long.*docker logs houston-update/m
+
+    ENV["HOUSTON_VERSION"] = "v0.4.3"
+    update.update!(status: "go", finished_at: 1.minute.ago, log: "==> Starting Houston\n")
+    get root_path
+    assert_select ".server-update.notice--go .notice__text", /Updated to v0\.4\.3\./
+    assert_select ".update-notice", 0
+
+    ENV["HOUSTON_VERSION"] = "v0.4.2"
+    update.update!(status: "rolled_back", log: "curl: (22) The requested URL returned error: 404\n")
+    get root_path
+    assert_select ".server-update.notice--nogo" do
+      assert_select ".notice__text", /The update to v0\.4\.3 failed, so this server went back to v0\.4\.2\./
+      assert_select "pre", /returned error: 404/
+    end
+    update.update!(status: "no_go")
+    get root_path
+    assert_select ".server-update.notice--nogo .notice__text", /The update to v0\.4\.3 failed\./
+
+    update.update!(finished_at: 25.hours.ago)
+    get root_path
+    assert_select ".server-update", 0, "a day later, it's gone"
+  ensure
+    ENV.delete("HOUSTON_VERSION")
+  end
+
   test "the flight board listens for changes" do
     stub_tunnel
     make_deploy(make_project("equip"), 1, "go")

@@ -42,3 +42,4 @@ install/test/install-ssh-key.sh                     # houston's SSH key, in a co
 ## Releasing
 Tag `vX.Y.Z` and push the tag, only when a human asks. The workflow must go green; then a server updates to it (the latest) with:
 `curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo sh`
+or, from anywhere, the flight board's Update button or `houston update` (docs/plans/update-from-mission-control.md).

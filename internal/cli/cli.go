@@ -247,6 +247,19 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	}
 	port.Flags().BoolVar(&portJSON, "json", false, "print the API's JSON")
 	root.AddCommand(port)
+	root.AddCommand(&cobra.Command{
+		Use:   "update [vX.Y.Z]",
+		Short: "Update the Houston server to the latest release (or vX.Y.Z), from anywhere, and follow it to its result",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			version := ""
+			if len(args) > 0 {
+				version = args[0]
+			}
+			code = runUpdate(file, version, stdout, stderr)
+			return nil
+		},
+	})
 
 	var snapshotsJSON, backupFollow bool
 	snapshots := command("snapshots", "A project's snapshots on the server (code and data together), newest first", func() int {

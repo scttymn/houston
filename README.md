@@ -47,6 +47,8 @@ Setup code       XXXX-XXXX
 
 The flight board's header and `houston status` say which version is running. When a newer release is out, the flight board says so, with its release notes and the update command to copy, and `houston status` adds "(vX.Y.Z available)". Mission Control checks GitHub every 6 hours; nothing updates by itself.
 
+**Or update from anywhere:** the flight board's **Update to vX.Y.Z** button (or `houston update`, which follows it to the end) runs that release's installer on the server for you. It waits until no deploy, restore or backup is running, and holds new ones until it's done. Mission Control restarts on the way, then the board says how it went. If the new version doesn't install, the server goes back to the one it ran. The first version with the button has to be installed with the command above.
+
 **From a checkout** (working on Houston): `sudo HOUSTON_SOURCE=/path/to/houston sh install/install.sh` builds everything there, instead of pulling a release. The flight board then says `SOURCE <commit>`. Set one of `HOUSTON_VERSION` and `HOUSTON_SOURCE`, not both.
 
 ## 2. First run (in the browser)

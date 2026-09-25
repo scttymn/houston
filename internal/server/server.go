@@ -111,10 +111,11 @@ func New(c Config) *Client { return &Client{c: c, http: &http.Client{Timeout: 30
 
 // Me is the token's name and the server's base domain.
 type Me struct {
-	Token   string `json:"token"`
-	Server  string `json:"server"`
-	Version string `json:"version"` // the Houston release it runs, "source <sha>" or "dev"
-	Latest  string `json:"latest"`  // a newer release, when one is out
+	Token    string `json:"token"`
+	Server   string `json:"server"`
+	Version  string `json:"version"`  // the Houston release it runs, "source <sha>" or "dev"
+	Latest   string `json:"latest"`   // a newer release, when one is out
+	Updating string `json:"updating"` // the release the server is updating to, while it does
 }
 
 func (cl *Client) Me(ctx context.Context) (Me, error) {
@@ -723,4 +724,50 @@ func (cl *Client) SetPort(ctx context.Context, open bool) (PortView, error) {
 		return v, fmt.Errorf("%s", message(body))
 	}
 	return v, json.Unmarshal(body, &v)
+}
+
+// UpdateView is the server's version, a newer release, and the last update
+// started from Mission Control (docs/plans/update-from-mission-control.md).
+type UpdateView struct {
+	Version string        `json:"version"`
+	Latest  string        `json:"latest"`
+	Update  *ServerUpdate `json:"update"`
+	Message string        `json:"message"`
+}
+
+// ServerUpdate is one update: running, go, rolled_back or no_go.
+type ServerUpdate struct {
+	ID     int    `json:"id"`
+	To     string `json:"to"`
+	From   string `json:"from"`
+	Status string `json:"status"`
+	Log    string `json:"log"`
+}
+
+func (cl *Client) Update(ctx context.Context) (UpdateView, error) {
+	var v UpdateView
+	return v, cl.getJSON(ctx, "/api/v1/update", &v)
+}
+
+// StartUpdate updates the server to version ("" for the latest release).
+func (cl *Client) StartUpdate(ctx context.Context, version string) (UpdateView, error) {
+	var v UpdateView
+	payload := map[string]string{}
+	if version != "" {
+		payload["version"] = version
+	}
+	status, body, err := cl.do(ctx, http.MethodPost, "/api/v1/update", payload)
+	if err != nil {
+		return v, err
+	}
+	if status != http.StatusAccepted {
+		return v, fmt.Errorf("%s", message(body))
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return v, err
+	}
+	if v.Update == nil {
+		return v, fmt.Errorf("the server didn't say which update it started")
+	}
+	return v, nil
 }

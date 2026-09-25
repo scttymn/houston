@@ -153,8 +153,10 @@ class Deploy < ApplicationRecord
   # Hands the oldest claimable queued deploy to runner: [deploy, token,
   # the number it took over or nil], or nil. Silent in-flight deploys are
   # finished first; a project with a live one keeps its queued deploy back.
+  # None while the server updates: the installer recreates the runners.
   def self.claim_next!(runner:)
     transaction do
+      return nil if ServerUpdate.running?
       took_over = in_flight.where(heartbeat_at: ...STALE_AFTER.ago).to_h { |stale| [ stale.project_id, stale.abandon! ] }
       candidate = where(status: "queued").where.not(project_id: in_flight.select(:project_id)).order(:created_at, :id).first
       deploy, token = candidate && claim!(candidate, runner:)
