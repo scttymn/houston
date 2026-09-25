@@ -21,7 +21,7 @@ class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
     get settings_path
     assert_select ".settings__body section#cloudflare", /BASE DOMAIN\s+svnmns\.com/
     assert_select "section#cloudflare", /DNS\s+Host by host/
-    assert_select "section#cloudflare .ingress", /admin\.svnmns\.com.*Mission Control.*hooks\.svnmns\.com.*webhook paths only.*everything else.*Your apps/m
+    assert_select "section#cloudflare turbo-frame#cloudflare-live", 0, "no live panel before there's a tunnel (with one: settings/cloudflare_controller_test.rb)"
     assert_select "section#time-zone .inline-form select[name=time_zone]"
   end
 

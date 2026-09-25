@@ -2,6 +2,8 @@ require "test_helper"
 
 # The latest Houston release, checked on a schedule (docs/plans/update-available.md).
 class LatestReleaseTest < ActiveSupport::TestCase
+  # Included here, not left to whichever test loaded it first (it once passed only by test order).
+  include Turbo::Broadcastable::TestHelper
   URL = "https://api.github.com/repos/scttymn/houston/releases/latest"
 
   def github(tag: "v0.1.1", url: "https://github.com/scttymn/houston/releases/tag/v0.1.1", status: 200)

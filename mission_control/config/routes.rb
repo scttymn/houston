@@ -54,6 +54,10 @@ Rails.application.routes.draw do
         end
       end
       resource :settings, only: %i[ show update ]
+      resource :cloudflare, only: :show, controller: "cloudflare" do
+        put :token
+        post :repair
+      end
       resources :storage, only: %i[ index update ], param: :name
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
@@ -112,6 +116,10 @@ Rails.application.routes.draw do
       end
     end
     resources :tokens, only: %i[ index create destroy ]
+    resource :cloudflare, only: :show, controller: "cloudflare" do
+      patch :token
+      post :repair
+    end
   end
 
   root "projects#index"

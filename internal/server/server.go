@@ -624,3 +624,76 @@ func (cl *Client) SSHTarget(getenv func(string) string) string {
 	}
 	return cl.c.SSH
 }
+
+// Cloudflare (docs/plans/cloudflare-settings.md): the view, a new token, repair.
+type CloudflareView struct {
+	Tunnel *struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"tunnel"`
+	Connections []struct {
+		Colo    string `json:"colo"`
+		Version string `json:"version"`
+		Origin  string `json:"origin"`
+		Since   string `json:"since"`
+	} `json:"connections"`
+	Routes        []CloudflareRoute `json:"routes"`
+	MissingRoutes []CloudflareRoute `json:"missing_routes"`
+	Drift         bool              `json:"drift"`
+	Records       []struct {
+		Zone    string `json:"zone"`
+		Name    string `json:"name"`
+		Project string `json:"project"`
+		Proxied bool   `json:"proxied"`
+		Here    bool   `json:"here"`
+	} `json:"records"`
+	Problems []string `json:"problems"`
+}
+
+type CloudflareRoute struct {
+	Hostname *string `json:"hostname"`
+	Path     *string `json:"path"`
+	Service  string  `json:"service"`
+	Drift    bool    `json:"drift"`
+}
+
+type CloudflareTokenResult struct {
+	Replaced bool `json:"replaced"`
+	Checks   []struct {
+		OK    bool   `json:"ok"`
+		Label string `json:"label"`
+	} `json:"checks"`
+}
+
+type CloudflareRepairResult struct {
+	Item   string `json:"item"`
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+}
+
+func (cl *Client) Cloudflare(ctx context.Context) (CloudflareView, error) {
+	var v CloudflareView
+	return v, cl.getJSON(ctx, "/api/v1/cloudflare", &v)
+}
+
+// ReplaceCloudflareToken sends a new token; a refused one (422) still
+// returns its checks, so they can be shown.
+func (cl *Client) ReplaceCloudflareToken(ctx context.Context, token string) (CloudflareTokenResult, error) {
+	var res CloudflareTokenResult
+	status, body, err := cl.do(ctx, http.MethodPut, "/api/v1/cloudflare/token", map[string]string{"token": token})
+	if err != nil {
+		return res, err
+	}
+	if status != http.StatusOK && status != http.StatusUnprocessableEntity {
+		return res, fmt.Errorf("%s", message(body))
+	}
+	return res, json.Unmarshal(body, &res)
+}
+
+func (cl *Client) RepairCloudflare(ctx context.Context) ([]CloudflareRepairResult, error) {
+	var res struct {
+		Results []CloudflareRepairResult `json:"results"`
+	}
+	return res.Results, cl.postJSON(ctx, "/api/v1/cloudflare/repair", nil, &res)
+}

@@ -1,0 +1,56 @@
+<%# What Cloudflare has, read after the page loads (CloudflareView). %>
+<turbo-frame id="cloudflare-live">
+  <% if view.problems.any? %>
+    <div class="notice notice--hold cf-problems">
+      <span class="mono">HOLD</span>
+      <span class="notice__text">Cloudflare didn't answer everything: <%= view.problems.join("; ") %>.</span>
+    </div>
+  <% end %>
+
+  <% if (t = view.tunnel) %>
+    <div class="cf-block cf-tunnel" data-controller="clipboard">
+      <span class="mono facts-strip__label">TUNNEL</span>
+      <div class="cf-tunnel__line">
+        <span class="mono"><%= t.name %></span>
+        <span class="mono state state--<%= t.status == "healthy" ? "go" : "hold" %>"><%= t.status %></span>
+        <span class="muted">since <%= t.created_at ? l(t.created_at, format: :short) : "—" %></span>
+      </div>
+      <div class="cf-tunnel__line">
+        <code class="mono muted" data-clipboard-target="source"><%= t.id %></code>
+        <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy ID</button>
+      </div>
+      <ul class="rows cf-connections">
+        <% view.connections.each do |c| %>
+          <li><span class="mono"><%= c.colo %></span><span class="mono muted">cloudflared <%= c.version %></span><span class="mono muted"><%= c.origin %></span><span class="muted"><%= c.since ? "connected #{time_ago_in_words(c.since)} ago" : "" %></span></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <% if view.routes.any? || view.missing_routes.any? %>
+    <div class="cf-block">
+      <span class="mono facts-strip__label">ROUTES<%= " · DRIFT: REPAIR PUTS THEM BACK" if view.drift? %></span>
+      <ul class="rows cf-routes">
+        <% view.routes.each do |r| %>
+          <li><span class="mono"><%= r.hostname || "everything else" %><%= " #{r.path}" if r.path %></span><span class="rule__arrow">→</span><span class="mono muted"><%= r.service %></span><% if r.drift %><span class="mono state state--nogo">DRIFT</span><% end %></li>
+        <% end %>
+        <% view.missing_routes.each do |r| %>
+          <li><span class="mono"><%= r.hostname || "everything else" %><%= " #{r.path}" if r.path %></span><span class="rule__arrow">→</span><span class="mono muted"><%= r.service %></span><span class="mono state state--nogo">MISSING</span></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="cf-block">
+    <span class="mono facts-strip__label">HOUSTON'S DNS RECORDS</span>
+    <% if view.records.empty? %>
+      <p class="muted">None found.</p>
+    <% else %>
+      <ul class="rows cf-records">
+        <% view.records.each do |r| %>
+          <li><span class="mono"><%= r.name %></span><span class="mono muted"><%= r.project %></span><span class="<%= r.here ? "" : "muted" %>"><%= r.here ? "this server" : "another server" %></span><span class="muted"><%= r.proxied ? "proxied" : "DNS only" %></span></li>
+        <% end %>
+      </ul>
+    <% end %>
+  </div>
+</turbo-frame>

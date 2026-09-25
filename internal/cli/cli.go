@@ -199,6 +199,32 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	webhook.Flags().BoolVar(&webhookRotate, "rotate", false, "make a new secret (then paste it into the git host)")
 	root.AddCommand(link, webhook)
 
+	// Cloudflare (docs/plans/cloudflare-settings.md): the view, a new token, repair.
+	var cloudflareJSON bool
+	cloudflare := command("cloudflare", "Cloudflare for this server: the tunnel and its connections, its routes, Houston's DNS records", func() int {
+		return runCloudflare(file, cloudflareJSON, stdout, stderr)
+	})
+	cloudflare.Flags().BoolVar(&cloudflareJSON, "json", false, "print the API's JSON")
+	cloudflare.AddCommand(
+		&cobra.Command{
+			Use:   "token",
+			Short: "Replace Houston's Cloudflare API token, from stdin (a hidden prompt on a terminal); checked before it's saved",
+			RunE: func(_ *cobra.Command, args []string) error {
+				if len(args) > 0 {
+					fmt.Fprintln(stderr, "houston cloudflare token: the token comes from stdin (or a hidden prompt), never on the command line")
+					code = exitUsage
+					return nil
+				}
+				code = runCloudflareToken(file, stdin, stdout, stderr)
+				return nil
+			},
+		},
+		command("repair", "Push the tunnel's routes again and re-point Houston's DNS records (only its own)", func() int {
+			return runCloudflareRepair(file, stdout, stderr)
+		}),
+	)
+	root.AddCommand(cloudflare)
+
 	var snapshotsJSON, backupFollow bool
 	snapshots := command("snapshots", "A project's snapshots on the server (code and data together), newest first", func() int {
 		return runSnapshots(file, projectFlag, snapshotsJSON, stdout, stderr)

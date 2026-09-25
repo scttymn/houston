@@ -50,13 +50,38 @@
         <div><span class="mono facts-strip__label">TUNNEL</span>
           <span><%= status_word(tunnel.go?) %><% if tunnel.connections.positive? %> <span class="mono muted">· <%= tunnel.connections %> CONN</span><% end %></span></div>
       </div>
-      <div class="ingress">
-        <span class="mono facts-strip__label">INGRESS RULES</span>
-        <div><span class="mono">admin.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control</span></div>
-        <div><span class="mono">hooks.<%= base %></span><span class="rule__arrow">→</span><span>Mission Control, webhook paths only (keep it outside Cloudflare Access)</span></div>
-        <div><span class="mono">everything else</span><span class="rule__arrow">→</span><span>Your apps, matched by hostname</span></div>
-      </div>
-      <p class="panel__row panel__row--muted">Houston only touches DNS records commented <span class="mono">managed-by:houston</span>.</p>
+      <% if @installation.tunnel_id.present? %>
+        <turbo-frame id="cloudflare-live" src="<%= settings_cloudflare_path %>" loading="lazy">
+          <p class="panel__row panel__row--muted">Asking Cloudflare for the tunnel, its routes and Houston's records…</p>
+        </turbo-frame>
+
+        <% if @repair_results %>
+          <div class="cf-block">
+            <span class="mono facts-strip__label">REPAIR</span>
+            <ul class="rows cf-repair">
+              <% @repair_results.each do |r| %>
+                <li><span class="mono"><%= r.item %></span><span class="mono state state--<%= r.state.in?(%w[OK DNS\ OK]) ? "go" : "nogo" %>"><%= r.state %></span><span class="muted"><%= r.reason %></span></li>
+              <% end %>
+            </ul>
+          </div>
+        <% end %>
+
+        <div class="cf-actions">
+          <%= form_with url: token_settings_cloudflare_path, method: :patch, class: "inline-form cf-token", data: { turbo: false } do |f| %>
+            <%= f.label :api_token, "Replace the API token", class: "mono facts-strip__label" %>
+            <%= f.password_field :api_token, autocomplete: "off", class: "mono", placeholder: "The new token's value" %>
+            <%= f.submit "Check and replace", class: "button button--small" %>
+          <% end %>
+          <% if @token_checks %>
+            <% @token_checks.each do |c| %>
+              <p class="check"><span class="mono check__state check__state--<%= c.ok ? "go" : "nogo" %>"><%= c.ok ? "GO" : "NO-GO" %></span><span><%= c.label %></span></p>
+            <% end %>
+            <p class="muted">The old token is still in use.</p>
+          <% end %>
+          <%= button_to "Repair routes and records", repair_settings_cloudflare_path, class: "button button--small", form: { class: "cf-repair-form", data: { turbo: false } } %>
+        </div>
+      <% end %>
+      <p class="panel__row panel__row--muted">The new token needs Account · Cloudflare Tunnel · Edit, and Zone · DNS · Edit on <%= base %> and on every project domain's zone. Houston only touches DNS records commented <span class="mono">managed-by:houston</span>.</p>
     </section>
 
     <section class="settings-section" id="storage">

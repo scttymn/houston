@@ -595,6 +595,7 @@ a.button--primary { color: var(--on-dark); }
 .settings__body .board__title h1.disp { font-size: 44px; }
 .settings-section { display: flex; flex-direction: column; border: 1px solid var(--ink); background: var(--surface); }
 .settings-section .panel__head .panel__title { font-size: 26px; }
+.settings-section .panel__head { flex-wrap: wrap; gap: 8px 12px; }
 .settings-section--new { border: 2px solid var(--signal); }
 .settings-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
 .settings-facts > div { display: flex; flex-direction: column; gap: 6px; padding: 16px 20px; border-right: 1px solid var(--rule); font-size: 17px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
@@ -602,6 +603,25 @@ a.button--primary { color: var(--on-dark); }
 .settings-facts .status__go { color: var(--go-fg); }
 .settings-facts .status__nogo { color: var(--nogo-fg); }
 .ingress { display: flex; flex-direction: column; gap: 0; padding: 16px 20px 6px; }
+/* Settings › Cloudflare's live panel (settings/cloudflare/_live): ruled rows like the ingress list. */
+.cf-block { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px 6px; border-bottom: 1px solid var(--rule); font-size: 14px; min-width: 0; }
+.cf-tunnel__line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.cf-tunnel__line code { overflow-wrap: anywhere; }
+.cf-block .rows li { gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rule); }
+.cf-block .rows li:last-child { border-bottom: 0; }
+.cf-connections li { grid-template-columns: 72px 170px 140px minmax(0, 1fr); }
+.cf-routes li { grid-template-columns: minmax(0, 1.3fr) 24px minmax(0, 1fr) 64px; }
+.cf-records li { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 110px 70px; }
+.cf-repair li { grid-template-columns: minmax(0, 1.3fr) 110px minmax(0, 1fr); }
+.cf-block .rows li > * { min-width: 0; overflow-wrap: anywhere; }
+.cf-problems { margin: 0; }
+.cf-actions { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--rule); }
+.cf-token input[type=password] { flex: 1 1 240px; height: 36px; padding: 0 10px; border: 1px solid var(--ink); background: var(--white); color: var(--ink); font: 14px var(--mono, monospace); max-width: 100%; }
+.cf-repair-form { margin: 0; }
+@media (max-width: 600px) {
+  .cf-connections li, .cf-routes li, .cf-records li, .cf-repair li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .cf-routes .rule__arrow { display: none; }
+}
 .ingress .facts-strip__label { margin-bottom: 4px; }
 .ingress > div { display: grid; grid-template-columns: 260px 40px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
 .ingress > div:last-child { border-bottom: 0; }
