@@ -28,12 +28,14 @@ KAMAL_IMAGE="ghcr.io/basecamp/kamal:v2.12.0@sha256:7b5be276aa17bbe122887f6a1ff12
 REGISTRY_IMAGE="registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649"
 RUNNER_IMAGE="houston/runner:local"
 RUNNERS="${HOUSTON_RUNNERS:-2}"
-# Where Mission Control's port 3000 listens (an IPv4 address). Unset: open to
-# the network until Cloudflare is connected, then 127.0.0.1 (choose_bind).
+# Where Mission Control's port 3000 listens (an IPv4 address). Unset: the
+# choice saved in Settings › Port 3000 (open on a new install; choose_bind).
 HOUSTON_BIND="${HOUSTON_BIND:-}"
 
 say() { printf '%s\n' "$*"; }
-compose() { docker compose -f "$HOUSTON_DIR/compose.yml" "$@"; }
+# compose: with the bind this run chose (choose_bind); compose.yml's default
+# is 127.0.0.1.
+compose() { HOUSTON_BIND="${bind:-}" docker compose -f "$HOUSTON_DIR/compose.yml" "$@"; }
 step() { printf '==> %s\n' "$*"; }
 fail() { printf 'houston install: %s\n' "$*" >&2; exit 1; }
 has() { command -v "$1" >/dev/null 2>&1; }
@@ -404,11 +406,12 @@ RUNNER
   done
 }
 
-# choose_bind: where port 3000 listens. A first install opens it to the
-# network, for setup in a browser. Once Cloudflare is connected, admin.<base>
-# is the way in, so a rerun binds it to 127.0.0.1 (reach it with ssh -L). A
-# rerun that can't ask the installed Mission Control binds 127.0.0.1 too, and
-# the report says how to open it. HOUSTON_BIND chooses.
+# choose_bind: where port 3000 listens this run. compose.yml binds
+# ${HOUSTON_BIND:-127.0.0.1}. A first install opens it to the network, for
+# setup in a browser. A rerun keeps the choice saved in Settings › Port 3000
+# (open unless someone closed it; an older Mission Control has no choice
+# saved: open, as it was). A rerun that can't ask binds 127.0.0.1, and the
+# report says how to open it. HOUSTON_BIND chooses for this run.
 choose_bind() {
   bind_unknown=""
   if [ -n "$HOUSTON_BIND" ]; then
@@ -416,11 +419,12 @@ choose_bind() {
   elif [ ! -f "$HOUSTON_DIR/compose.yml" ]; then
     bind=0.0.0.0
   else
-    connected=0
-    compose run --rm --no-deps -T mission-control bin/rails runner 'exit(Installation.connected? ? 0 : 3)' >/dev/null 2>&1 || connected=$?
-    case "$connected" in
-      0) bind=127.0.0.1 ;;
-      3) bind=0.0.0.0 ;;
+    saved=0
+    compose run --rm --no-deps -T mission-control bin/rails runner \
+      'i = Installation.current; exit(i.has_attribute?(:port_open) && !i.port_open ? 4 : 0)' >/dev/null 2>&1 || saved=$?
+    case "$saved" in
+      0) bind=0.0.0.0 ;;
+      4) bind=127.0.0.1 ;;
       *) bind=127.0.0.1 bind_unknown=1 ;;
     esac
   fi
@@ -450,10 +454,13 @@ services:
       HOUSTON_TUNNEL_TOKEN_PATH: /houston/tunnel-token
       HOUSTON_RUNNERS: "$RUNNERS"
       HOUSTON_TOOLS_IMAGE: $IMAGE
+      # Settings › Port 3000 recreates Mission Control with the runner image
+      # (it has docker compose).
+      HOUSTON_RUNNER_IMAGE: $RUNNER_IMAGE
       # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
       RAILS_MAX_THREADS: "8"
     ports:
-      - "$bind:3000:80"
+      - "\${HOUSTON_BIND:-127.0.0.1}:3000:80"
     group_add:
       - "$docker_gid"
     volumes:
@@ -566,12 +573,12 @@ report() {
     say "Houston $(installed_version) is running."
     say "Finish setup at  $url"
     say "Setup code       $code"
-    [ "$bind" = 0.0.0.0 ] && say "When setup is done, run this installer again: it closes port 3000 to the network."
+    [ "$bind" = 0.0.0.0 ] && say "Port 3000 is plain HTTP, open to your network for setup. Once admin.<your base domain> works, you can close it in Settings › Port 3000."
   else
     say ""
     say "Houston $(installed_version) is running. Setup is already complete. Sign in at https://admin.<your base domain>."
     if [ "$bind" = 0.0.0.0 ]; then
-      say "Port 3000 is open to your network, over plain HTTP (HOUSTON_BIND=0.0.0.0)."
+      say "Port 3000 is open to your network, over plain HTTP. Close it in Settings › Port 3000 (or: houston port close), especially on a server with a public address."
       return 0
     fi
   fi
@@ -579,7 +586,7 @@ report() {
     say "Port 3000 answers only on this server. From another machine: ssh -L 3000:127.0.0.1:3000 <you>@${address:-<this server>}, then open http://localhost:3000."
   fi
   if [ -n "${bind_unknown:-}" ]; then
-    say "Couldn't ask Mission Control whether setup is done, so port 3000 is closed to the network. To open it for setup, run this installer again with HOUSTON_BIND=0.0.0.0."
+    say "Couldn't ask Mission Control for the choice in Settings › Port 3000, so port 3000 is closed to the network. Open it there, or run this installer again with HOUSTON_BIND=0.0.0.0."
   fi
 }
 

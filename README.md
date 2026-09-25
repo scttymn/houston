@@ -64,13 +64,13 @@ Open the URL. The three steps:
 
 Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of it is optional and recommended. Keep `hooks.<base>` outside Access.
 
-**Then close port 3000: run the installer again.** Port 3000 is plain HTTP, open to your network for setup. Once Cloudflare is connected, a rerun binds it to `127.0.0.1`, so Mission Control answers only at `admin.<base>` and on the server itself. Until then the flight board says it's open. If you need Mission Control without Cloudflare, go through SSH:
+**Port 3000 stays open until you close it.** It's plain HTTP, open to your network, which is handy at home and risky on a server with a public address: Docker publishes it straight past the server's firewall. **Settings › Port 3000** shows whether it's open, and closes or opens it (Mission Control restarts for a few seconds; so does `houston port close` or `houston port open`). Closed, it's bound to `127.0.0.1`, so Mission Control answers only at `admin.<base>` and on the server itself. Updates keep your choice. If you need Mission Control without Cloudflare while it's closed, go through SSH:
 
 ```sh
 ssh -L 3000:127.0.0.1:3000 you@<server>    # then open http://localhost:3000
 ```
 
-`HOUSTON_BIND=<IPv4 address>` chooses where port 3000 listens: `0.0.0.0` opens it again, or give a VPN address. Give it on every run: without it, the installer decides again. Sign-ins end after two weeks unused, and after 30 days at most. A sign-in made on port 3000 doesn't work at `admin.<base>`, and the other way round.
+`HOUSTON_BIND=<IPv4 address>` on the installer chooses where port 3000 listens for that run, overriding the saved choice: a VPN address, for example. Give it on every run. Sign-ins end after two weeks unused, and after 30 days at most. A sign-in made on port 3000 doesn't work at `admin.<base>`, and the other way round.
 
 ## 3. Install the CLI (your laptop)
 

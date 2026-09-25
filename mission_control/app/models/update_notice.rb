@@ -10,8 +10,6 @@ module UpdateNotice
     c && l && (l <=> c) == 1 ? latest : nil
   end
 
-  def self.release?(version) = numbers(version).present?
-
   def self.numbers(version) = version.to_s.match(RELEASE)&.captures&.map(&:to_i)
   private_class_method :numbers
 end

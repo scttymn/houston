@@ -697,3 +697,30 @@ func (cl *Client) RepairCloudflare(ctx context.Context) ([]CloudflareRepairResul
 	}
 	return res.Results, cl.postJSON(ctx, "/api/v1/cloudflare/repair", nil, &res)
 }
+
+// PortView is Settings › Port 3000: what it's bound to now (Address empty
+// when Mission Control can't tell), and the saved choice.
+type PortView struct {
+	Open    bool   `json:"open"`
+	Address string `json:"address"`
+	Saved   string `json:"saved"`
+	Message string `json:"message"`
+}
+
+func (cl *Client) Port(ctx context.Context) (PortView, error) {
+	var v PortView
+	return v, cl.getJSON(ctx, "/api/v1/port", &v)
+}
+
+// SetPort opens or closes port 3000; Mission Control restarts to apply it.
+func (cl *Client) SetPort(ctx context.Context, open bool) (PortView, error) {
+	var v PortView
+	status, body, err := cl.do(ctx, http.MethodPut, "/api/v1/port", map[string]bool{"open": open})
+	if err != nil {
+		return v, err
+	}
+	if status != http.StatusAccepted {
+		return v, fmt.Errorf("%s", message(body))
+	}
+	return v, json.Unmarshal(body, &v)
+}

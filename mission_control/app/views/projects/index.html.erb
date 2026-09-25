@@ -47,19 +47,6 @@
     <% end %>
   <% end %>
 
-  <% if PortExposure.open? %>
-    <div class="notice notice--hold update-notice port-notice" data-controller="clipboard">
-      <span class="mono">HOLD</span>
-      <span class="notice__text">Port 3000 is open to your network, over plain HTTP. Mission Control is at <span class="mono">admin.<%= base %></span> now, so close it: run the installer again on the server, and it binds port 3000 to 127.0.0.1.</span>
-      <% if UpdateNotice.release?(HoustonVersion.current) %>
-        <div class="update-notice__run">
-          <code class="mono update-notice__command" data-clipboard-target="source"><%= LatestRelease.update_command(HoustonVersion.current) %></code>
-          <button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
-        </div>
-      <% end %>
-    </div>
-  <% end %>
-
   <% if (newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release)) %>
     <div class="notice notice--hold update-notice" data-controller="clipboard">
       <span class="mono">UPDATE</span>

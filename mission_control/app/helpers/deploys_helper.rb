@@ -7,9 +7,9 @@ module DeploysHelper
   end
 
   # The status as the design's pill: a dot and the word, on its colour.
-  def state_pill(status)
+  def state_pill(status, label = nil)
     status = status.to_sym
-    tag.span(class: "mono state state-pill state--#{status.to_s.dasherize}") { tag.span(class: "state-pill__dot") + STATE_LABELS.fetch(status) }
+    tag.span(class: "mono state state-pill state--#{status.to_s.dasherize}") { tag.span(class: "state-pill__dot") + (label || STATE_LABELS.fetch(status)) }
   end
 
   # 108 → "1m 48s"

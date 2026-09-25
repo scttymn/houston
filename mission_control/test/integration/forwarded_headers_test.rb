@@ -56,6 +56,7 @@ class ForwardedHeadersTest < ActionDispatch::IntegrationTest
   # together (so many addresses can't guess without limit). Successful ones
   # don't count, and it never locks out the server itself (ssh -L).
   test "failed sign-ins through the tunnel have a cap across every address" do
+    freeze_time # the counts are per fixed window
     with_cloudflared_at(CLOUDFLARED) do
       visitor = ->(i) { { "X-Forwarded-For" => CLOUDFLARED, "Cf-Ray" => "8f-MCI", "Cf-Connecting-Ip" => "198.51.#{i / 200}.#{i % 200}" } }
       SessionsController::EVERYONE.times { |i| sign_in_attempt(visitor.(i)) }
@@ -65,6 +66,7 @@ class ForwardedHeadersTest < ActionDispatch::IntegrationTest
   end
 
   test "successful sign-ins don't count toward the cap" do
+    freeze_time # the counts are per fixed window
     with_cloudflared_at(CLOUDFLARED) do
       (SessionsController::EVERYONE + 1).times do |i|
         post session_path, params: { email_address: users(:one).email_address, password: "password" },

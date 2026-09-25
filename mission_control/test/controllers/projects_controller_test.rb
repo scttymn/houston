@@ -1,11 +1,9 @@
 require "test_helper"
 require_relative "../support/cloudflare_stubs"
-require_relative "../support/fake_docker"
 require_relative "../support/project_helpers"
 
 class ProjectsControllerTest < ActionDispatch::IntegrationTest
   include CloudflareStubs
-  include FakeDockerHelper
   include ProjectHelpers
 
   setup do
@@ -228,40 +226,6 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select ".update-notice", 0, "current"
   ensure
     ENV.delete("HOUSTON_VERSION")
-  end
-
-  # Security audit H3: the installer's first run opens port 3000 to the
-  # network for setup; once admin.<base> is the way in, a rerun closes it.
-  # Mission Control reads its own container's ports to say so.
-  test "the flight board says to close port 3000 while it's open to the network" do
-    stub_tunnel
-    Rails.cache.clear
-    ENV["HOUSTON_VERSION"] = "v0.3.0"
-    bindings = ->(json) { FakeDocker.new { |args| DockerCommand::Result.new(success: true, output: json) if args.first == "inspect" } }
-
-    use_fake_docker(bindings.(%({"80/tcp":[{"HostIp":"","HostPort":"3000"}]}))) do |docker|
-      get root_path
-      assert_select ".port-notice" do
-        assert_select ".notice__text", /Port 3000 is open to your network/
-        assert_select "[data-clipboard-target=source]", "curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.3.0 sh"
-      end
-      assert_equal [ "inspect", "--format", "{{json .HostConfig.PortBindings}}", Socket.gethostname ], docker.calls.first.args
-      get root_path
-      assert_equal 1, docker.calls.size, "read once per container"
-    end
-
-    Rails.cache.clear
-    use_fake_docker(bindings.(%({"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"}]}))) { get root_path }
-    assert_select ".port-notice", 0, "closed"
-
-    Rails.cache.clear
-    use_fake_docker(FakeDocker.new { failure("permission denied") }) { get root_path }
-    assert_select ".port-notice", 0, "unknown: no notice"
-    use_fake_docker(bindings.(%({"80/tcp":[{"HostIp":"","HostPort":"3000"}]}))) { get root_path }
-    assert_select ".port-notice", 1, "unknown isn't remembered: asked again"
-  ensure
-    ENV.delete("HOUSTON_VERSION")
-    Rails.cache.clear
   end
 
   test "the flight board listens for changes" do

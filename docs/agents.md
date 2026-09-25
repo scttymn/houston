@@ -33,7 +33,7 @@ curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.s
   2. A Cloudflare API token (Account › Cloudflare Tunnel › Edit, and Zone › DNS › Edit on the domain).
   3. Backup storage, and a restic password shown once, which they must save.
 - **Check:** `https://admin.<their domain>/up` answers 200.
-- **HUMAN:** then run the installer again. Once Cloudflare is connected, it closes port 3000 to the network (it binds `127.0.0.1`). Until then the flight board shows a HOLD for it.
+- Use `https://admin.<domain>` from here on. Port 3000 stays open to the network (plain HTTP) until someone closes it. **HUMAN:** on a server with a public address, they should: Settings › Port 3000, or `houston port close` with their OK. Mission Control restarts for a few seconds.
 
 ## 2. The CLI, and logging in
 Download the CLI (`darwin` or `linux`, `arm64` or `amd64`), and check its checksum. This is the latest release. If the server is pinned to an older one, use `releases/download/<tag>/…` for both files, and match `houston status`'s version.
@@ -147,4 +147,5 @@ There's no import command yet. The steps that worked, each with the human's OK:
 - **Exit codes:** `0` done, `1` failed, `2` usage or a bad compose file. `--follow`: `0` GO, `1` NO-GO.
 - **Machine-readable:** `--json` on `status`, `deploys`, `deploys show`, `snapshots`, `inspect` and `cloudflare`.
 - **Cloudflare:** `houston cloudflare` (the tunnel, its routes, Houston's records), and `houston cloudflare repair` after anyone changed the tunnel or records by hand (exit 1 if something couldn't be put back).
+- **Port 3000:** `houston port` says whether Mission Control's port 3000 is open to the network (`--json`); `houston port close` and `houston port open` change it, with the human's OK (Mission Control restarts for a few seconds).
 - **Status words:** GO, QUEUED, IN FLIGHT, NO-GO (the previous version still serves), HOLD (something blocks the next deploy, usually a secret with no value), STANDBY (linked, never deployed).

@@ -17,7 +17,7 @@ This is how Houston is designed. If Houston is less safe than this, that's a vul
 - **Anyone who can push to a linked repo's deploy branch runs code on the server**, in Docker: its image, its tests and its release hook. That code reaches only its own project: its build reads only its own checkout, it deploys only as the project Houston claimed it for, and it never sees the runner's token.
 - **Mission Control's admin** can do everything: deploys, secrets, restores and Cloudflare. So can an API token, which acts as the admin.
 - **The internet** reaches Mission Control only through the Cloudflare Tunnel, at `admin.<base>` (sign-in required) and `hooks.<base>` (only webhooks, each checked against its project's secret).
-- **Port 3000** is plain HTTP, open to the network only until setup is done. After that, rerunning the installer binds it to `127.0.0.1`.
+- **Port 3000** is plain HTTP, open to the network for first-run setup and until the admin closes it (Settings › Port 3000, or `houston port close`). Closed, it's bound to `127.0.0.1`. On a server with a public address, Docker publishes it past the firewall, so close it there.
 - **The server's root and the `houston` user** are trusted. The `houston` user is in the `docker` group, which amounts to root.
 - **Secrets** are encrypted at rest with keys in `/opt/houston/.env`. They're written only to their destination, and never to a log or a command line. Deploy logs in Mission Control mask their values; the runners' own output on the server (`docker logs`), readable only by root and the `docker` group, doesn't.
 - **The local registry** (`127.0.0.1:5000`) has no authentication. Only processes on the server can reach it.

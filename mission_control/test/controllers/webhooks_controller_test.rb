@@ -65,6 +65,7 @@ class WebhooksControllerTest < ActionDispatch::IntegrationTest
   # that don't verify are counted per address, before the body is read;
   # verified ones are counted per project, and never blocked by junk.
   test "junk is limited per address, and doesn't block real pushes" do
+    freeze_time # the counts are per fixed window
     junk = { "X-Forwarded-For" => "203.0.113.9", "X-Houston-Token" => "wrong" }
     WebhooksController::UNVERIFIED.times { ring(headers: junk) }
     assert_response :not_found
@@ -89,6 +90,7 @@ class WebhooksControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "verified pushes are limited per project" do
+    freeze_time # the counts are per fixed window
     github = { "X-Forwarded-For" => "140.82.115.1", "X-Houston-Token" => WEBHOOK_SECRET }
     WebhooksController::VERIFIED.times { ring(headers: github) }
     assert_response :accepted

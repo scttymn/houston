@@ -225,6 +225,24 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	)
 	root.AddCommand(cloudflare)
 
+	// Port 3000 (docs/plans/security-fixes.md, H3): Settings › Port 3000.
+	var portJSON bool
+	port := &cobra.Command{
+		Use:   "port [open|close]",
+		Short: "Whether Mission Control's port 3000 is open to the network; open or close it (Mission Control restarts for a few seconds)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			change := ""
+			if len(args) == 1 {
+				change = args[0]
+			}
+			code = runPort(file, change, portJSON, stdout, stderr)
+			return nil
+		},
+	}
+	port.Flags().BoolVar(&portJSON, "json", false, "print the API's JSON")
+	root.AddCommand(port)
+
 	var snapshotsJSON, backupFollow bool
 	snapshots := command("snapshots", "A project's snapshots on the server (code and data together), newest first", func() int {
 		return runSnapshots(file, projectFlag, snapshotsJSON, stdout, stderr)

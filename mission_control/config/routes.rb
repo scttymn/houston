@@ -58,6 +58,7 @@ Rails.application.routes.draw do
         put :token
         post :repair
       end
+      resource :port, only: %i[ show update ], controller: "port"
       resources :storage, only: %i[ index update ], param: :name
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
@@ -120,6 +121,7 @@ Rails.application.routes.draw do
       patch :token
       post :repair
     end
+    resource :port, only: :update, controller: "port"
   end
 
   root "projects#index"

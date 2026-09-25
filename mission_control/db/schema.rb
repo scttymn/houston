@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_25_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_25_060000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -93,6 +93,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_25_050000) do
     t.string "latest_release"
     t.datetime "latest_release_checked_at"
     t.string "latest_release_url"
+    t.boolean "port_open", default: true, null: false
     t.string "time_zone", default: "UTC", null: false
     t.string "tunnel_id"
     t.text "tunnel_token"
