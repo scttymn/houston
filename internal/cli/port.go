@@ -39,11 +39,11 @@ func runPort(file, change string, asJSON bool, stdout, stderr io.Writer) int {
 	case v.Address == "":
 		fmt.Fprintln(stdout, "Houston can't tell what port 3000 is bound to right now.")
 	case !v.Open:
-		fmt.Fprintf(stdout, "CLOSED  port 3000 answers only on the server (%s).\n        Reach it with: ssh -L 3000:127.0.0.1:3000 <you>@<server>, then http://localhost:3000\n        (houston port open opens it to the network)\n", v.Address)
+		fmt.Fprintf(stdout, "CLOSED  port 3000 answers only on the server (%s).\n        To reach it: ssh -L 3000:127.0.0.1:3000 <you>@<server>, then open http://localhost:3000\n        To open it to the network: houston port open\n", v.Address)
 	case v.Address == "0.0.0.0":
-		fmt.Fprintln(stdout, "OPEN    port 3000 is open to your network, over plain HTTP.\n        (houston port close closes it; do, on a server with a public address)")
+		fmt.Fprintln(stdout, "OPEN    port 3000 is open to your network, over plain HTTP.\n        To close it: houston port close. Close it on a server with a public address: Docker publishes it past the firewall.")
 	default:
-		fmt.Fprintf(stdout, "OPEN    port 3000 is open on %s, over plain HTTP.\n        (houston port close closes it)\n", v.Address)
+		fmt.Fprintf(stdout, "OPEN    port 3000 is open on %s, over plain HTTP.\n        To close it: houston port close\n", v.Address)
 	}
 	return 0
 }

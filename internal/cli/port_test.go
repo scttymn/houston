@@ -16,12 +16,14 @@ func TestPortShow(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	code, out, errOut := run(&fakeDocker{}, "port")
-	if code != 0 || !strings.Contains(out, "OPEN") || !strings.Contains(out, "to your network") || !strings.Contains(out, "houston port close") {
+	if code != 0 || !strings.Contains(out, "OPEN") || !strings.Contains(out, "to your network") ||
+		!strings.Contains(out, "To close it: houston port close. Close it on a server with a public address: Docker publishes it past the firewall.") {
 		t.Errorf("open: exit %d\n%s%s", code, out, errOut)
 	}
 	answer = `{"open":false,"address":"127.0.0.1","saved":"closed"}`
 	code, out, _ = run(&fakeDocker{}, "port")
-	if code != 0 || !strings.Contains(out, "CLOSED") || !strings.Contains(out, "127.0.0.1") || !strings.Contains(out, "ssh -L 3000:127.0.0.1:3000") {
+	if code != 0 || !strings.Contains(out, "CLOSED") || !strings.Contains(out, "127.0.0.1") || !strings.Contains(out, "ssh -L 3000:127.0.0.1:3000") ||
+		!strings.Contains(out, "To open it to the network: houston port open") {
 		t.Errorf("closed: exit %d\n%s", code, out)
 	}
 	code, out, _ = run(&fakeDocker{}, "port", "--json")
