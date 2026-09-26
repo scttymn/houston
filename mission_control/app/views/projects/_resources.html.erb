@@ -1,0 +1,9 @@
+<%# Right now, from Docker every 30 seconds (AppStats): tick gauges against each limit. %>
+<% if (stats = AppStats.for(project)) %>
+  <%= usage(:cpu, "CPU", cores_words(stats.cpu_cores), limit: stats.cpu_limit && cores_words(stats.cpu_limit), percent: stats.cpu_percent) %>
+  <%= usage(:memory, "MEM", size_words(stats.memory_bytes), limit: stats.memory_limit && size_words(stats.memory_limit), percent: stats.memory_percent) %>
+  <%= usage(:disk, "DISK", size_words(stats.disk_bytes)) %>
+  <% if stats.stale? %><small class="usage__stale">stale: read <%= time_ago_in_words(stats.sampled_at) %> ago</small><% end %>
+<% else %>
+  <span class="muted">—</span>
+<% end %>

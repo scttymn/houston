@@ -238,7 +238,6 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
   .preflight { width: 100%; }
   .empty__paths { grid-template-columns: minmax(0, 1fr); }
   .path + .path { border-left: 0; border-top: 1px solid var(--rule); }
-  .status { display: none; }
 }
 
 /* Projects, project detail, deploys (build step 3) */
@@ -403,15 +402,7 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
   .plan dd { margin-bottom: 8px; }
 }
 
-/* The top bar on a phone: the logo without its name, tighter tabs. */
-@media (max-width: 720px) {
-  .topbar { padding: 0 16px; gap: 12px; }
-  .topbar__nav { margin-left: 0; }
-  .topbar__nav a { padding: 0 8px; }
-}
-@media (max-width: 480px) {
-  .brand__name { display: none; }
-}
+
 
 /* Add project, as the design's AddProject: step 01 on the left, 02-04 on the right. */
 .link { gap: 28px; padding: 32px 48px 48px; }
@@ -486,21 +477,22 @@ a.button--primary { color: var(--on-dark); }
 /* One set of columns for the whole board (the rows are subgrids), sized to
    what they hold: status, name, SHA and backup take what they need (names
    never wrap); domains and the last deploy share the rest. */
-.panel.flight { display: grid; grid-template-columns: max-content max-content max-content minmax(0, 1.4fr) minmax(12rem, 1fr) max-content max-content; column-gap: 32px; font-size: 14px; }
-.flight-head, .flight__row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; padding: 22px 24px; align-items: start; }
-.flight__name, .flight__backup > span { white-space: nowrap; }
-.flight-head { padding: 12px 24px; border-bottom: 1px solid var(--ink); font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
+.panel.flight { display: grid; grid-template-columns: minmax(90px, max-content) 170px 80px minmax(0, 1.2fr) minmax(0, 1fr) 118px 280px; column-gap: 20px; font-size: 14px; }
+.flight-head, .flight__row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; padding: 20px 24px; align-items: start; }
+.flight__backup > span { white-space: nowrap; }
+.flight-head { padding: 14px 24px; border-bottom: 1px solid var(--ink); font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
 .flight__row { border-bottom: 1px solid var(--rule); }
 .flight__row:last-child { border-bottom: 0; }
 .flight__row--in-flight { background: #FAF3E2; }
 .flight__status { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .flight__cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .flight__cell small { font-size: 13px; color: var(--muted); }
-.flight__name { font-size: 18px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.flight__name { font-size: 18px; font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .flight__name:hover { text-decoration: underline; }
 .flight__next { color: #75480A !important; font-size: 12px !important; }
-.flight__domains { gap: 5px; }
-.flight__host { display: flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; }
+.flight__domains { gap: 6px; }
+.flight__host { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink); text-decoration: none; }
+.flight__row .flight__hostname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flight__host:hover { text-decoration: underline; }
 .flight__host svg { color: var(--muted); flex-shrink: 0; }
 .flight__dot { width: 6px; height: 6px; flex-shrink: 0; background: #2F7D4A; }
@@ -515,9 +507,9 @@ a.button--primary { color: var(--on-dark); }
 /* An app's CPU, memory and disk as tick gauges (the design's UsageOptions):
    label, ten ticks (one per 10% of the limit), percentage, amount. Amber from
    85%. Without a limit the ticks are outlined and the percentage is a dash. */
-.flight__resources { gap: 8px; }
-.usage { display: grid; grid-template-columns: 38px max-content 36px max-content; align-items: center; column-gap: 10px; white-space: nowrap; }
-.usage__label { font-size: 11px; letter-spacing: 0.12em; color: var(--muted); }
+.flight__resources { gap: 7px; }
+.usage { display: grid; grid-template-columns: 34px max-content 34px max-content; align-items: center; column-gap: 9px; white-space: nowrap; }
+.usage__label { font-size: 10px; letter-spacing: 0.12em; color: var(--muted); }
 .gauge { display: flex; gap: 2px; }
 .gauge__tick { width: 5px; height: 12px; background: #E2DBC9; }
 .gauge__tick.is-on { background: var(--ink); }
@@ -526,24 +518,11 @@ a.button--primary { color: var(--on-dark); }
 .usage__percent { font-size: 11px; color: var(--muted); text-align: right; }
 .gauge--open + .usage__percent { color: var(--faint); }
 .usage--near .usage__percent { color: #75480A; font-weight: 600; }
-.usage__amount { font-size: 15px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.usage__amount { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink); }
 .usage--near .usage__amount { color: #75480A; }
 .usage__limit { color: var(--muted); }
 .usage__stale { color: #75480A !important; font-size: 12px !important; }
-@media (max-width: 1100px) {
-  .panel.flight { display: flex; }
-  .flight-head { display: none; }
-  .flight__row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 24px; }
-  .flight__name { white-space: normal; overflow-wrap: anywhere; }
-}
-@media (max-width: 720px) {
-  .flight__row { grid-template-columns: minmax(0, 1fr); padding: 18px 16px; }
-  .usage { grid-template-columns: 34px max-content 34px max-content; column-gap: 9px; }
-  .usage__label { font-size: 10px; }
-  .usage__amount { font-size: 14px; }
-  .board__heading h1.disp { font-size: 48px; }
-  .stats { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+
 
 /* Restore, as the design's dialog over the dimmed page. */
 .restore { display: flex; justify-content: center; align-items: flex-start; padding: 48px 16px; min-height: calc(100vh - 64px); background: rgba(26, 29, 36, 0.62); }
@@ -740,4 +719,112 @@ select, .inline-form select {
   background-position: right 12px center;
   background-size: 12px 8px;
   cursor: pointer;
+}
+
+/* The flight board and top bar on tablets and phones (the design's
+   TabletFlightBoard at 768, MobileFlightBoard and MobileMenu at 390): a
+   status strip under the bar, and a card per project instead of the table. */
+.topbar__menu, .topbar__strip, .flight-cards, .add__short { display: none; }
+.stat .eyebrow { font-size: 10px; letter-spacing: 0.16em; }
+.mobile-menu[hidden] { display: none; }
+.topbar-shell { display: contents; }
+
+@media (max-width: 1099px) {
+  .topbar { flex-wrap: wrap; height: auto; padding: 0 24px; gap: 0 16px; }
+  .topbar > .brand, .topbar__nav, .topbar__signout { height: 60px; }
+  .topbar__signout { height: 36px; align-self: center; }
+  .topbar__nav { margin-left: 8px; }
+  .topbar__nav a { padding: 0 12px; }
+  .brand__mark { width: 32px; height: 32px; }
+  .brand__name .disp { font-size: 20px; }
+  .brand__name .mono { font-size: 9px; }
+  .status { display: none; }
+  .topbar__strip { display: flex; align-items: center; gap: 18px; flex-basis: calc(100% + 48px); height: 30px; margin: 0 -24px; padding: 0 24px; border-top: 1px solid #2E323B; font-size: 10px; letter-spacing: 0.1em; color: var(--on-dark-muted); }
+  .topbar__strip .status__clock { color: var(--on-dark); }
+
+  .board { padding: 28px 24px 36px; gap: 20px; }
+  .board__top { flex-direction: column; align-items: stretch; gap: 20px; }
+  .board__heading { justify-content: space-between; gap: 16px; }
+  .board__heading h1.disp { font-size: 54px; }
+  .board__heading .button { padding: 0 18px; font-weight: 600; }
+  .stats { width: 100%; }
+  .stat { padding: 10px 14px; }
+  .stat__value { font-size: 30px; }
+
+  .panel.flight { display: none; }
+  .flight-cards { display: flex; flex-direction: column; gap: 20px; }
+  .flight-card { display: flex; flex-direction: column; border: 1px solid var(--ink); background: var(--surface); }
+  .flight-card--in-flight { background: #FAF3E2; }
+  .flight-card__head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--rule); color: var(--ink); text-decoration: none; }
+  .flight-card__head:hover .flight-card__name { text-decoration: underline; }
+  .flight-card__head > svg { flex-shrink: 0; color: var(--muted); }
+  .flight-card__head .state-pill { padding: 4px 8px; font-size: 11px; gap: 6px; }
+  .flight-card__title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 12px; flex-grow: 1; min-width: 0; }
+  .flight-card__name { font-size: 19px; font-weight: 600; overflow-wrap: anywhere; }
+  .flight-card__title small { font-size: 13px; color: var(--muted); }
+  .flight-card__body { display: grid; grid-template-columns: minmax(0, 1fr) 190px minmax(222px, max-content); gap: 20px; padding: 14px 18px 18px; font-size: 14px; }
+  .flight-card__label { font-size: 10px; letter-spacing: 0.14em; color: var(--muted); }
+  .flight-card__domains { display: flex; flex-direction: column; min-width: 0; }
+  .flight-card__domains .flight__host { align-items: flex-start; line-height: 1.4; }
+  .flight-card__domains .flight__dot { margin-top: 7px; }
+  .flight-card__domains .flight__host svg { margin-top: 4px; }
+  .flight-card__details { display: flex; flex-direction: column; gap: 10px; }
+  .flight-card__details .flight__cell { gap: 2px; }
+  .flight-card__details .flight__cell small { font-size: 12px; }
+  .flight-card__resources { display: flex; flex-direction: column; gap: 8px; }
+  .flight-card .usage { grid-template-columns: 34px max-content 30px max-content; }
+}
+
+@media (max-width: 640px) {
+  .topbar { padding: 0 8px 0 16px; gap: 0 10px; }
+  .topbar > .brand { height: 56px; gap: 10px; }
+  .brand__mark { width: 30px; height: 30px; }
+  .brand__name .disp { font-size: 19px; }
+  .topbar__nav, .topbar__signout { display: none; }
+  .topbar__menu { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-left: auto; padding: 0; border: 0; background: none; color: var(--on-dark); cursor: pointer; }
+  .topbar__strip { gap: 16px; flex-basis: calc(100% + 24px); margin: 0 -8px 0 -16px; padding: 0 16px; }
+
+  .mobile-menu { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; overflow-y: auto; background: var(--paper); color: var(--ink); }
+  .mobile-menu__bar { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 8px 0 16px; background: var(--ink); }
+  .mobile-menu__bar .brand { gap: 10px; }
+  .mobile-menu > .topbar__strip { flex-basis: auto; margin: 0; background: var(--ink); }
+  .mobile-menu__nav { display: flex; flex-direction: column; margin-top: 8px; border-top: 1px solid var(--rule); background: var(--surface); }
+  .mobile-menu__nav a { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 16px; border-bottom: 1px solid var(--rule); color: var(--ink); text-decoration: none; font-size: 18px; }
+  .mobile-menu__nav a svg { color: var(--muted); }
+  .mobile-menu__nav a.is-current { font-weight: 600; box-shadow: inset 3px 0 0 var(--signal-bright); }
+  .mobile-menu__systems { display: flex; flex-direction: column; margin: 24px 16px 0; border: 1px solid var(--ink); background: var(--surface); }
+  .mobile-menu__label { padding: 10px 14px; border-bottom: 1px solid var(--rule); font-size: 10px; letter-spacing: 0.16em; color: var(--muted); }
+  .mobile-menu__systems > div { display: flex; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+  .mobile-menu__systems > div:last-child { border-bottom: 0; }
+  .mobile-menu__systems .mono { font-size: 12px; }
+  .mobile-menu__systems .status__go { color: var(--go-fg); }
+  .mobile-menu__systems .status__nogo { color: var(--nogo-fg); }
+  .mobile-menu__foot { margin-top: auto; padding: 16px 16px 32px; }
+  .mobile-menu__foot form { margin: 0; }
+  .mobile-menu__signout { width: 100%; height: 48px; border: 1px solid var(--ink); background: none; color: var(--ink); font: 500 15px var(--text); cursor: pointer; }
+  html.menu-open { overflow: hidden; }
+
+  .board { padding: 22px 16px 32px; gap: 18px; }
+  .board__title .eyebrow { font-size: 10px; letter-spacing: 0.16em; }
+  .board__heading { gap: 12px; }
+  .board__heading h1.disp { font-size: 46px; }
+  .board__heading .button { padding: 0 16px; }
+  .add__long { display: none; }
+  .add__short { display: inline; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat:nth-child(odd) { border-right: 1px solid var(--rule); }
+  .stat:nth-child(even) { border-right: 0; }
+  .stat:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
+
+  .flight-cards { gap: 18px; }
+  .flight-card__head { padding: 14px 16px; }
+  .flight-card__title { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .flight-card__body { display: flex; flex-direction: column; gap: 14px; padding: 12px 16px 16px; }
+  .flight-card__domains { gap: 4px; }
+  .flight-card__domains .flight__host { min-height: 30px; align-items: center; }
+  .flight-card__domains .flight__dot, .flight-card__domains .flight__host svg { margin-top: 0; }
+  .flight-card__details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+  .flight-card__details .flight__cell { gap: 3px; }
+  .flight-card__resources { padding-top: 14px; border-top: 1px solid var(--rule); }
+  .flight-card .usage { grid-template-columns: 34px max-content 34px max-content; }
 }

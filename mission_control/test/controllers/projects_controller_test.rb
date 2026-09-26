@@ -202,11 +202,13 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
   # The design's Main: pills, services with images, host rows, and LAST BACKUP.
   # docs/plans/live-flight-board.md: the board redraws itself on changes.
-  test "the flight board shows the version" do
+  # The design (desktop, tablet, phone) names the base domain only; the version
+  # is in Settings › Releases and the phone menu.
+  test "the flight board's eyebrow names the base domain" do
     stub_tunnel
     ENV["HOUSTON_VERSION"] = "v0.1.0"
     get root_path
-    assert_select ".board__title > .board__version > .eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.1.0"
+    assert_select ".board__title > .board__version > .eyebrow", "FLIGHT BOARD · SVNMNS.COM"
   ensure
     ENV.delete("HOUSTON_VERSION")
   end
@@ -219,7 +221,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     Installation.current.update!(latest_release: "v0.4.2")
     get root_path
     assert_select ".board__version" do
-      assert_select "span.eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.4.2"
+      assert_select "span.eyebrow", "FLIGHT BOARD · SVNMNS.COM"
       assert_select "a", 0, "nothing newer: no pill, and the version isn't a link"
     end
 
@@ -252,7 +254,6 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     ENV["HOUSTON_VERSION"] = "v0.4.3"
     update.update!(status: "go", finished_at: 1.minute.ago)
     get root_path
-    assert_select ".board__version .eyebrow", /V0\.4\.3/
     assert_select ".board__pill, .server-update", 0
 
     # A failed update: a red pill to its log, for a day.
@@ -327,6 +328,58 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     travel 3.minutes
     get root_path
     assert_select "[data-project=equip] .flight__resources .usage__stale", /stale/
+  end
+
+  # docs/plans/mobile-board.md, rows 1 and 2.
+  test "the phone header: a menu button and the status strip" do
+    stub_tunnel
+    ENV["HOUSTON_VERSION"] = "v0.4.9"
+    [ [ root_path, "Projects" ], [ settings_path, "Settings" ] ].each do |path, current|
+      get path
+      assert_select "header.topbar" do
+        assert_select "button.topbar__menu[aria-controls='mobile-menu'][aria-expanded='false'][aria-label='Open menu']", 1
+        assert_select ".topbar__strip", /TUNNEL\s+GO.*REGISTRY\s+GO/m
+        assert_select ".topbar__strip .status__clock", 1
+      end
+      assert_select "#mobile-menu[hidden][data-menu-target=panel]" do
+        assert_select "button[aria-label='Close menu']", 1
+        assert_select "nav a", 2
+        assert_select "nav a.is-current", current
+        assert_select "nav a[href='#{root_path}']", "Projects"
+        assert_select "nav a[href='#{settings_path}']", "Settings"
+        assert_select ".mobile-menu__systems", /SYSTEMS.*Tunnel\s*GO.*Registry\s*GO.*Version\s*v0\.4\.9/m
+        assert_select "form[action='#{session_path}'] button", "Sign out"
+      end
+    end
+  ensure
+    ENV.delete("HOUSTON_VERSION")
+  end
+
+  # docs/plans/mobile-board.md, rows 3 and 4.
+  test "each project has a card for tablets and phones" do
+    stub_tunnel
+    equip = make_project("equip", services: %w[app db], domains: %w[equipping.com])
+    make_deploy(equip, 1, "go", sha: "a" * 40)
+    make_project("idle")
+    get root_path
+    assert_select ".board__heading a.button" do
+      assert_select ".add__long", "Add project"
+      assert_select ".add__short", "Add"
+    end
+    assert_select ".flight-cards article.flight-card[data-card=equip]" do
+      assert_select "a.flight-card__head[href='#{project_path("equip")}']" do
+        assert_select ".flight-card__name", "equip"
+        assert_select "small", /db/
+        assert_select ".state-pill", /GO/
+        assert_select "svg", 1
+      end
+      [ "DOMAINS", "RUNNING SHA", "LAST DEPLOY", "LAST BACKUP", "RESOURCES" ].each { |label| assert_select ".flight-card__label", label }
+      assert_select ".flight-card__domains a", /equip\.svnmns\.com/
+      assert_select ".flight-card__domains a", /equipping\.com/
+      assert_select ".flight-card__details .mono", "aaaaaaa"
+      assert_select ".flight-card__resources .muted", "—", "nothing sampled: a dash"
+    end
+    assert_select ".flight-card[data-card=idle] .flight-card__details", /Never deployed/
   end
 
   test "the flight board listens for changes" do
