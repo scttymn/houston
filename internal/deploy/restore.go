@@ -96,7 +96,7 @@ func (r *run) restore() int {
 	}
 
 	r.report.step("Switch")
-	code, err := r.kamal("deploy", "--skip-push", "--version", r.sha)
+	code, err := r.kamalDeploy()
 	if err != nil || code != 0 {
 		// Whatever the exit, the switch happened only if kamal-proxy routes
 		// to g+1. Kamal's container goes first: a killed docker CLI leaves it.

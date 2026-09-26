@@ -405,7 +405,7 @@ func (r *run) deploy(tookOver bool) int {
 	}
 
 	r.report.step("Deploy")
-	if code, err := r.kamal("deploy", "--skip-push", "--version", r.sha); err != nil || code != 0 {
+	if code, err := r.kamalDeploy(); err != nil || code != 0 {
 		return r.fail(fmt.Sprintf("kamal deploy failed (exit %d%s); the old version keeps serving", code, errText(err)))
 	}
 
@@ -678,12 +678,78 @@ func (r *run) kamal(args ...string) (int, error) {
 }
 
 func (r *run) kamalWith(ctx context.Context, args ...string) (int, error) {
+	return r.kamalTo(ctx, r.report, args...)
+}
+
+func (r *run) kamalTo(ctx context.Context, out io.Writer, args ...string) (int, error) {
 	full := []string{"run", "--rm", "--name", "houston-kamal-" + r.p.Name, "--network", "host",
 		"-v", r.kamalDir + ":/workdir", "-v", "/var/run/docker.sock:/var/run/docker.sock", "-v", r.o.SSHDir + ":/ssh:ro"}
 	full = append(full, r.kamalArgs...)
 	full = append(full, KamalImage)
 	full = append(full, args...)
-	return r.d.Docker.Stream(ctx, r.dir, r.kamalEnv, r.report, full...)
+	return r.d.Docker.Stream(ctx, r.dir, r.kamalEnv, out, full...)
+}
+
+// kamalDeploy runs kamal deploy, and once more when it failed pulling the
+// image. Kamal pulls first, before it takes its deploy lock or touches a
+// container, so trying again repeats nothing it had changed. Docker's
+// containerd store can fail to unpack a layer when several deploys pull the
+// same layers at once ("failed to extract layer").
+func (r *run) kamalDeploy() (int, error) {
+	for try := 1; ; try++ {
+		watch := &pullWatch{w: r.report}
+		code, err := r.kamalTo(r.ctx, watch, "deploy", "--skip-push", "--version", r.sha)
+		if (err == nil && code == 0) || try == 2 || !watch.pullFailed() || r.ctx.Err() != nil {
+			return code, err
+		}
+		r.report.logf("The image pull failed, before Kamal changed anything; pulling once more.\n")
+	}
+}
+
+// pullWatch passes kamal deploy's output on, following it (Kamal v2.12) to
+// tell whether the command that failed was its pull of the app image: the
+// last command it ran after "Pull app image..." was docker pull, and it
+// never got to "Ensure kamal-proxy is running...".
+type pullWatch struct {
+	w       io.Writer
+	line    []byte
+	pulling bool   // past "Pull app image..."
+	past    bool   // past the pull: Kamal has started changing things
+	last    string // the last command Kamal ran in its pull step
+}
+
+var kamalRunning = regexp.MustCompile(`INFO \[[0-9a-f]+\] Running (.+) on \S+$`)
+
+func (p *pullWatch) Write(b []byte) (int, error) {
+	for _, c := range b {
+		if c != '\n' {
+			if len(p.line) < 4096 {
+				p.line = append(p.line, c)
+			}
+			continue
+		}
+		p.see(string(p.line))
+		p.line = p.line[:0]
+	}
+	return p.w.Write(b)
+}
+
+func (p *pullWatch) see(line string) {
+	line = strings.TrimSpace(line)
+	switch {
+	case line == "Pull app image...":
+		p.pulling = true
+	case line == "Ensure kamal-proxy is running...":
+		p.past = true
+	case p.pulling:
+		if m := kamalRunning.FindStringSubmatch(line); m != nil {
+			p.last = m[1]
+		}
+	}
+}
+
+func (p *pullWatch) pullFailed() bool {
+	return !p.past && strings.HasPrefix(p.last, "docker pull ")
 }
 
 func (r *run) docker(failure string, args ...string) string {

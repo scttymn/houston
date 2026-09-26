@@ -523,3 +523,16 @@ None blocking Batch 1. Recorded for Batch 2:
   - The plan: runner token (256-bit, never leaves the server) + refuse any request carrying `Cf-Ray` or `Cf-Connecting-Ip`, which Cloudflare always adds and clients can't remove.
   - This is a documented divergence from a literal source-address check.
 - **CLI personal API tokens and `--server` from a laptop.** Their home is build step 4, with Settings › API tokens. Build step 3's `houston deploy` runs on the server with the runner token.
+
+## Found later: a failed image pull is tried once more (2026-09-25)
+- **What happened:** three app PRs merged at once, and their deploys ran together on two runners. Equip's deploy #7 built and pushed, then Kamal's `docker pull` failed inside Docker's containerd store: "failed to extract layer … UtimesNanoAt … no such file or directory". The same commit deployed alone (#8) was GO.
+- **The fix:** `kamal deploy` runs once more when the command that failed was its pull of the app image.
+  - Kamal v2.12 pulls first, before it takes its deploy lock or touches a container (`Kamal::Cli::Main#deploy`), so trying again repeats nothing it had changed.
+  - `pullWatch` follows Kamal's output: the last command Kamal ran after "Pull app image..." was `docker pull`, and it never got to "Ensure kamal-proxy is running...".
+  - Deploys and restores both get it. The log says "The image pull failed, before Kamal changed anything; pulling once more."
+- **Tests:** `internal/deploy/pull_retry_test.go`, with deploy #7's own output as the fixture.
+  - A failed pull tries once more; twice is NO-GO.
+  - Other failures aren't retried: the image's check after the pull, anything after the pull, no pull at all, a `docker pull` outside Kamal's pull step or before it.
+  - A restore retries too, and output split mid-line is read right.
+  - Mutation check: 9, each caught. Two conditions the mutations showed were redundant were cut: stripping colour codes (Kamal runs without a terminal), and a second check of the pull step.
+  - `bin/go test ./...`, `bin/test-integration` and gofmt are clean.
