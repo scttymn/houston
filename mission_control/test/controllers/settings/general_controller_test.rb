@@ -1,13 +1,16 @@
 require "test_helper"
 
 class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
-  # The design's Settings: one page, a menu on the left that jumps to its
-  # sections, and the sections in one column.
+  # The design's Settings: one page, a menu that jumps to its sections (on the
+  # left on a desktop; tabs, then chips, pinned at the top on tablets and
+  # phones), and the sections in one column. The title sits outside the menu,
+  # so the menu alone stays pinned (docs/plans/settings-responsive.md).
   test "settings is one page: the menu and its sections" do
     Installation.current.update!(dns_mode: "per_host")
     sign_in_as users(:one)
     get settings_path
-    assert_select ".settings > nav.section-nav h1", /Settings/i
+    assert_select ".settings > .settings__side > h1.disp.settings__title", /Settings/i
+    assert_select ".settings > .settings__side > nav.section-nav[aria-label='Settings sections'] h1", 0
     links = css_select("nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
     assert_equal [ [ "API tokens", "#tokens" ], [ "Cloudflare", "#cloudflare" ], [ "Releases", "#releases" ], [ "Security", "#security" ], [ "Storage", "#storage" ], [ "Time zone", "#time-zone" ] ], links
     assert_equal %w[tokens cloudflare releases security storage time-zone], css_select(".settings__body > section").map { |s| s["id"] }

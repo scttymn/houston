@@ -1,3 +1,9 @@
-<%= render "shared/section_nav", title: "Settings", label: "Settings sections",
-           items: [ [ "API tokens", "tokens" ], [ "Cloudflare", "cloudflare" ], [ "Releases", "releases" ], [ "Security", "security" ], [ "Storage", "storage" ], [ "Time zone", "time-zone" ] ], # alphabetical
-           base: (settings_path unless controller_name == "pages") %>
+<%# The title and the menu. On a desktop they're a column on the left; on
+    tablets and phones the menu (tabs, then chips) stays pinned at the top
+    on its own (docs/plans/settings-responsive.md). %>
+<div class="settings__side">
+  <h1 class="disp settings__title">Settings</h1>
+  <%= render "shared/section_nav", label: "Settings sections",
+             items: [ [ "API tokens", "tokens" ], [ "Cloudflare", "cloudflare" ], [ "Releases", "releases" ], [ "Security", "security" ], [ "Storage", "storage" ], [ "Time zone", "time-zone" ] ], # alphabetical
+             base: (settings_path unless controller_name == "pages") %>
+</div>

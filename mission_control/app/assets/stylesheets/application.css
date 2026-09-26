@@ -666,15 +666,9 @@ a.button--primary { color: var(--on-dark); }
 .storage-rows .field__error { grid-column: 1 / -1; }
 .badge { font-size: 10px; letter-spacing: 0.1em; padding: 1px 5px; background: var(--go-bg); color: var(--go-fg); }
 .settings-section .token-row { grid-template-columns: minmax(0, 1fr) 160px 200px auto; align-items: center; }
+.settings-section .token-row > .mono:first-child { font-family: var(--text); font-weight: 500; }
 .token-new input[type=text] { max-width: 360px; }
-@media (max-width: 960px) {
-  .settings { flex-direction: column; gap: 20px; padding: 24px 16px; }
-  .settings-facts { grid-template-columns: minmax(0, 1fr); }
-  .settings-facts > div { border-right: 0; border-bottom: 1px solid var(--rule); }
-  .storage-head { display: none; }
-  .storage-rows li, .settings-section .token-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .storage-rows li > span:last-child { justify-self: start; }
-}
+
 
 /* Phone width: nothing wider than the screen (docs/plans/mission-control-match-design.md). */
 .inline-form input, .inline-form select { min-width: 0; }
@@ -827,4 +821,66 @@ select, .inline-form select {
   .flight-card__details .flight__cell { gap: 3px; }
   .flight-card__resources { padding-top: 14px; border-top: 1px solid var(--rule); }
   .flight-card .usage { grid-template-columns: 34px max-content 34px max-content; }
+}
+
+/* Settings on tablets and phones (the design's SettingsTablet at 768 and
+   SettingsMobile at 390): the title, then the menu pinned at the top as the
+   page scrolls (underlined tabs, then chips), and sections that stack. */
+.settings__side { display: flex; flex-direction: column; width: 200px; flex-shrink: 0; position: sticky; top: 24px; align-self: flex-start; }
+.settings__title { margin: 0 0 16px; font-size: 44px; line-height: 1; }
+.settings__side .section-nav { position: static; width: auto; }
+
+@media (max-width: 1099px) {
+  .settings { flex-direction: column; gap: 20px; padding: 28px 24px 40px; }
+  .settings__side { display: contents; }
+  .settings__title { margin: 0; font-size: 40px; }
+  .settings .section-nav { position: sticky; top: 0; z-index: 5; align-self: stretch; flex-direction: row; flex-wrap: nowrap; gap: 0; overflow-x: auto; scrollbar-width: none; background: var(--paper); border-bottom: 1px solid var(--rule); }
+  .settings .section-nav::-webkit-scrollbar { display: none; }
+  .settings .section-nav a { display: flex; align-items: center; flex-shrink: 0; height: 44px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
+  .settings .section-nav a:hover { background: none; color: var(--ink); }
+  .settings .section-nav a.is-current { background: none; color: var(--ink); font-weight: 600; border-bottom-color: var(--signal); }
+  .settings__body > section { scroll-margin-top: 60px; }
+  .settings-section .panel__head .panel__title { font-size: 24px; }
+  .settings-facts > div { padding: 14px 18px; font-size: 16px; }
+
+  .storage-head { display: none; }
+  .storage-rows li { grid-template-columns: max-content max-content minmax(0, 1fr); grid-template-areas: "name name action" "where where where" "holds used last"; gap: 8px 28px; align-items: baseline; }
+  .storage-rows li > span:nth-child(1) { grid-area: name; font-size: 16px; font-weight: 600; font-family: var(--text); }
+  .storage-rows .badge { display: inline-block; margin: 0 0 0 8px; padding: 2px 5px; background: var(--ink); color: var(--on-dark); vertical-align: middle; }
+  .storage-rows li > span:nth-child(2) { display: none; }
+  .storage-rows li > span:nth-child(3) { grid-area: where; font-size: 13px; }
+  .storage-rows li > span:nth-child(3)::before { content: attr(data-kind) " · "; }
+  .storage-rows li > span:nth-child(3):empty::before { content: attr(data-kind); }
+  .storage-rows li > span:nth-child(4) { grid-area: holds; }
+  .storage-rows li > span:nth-child(5) { grid-area: used; }
+  .storage-rows li > span:nth-child(6) { grid-area: last; }
+  .storage-rows li > span:nth-child(7) { grid-area: action; justify-self: end; }
+  .storage-rows li > span[data-label] { display: flex; flex-direction: column; gap: 3px; }
+  .storage-rows li > span[data-label]::before { content: attr(data-label); font: 400 10px var(--mono, monospace); letter-spacing: 0.16em; color: var(--muted); }
+  .storage-rows .field__error { grid-column: 1 / -1; }
+
+  .settings-section .token-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name action" "created created" "used used"; gap: 4px 12px; align-items: baseline; }
+  .settings-section .token-row > :nth-child(1) { grid-area: name; font-size: 15px; font-weight: 600; }
+  .settings-section .token-row > :nth-child(2) { grid-area: created; font-size: 13px; color: var(--muted); }
+  .settings-section .token-row > :nth-child(3) { grid-area: used; font-size: 13px; }
+  .settings-section .token-row > :nth-child(4) { grid-area: action; }
+}
+
+@media (max-width: 640px) {
+  .settings { gap: 16px; padding: 20px 16px 32px; }
+  .settings__title { font-size: 36px; }
+  .settings .section-nav { gap: 8px; margin: 0 -16px; padding: 8px 16px; border-bottom: 0; }
+  .settings .section-nav a { height: 36px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
+  .settings .section-nav a:hover { background: var(--surface); }
+  .settings .section-nav a.is-current { background: var(--ink); border-color: var(--ink); color: var(--on-dark); font-weight: 500; }
+  .settings__body > section { scroll-margin-top: 64px; }
+  .settings-section .panel__head { padding: 12px 16px; }
+  .settings-section .panel__head .panel__title { font-size: 20px; }
+  .settings-section .panel__row, .settings-section .settings-subhead, .settings-section .rows li, .settings-section .history__row,
+  .cf-checked, .cf-block, .cf-row, .storage-rows li { padding-left: 16px; padding-right: 16px; }
+  .settings-facts { grid-template-columns: minmax(0, 1fr); }
+  .settings-facts > div { padding: 12px 16px; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .settings-facts > div:last-child { border-bottom: 0; }
+  .storage-rows li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "name name action" "where where where" "holds used used" "last last last"; gap: 10px 12px; }
+  .storage-rows li > span:nth-child(3) { word-break: break-all; }
 }

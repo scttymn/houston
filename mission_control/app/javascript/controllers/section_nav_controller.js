@@ -55,5 +55,17 @@ export default class extends Controller {
 
   mark(id) {
     this.links.forEach((link) => link.classList.toggle("is-current", link.hash === `#${id}`))
+    this.reveal(this.links.find((link) => link.hash === `#${id}`))
+  }
+
+  // When the menu is a row that scrolls sideways (Settings' chips on a
+  // phone), the marked link stays in sight.
+  reveal(link) {
+    const nav = this.element
+    if (!link || nav.scrollWidth <= nav.clientWidth) return
+    const left = link.offsetLeft - nav.offsetLeft
+    if (left < nav.scrollLeft || left + link.offsetWidth > nav.scrollLeft + nav.clientWidth) {
+      nav.scrollLeft = Math.max(0, left - 16)
+    }
   }
 }

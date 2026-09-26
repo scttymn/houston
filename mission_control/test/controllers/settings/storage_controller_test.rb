@@ -24,6 +24,11 @@ class Settings::StorageControllerTest < ActionDispatch::IntegrationTest
     assert_select "[data-location=unas-nfs]", /DEFAULT.*nfs.*10\.0\.1\.20:\/volume1\/houston.*live volumes · backups.*1 project.*22 Sep 03:00.*Last prune failed: .*unable to create lock/m
     assert_select "[data-location=b2-offsite]", /b2.*backups.*not used yet/m
     assert_select "[data-location=b2-offsite]", { text: /live volumes/, count: 0 }
+    # Stacked on tablets and phones, each figure says what it is.
+    assert_select "[data-location=unas-nfs] [data-label]", 3
+    assert_select "[data-location=unas-nfs] [data-label='HOLDS']", /live volumes · backups/
+    assert_select "[data-location=unas-nfs] [data-label='USED BY']", /1 project/
+    assert_select "[data-location=unas-nfs] [data-label='LAST WRITE']", /22 Sep 03:00/
     assert_select "form[action='#{default_settings_storage_location_path("b2-offsite")}']"
   end
 

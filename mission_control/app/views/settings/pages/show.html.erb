@@ -180,7 +180,7 @@
     <section class="settings-section" id="storage">
       <div class="panel__head">
         <h2 class="disp panel__title">Storage locations</h2>
-        <%= link_to "Add storage location", new_settings_storage_location_path, class: "button button--primary button--small" %>
+        <%= link_to new_settings_storage_location_path, class: "button button--primary button--small" do %><span class="add__long">Add storage location</span><span class="add__short">Add</span><% end %>
       </div>
       <div class="mono storage-head"><span>NAME</span><span>TYPE</span><span>LOCATION</span><span>HOLDS</span><span>USED BY</span><span>LAST WRITE</span><span></span></div>
       <ul class="rows storage-rows">
@@ -190,10 +190,10 @@
           <li data-location="<%= location.name %>" class="storage-row">
             <span class="mono"><%= location.name %><% if location.default? %> <small class="mono badge">DEFAULT</small><% end %></span>
             <span class="mono"><%= location.kind %></span>
-            <span class="mono"><%= location.where_it_is %></span>
-            <span><%= location.holds_words %></span>
-            <span><%= used.zero? ? "not used yet" : pluralize(used, "project") %></span>
-            <span><%= last ? l(last, format: :short) : "—" %></span>
+            <span class="mono" data-kind="<%= location.kind %>"><%= location.where_it_is %></span>
+            <span data-label="HOLDS"><%= location.holds_words %></span>
+            <span data-label="USED BY"><%= used.zero? ? "not used yet" : pluralize(used, "project") %></span>
+            <span data-label="LAST WRITE"><%= last ? l(last, format: :short) : "—" %></span>
             <span>
               <% if !location.acknowledged? %>
                 <%= link_to "Save its password", settings_storage_location_path(location.name) %>
