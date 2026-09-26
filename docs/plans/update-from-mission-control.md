@@ -100,6 +100,12 @@
   - the note with **Update to v0.4.3** and the command
   - updating, and taking long
   - rolled back, with its log
+- **The live check (13), first half, 2026-09-25:**
+  - v0.4.3 released green, and the server was updated to it by hand after an idle check. Mission Control, both runners and all three CLIs run v0.4.3, pinned by digest.
+  - `settle_server_update` is scheduled every minute, and Mission Control knows the runner image.
+  - The four apps and admin/up answered 10 × 200 each.
+  - `houston update` from the laptop reached the new API and was refused, with nothing started: no newer release yet.
+  - The second half, an update from the board, waits for the next release.
 - **Fixed in passing:** at 375 px, a pre-flight check's error with a long URL in it overflowed by 12 px. It now wraps.
 
 ## Deploy notes
