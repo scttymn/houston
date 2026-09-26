@@ -61,6 +61,8 @@ class ServerUpdateTest < ActiveSupport::TestCase
       "not a release" => -> { ENV["HOUSTON_VERSION"] = "dev"; [ nil, docker ] },
       "a checkout's build" => -> { ENV.delete("HOUSTON_VERSION"); ENV["HOUSTON_SOURCE_SHA"] = "abc1234"; [ nil, docker ] },
       "not newer" => -> { [ "v0.4.2", docker ] },
+      "the latest known is this one" => -> { Installation.current.update!(latest_release: "v0.4.2"); [ nil, docker ] },
+      "the latest known is older" => -> { Installation.current.update!(latest_release: "v0.4.1"); [ nil, docker ] },
       "older" => -> { [ "v0.4.1", docker ] },
       "a bad tag" => -> { [ "v0.4.3; rm -rf /", docker ] },
       "a prerelease" => -> { [ "v0.5.0-rc.1", docker ] },
@@ -70,7 +72,9 @@ class ServerUpdateTest < ActiveSupport::TestCase
       "the helper didn't start" => -> { [ nil, docker(run: false) ] }
     }
     words = { "not a release" => "runs dev, not a release", "a checkout's build" => "runs source abc1234, not a release",
-              "not newer" => "v0.4.2 isn't newer", "older" => "v0.4.1 isn't newer", "a bad tag" => "isn't a release (vX.Y.Z)",
+              "not newer" => "v0.4.2 isn't newer",
+              "the latest known is this one" => "already runs the latest release (v0.4.2)",
+              "the latest known is older" => "already runs the latest release (v0.4.2)", "older" => "v0.4.1 isn't newer", "a bad tag" => "isn't a release (vX.Y.Z)",
               "a prerelease" => "isn't a release (vX.Y.Z)", "no latest known" => "no newer release is known",
               "not installed by the installer" => "wasn't started by Houston's installer", "no runner image" => "run the installer once more",
               "the helper didn't start" => "couldn't start the update: docker: Error response" }

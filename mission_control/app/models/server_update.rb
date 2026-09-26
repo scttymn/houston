@@ -40,7 +40,10 @@ class ServerUpdate < ApplicationRecord
     to = version.presence || Installation.current.latest_release
     raise Refused, "no newer release is known yet" if to.blank?
     raise Refused, "#{to.truncate(40)} isn't a release (vX.Y.Z)" unless UpdateNotice.release?(to)
-    raise Refused, "#{to} isn't newer than #{from}, which this server runs" unless UpdateNotice.newer(from, to)
+    unless UpdateNotice.newer(from, to)
+      raise Refused, "this server already runs the latest release (#{from})" if version.blank?
+      raise Refused, "#{to} isn't newer than #{from}, which this server runs"
+    end
     if (current = running.first)
       raise Refused, "the update to #{current.to_version} is already running"
     end
