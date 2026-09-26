@@ -105,6 +105,49 @@
       <% end %>
     </section>
 
+    <section class="settings-section" id="houston">
+      <% running = @updates.first if @updates.first&.status == "running" %>
+      <div class="panel__head">
+        <h2 class="disp panel__title">Houston</h2>
+        <span class="panel__meta">
+          <span class="mono eyebrow"><%= HoustonVersion.current.upcase %></span>
+          <%= button_to "Check for updates", check_settings_updates_path, class: "button button--small" %>
+          <% if @newer && !running %>
+            <%= form_with url: settings_updates_path do %>
+              <%= hidden_field_tag :version, @newer, id: nil %>
+              <button type="submit" class="button button--primary button--small" data-turbo-confirm="Update this server to <%= @newer %>? Mission Control restarts on the way, and deploys and backups wait until it's done. If <%= @newer %> doesn't install, the server goes back to <%= HoustonVersion.current %>.">Update to <%= @newer %></button>
+            <% end %>
+          <% end %>
+        </span>
+      </div>
+      <% checked = @installation.latest_release_checked_at && " (checked #{time_ago_in_words(@installation.latest_release_checked_at)} ago)" %>
+      <% if running %>
+        <p class="panel__row" data-controller="refresh" data-refresh-every-value="10000">Updating to <%= running.to_version %><%= running.step.present? ? " · #{running.step}" : "…" %>. Mission Control restarts on the way; deploys and backups wait.</p>
+      <% elsif @newer %>
+        <p class="panel__row"><span><%= @newer %> is out<%= checked %>. <%= link_to "Release notes ↗", @installation.latest_release_url, target: "_blank", rel: "noopener noreferrer" %></span></p>
+      <% elsif @installation.latest_release.present? %>
+        <p class="panel__row"><%= @installation.latest_release %> is the latest release<%= checked %>.</p>
+      <% end %>
+      <% if @updates.empty? %>
+        <p class="panel__row panel__row--muted">No updates from Mission Control yet. When a newer Houston is out, update to it here; its log shows here too. <span class="mono">houston update</span> does the same from anywhere.</p>
+      <% end %>
+      <% @updates.each do |u| %>
+        <div class="history__row <%= "history__row--no-go" if u.status.in?(%w[rolled_back no_go]) %>">
+          <span class="mono muted">#<%= u.id %></span>
+          <span class="mono"><%= u.to_version %></span>
+          <span class="history__what">
+            <span>from <span class="mono"><%= u.from_version %></span></span>
+            <% if u.status == "rolled_back" %><small class="history__error">failed; went back to <%= u.from_version %></small>
+            <% elsif u.status == "no_go" %><small class="history__error">failed</small>
+            <% else %><small><%= time_ago_in_words(u.started_at) %> ago · <%= l(u.started_at, format: :short) %></small><% end %>
+          </span>
+          <% if u.status == "running" %><span class="mono state state--in-flight">UPDATING</span><% else %><%= state_chip(u.status == "go" ? :go : :no_go) %><% end %>
+          <span class="mono muted"><%= u.finished_at ? duration_words(u.finished_at - u.started_at) : mission_elapsed(Time.current - u.started_at) %></span>
+          <%= link_to "Log", settings_update_path(u) %>
+        </div>
+      <% end %>
+    </section>
+
     <section class="settings-section" id="port">
       <div class="panel__head"><h2 class="disp panel__title">Port 3000</h2></div>
       <% address = PortExposure.address %>
@@ -169,4 +212,5 @@
       <% if @error %><p class="panel__row"><span class="field__error"><%= @error %></span></p><% end %>
     </section>
   </div>
+  <%= render "shared/toast" %>
 </main>

@@ -78,7 +78,7 @@ func runUpdate(file, version string, stdout, stderr io.Writer) int {
 }
 
 // houston update --check: the server asks GitHub for the latest release now,
-// as Check now on Houston's page does.
+// as Settings › Houston's Check for updates does.
 func runUpdateCheck(file string, stdout, stderr io.Writer) int {
 	client, _, code := remote(file, "", false, stderr)
 	if code != 0 {

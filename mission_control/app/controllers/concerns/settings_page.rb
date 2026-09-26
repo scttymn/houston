@@ -6,6 +6,8 @@ module SettingsPage
       @installation = Installation.current
       @locations = StorageLocation.where.not(verified_at: nil).order(:name)
       @tokens = ApiToken.order(:name)
+      @updates = ServerUpdate.order(id: :desc).limit(10).to_a
+      @newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release)
       render "settings/pages/show", status:
     end
 end

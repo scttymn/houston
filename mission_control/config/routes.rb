@@ -125,11 +125,10 @@ Rails.application.routes.draw do
       post :repair
     end
     resource :port, only: :update, controller: "port"
-  end
-
-  # Houston's own page: its version, checking for a newer one, updating, and the update's log.
-  resource :server_update, only: %i[ show create ], path: "update" do
-    post :check
+    # Settings › Houston: check for a newer version, update to it, each update's log.
+    resources :updates, only: %i[ show create ] do
+      post :check, on: :collection
+    end
   end
 
   root "projects#index"

@@ -155,6 +155,36 @@ Evidence:
   - Houston's page while updating, and with v0.4.5 out
   - the toast from a real check against GitHub
 
+## Batch 3: in Settings (2026-09-26)
+Your direction: "instead of clicking on the version, let's move this to settings. Create a deploy log table in settings. In the top right, let's have a button to check for updates. If an update is available, it should display an update button. Clicking on the log would take you to a log screen."
+
+What changed:
+- **Settings › Houston**, a section between Cloudflare and Port 3000:
+  - Its head shows the running version, **Check for updates**, and **Update to vX.Y.Z** when one is out (not while one runs).
+  - A line says what's known: out (with release notes), the latest, or updating with its step (refreshing every 10 seconds).
+  - Below, the updates, in the deploy history's rows: #, version, from, when (or how it failed), GO / NO-GO / UPDATING, how long, and **Log**.
+- **An update's log page** (`/settings/updates/:id`) is Houston's page from Batch 2, cut down to one update, laid out like a deploy's:
+  - "Update #N", from → to, how long it took, and the steps.
+  - The live log.
+  - Crumbs back to Settings › Houston.
+- **Toasts:** check results and a started or refused update are toasts (`flash[:toast]`) in Settings and on the log page. A started update opens its log page.
+- **The flight board:** the version is plain text again. The pills stay: "available" leads to Settings › Houston, and "updating" and "failed" lead to that update's log.
+- **Gone:** `/update` and `ServerUpdatesController`, now `Settings::UpdatesController`.
+
+Evidence:
+- Rails: 405 runs, 0 failures; rubocop clean. Go unchanged, and it passes.
+- `test/controllers/settings/updates_controller_test.rb`:
+  - the section with its buttons and rows
+  - while one runs
+  - the log page, with the failed-step rules
+  - check with its toasts
+  - update opens its log, refused says why
+  - signed out
+- The board's tests follow the pills' new links, and the Settings menu test lists Houston.
+- Mutation check: 8, each caught. Among them: the Update button while one runs, the section's and log page's refresh, the rollback row's words, the check's NO-GO toast, a started update opening its log, and the pills' links.
+- Visual check (a throwaway Mission Control) at 1280 and 375 px: the section with three updates (GO, a rollback, GO), and a rollback's log page.
+  - At 375 px the section's buttons overflowed by 12 px. They wrap now.
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 

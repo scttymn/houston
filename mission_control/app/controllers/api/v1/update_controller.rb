@@ -22,7 +22,7 @@ class Api::V1::UpdateController < Api::V1::BaseController
     if (found = LatestRelease.check_and_say)
       render json: view.merge(message: found)
     else
-      render json: { error: ServerUpdatesController::GITHUB_DOWN }, status: :bad_gateway
+      render json: { error: Settings::UpdatesController::GITHUB_DOWN }, status: :bad_gateway
     end
   end
 

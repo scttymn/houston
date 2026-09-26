@@ -133,7 +133,7 @@ class ServerUpdate < ApplicationRecord
     FlightBoard.refresh!
   end
 
-  # Saves what the running update is doing: its log so far (Houston's page
+  # Saves what the running update is doing: its log so far (its log page
   # shows it) and the installer's latest step (a "==> " line); the board
   # refreshes when the step changes.
   def self.follow(update)

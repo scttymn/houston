@@ -1,0 +1,61 @@
+<% content_for :title, "Update ##{@update.id} · Houston · Mission Control" %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<% running = @update.status == "running" %>
+<main class="page deploy-page">
+  <nav class="mono crumbs"><%= link_to "Settings", settings_path %> <span>/</span> <%= link_to "Houston", settings_path(anchor: "houston") %> <span>/</span> <span class="crumbs__here">Update #<%= @update.id %></span></nav>
+
+  <div class="deploy-status">
+    <div class="deploy-head">
+      <div class="deploy-head__main">
+        <div class="deploy-head__title">
+          <h1 class="disp">Update #<%= @update.id %></h1>
+          <%= running ? state_pill(:in_flight, "UPDATING") : state_pill(@update.status == "go" ? :go : :no_go) %>
+        </div>
+        <p class="deploy-head__meta"><span class="mono"><%= @update.from_version %> → <%= @update.to_version %></span> · Houston on this server</p>
+      </div>
+      <div class="deploy-head__clock">
+        <% if running %>
+          <span class="mono eyebrow">MISSION ELAPSED · STARTED <%= @update.started_at.in_time_zone.strftime("%H:%M:%S %Z") %></span>
+          <span class="disp deploy-head__elapsed"><%= mission_elapsed(Time.current - @update.started_at) %></span>
+        <% else %>
+          <span class="mono eyebrow">TOOK · STARTED <%= @update.started_at.in_time_zone.strftime("%H:%M:%S %Z") %></span>
+          <span class="disp deploy-head__elapsed"><%= duration_words(@update.finished_at - @update.started_at) %></span>
+        <% end %>
+      </div>
+    </div>
+
+    <% if running %>
+      <div class="serving" data-controller="refresh" data-refresh-every-value="5000">
+        <span class="serving__dot"></span>
+        <span><%= @update.from_version %> keeps running your apps while it updates. Mission Control restarts on the way, and this page comes back when it's up. Deploys and backups wait.<% if @update.long? %> It's taking long: <span class="mono">docker logs houston-update</span> on the server has the rest.<% end %></span>
+      </div>
+    <% elsif @update.status == "rolled_back" %>
+      <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">The update to <%= @update.to_version %> failed, so this server went back to <%= @update.from_version %>.</span></div>
+    <% elsif @update.status == "no_go" %>
+      <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">The update to <%= @update.to_version %> failed. This server runs <%= HoustonVersion.current %>; the log says why.</span></div>
+    <% end %>
+  </div>
+
+  <div class="deploy-body">
+    <ol class="panel deploy-steps">
+      <% @update.steps.each_with_index do |(name, state), i| %>
+        <li data-state="<%= state %>">
+          <span class="mono"><%= format("%02d", i) %></span>
+          <span><%= name %></span>
+          <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED" }.fetch(state) %></span>
+        </li>
+      <% end %>
+    </ol>
+    <section class="log-panel" data-controller="follow clipboard">
+      <div class="log-panel__head">
+        <% if running %><span class="mono log-panel__live">LIVE</span><% end %>
+        <span class="mono log-panel__what">houston · <%= @update.from_version %> → <%= @update.to_version %></span>
+        <span class="log-panel__spacer"></span>
+        <label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"> Follow</label>
+        <button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+      </div>
+      <pre class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled"><%= @update.log.presence || "Starting…" %></pre>
+    </section>
+  </div>
+  <%= render "shared/toast" %>
+</main>

@@ -1,4 +1,4 @@
-<%# What just happened (a flash), in a corner, gone after a few seconds. %>
-<% if notice || alert %>
-  <div class="toast <%= alert ? "toast--nogo" : "toast--go" %>" role="status" data-controller="toast" data-action="click->toast#dismiss"><%= alert || notice %></div>
+<%# What just happened (flash[:toast]: kind go or nogo, and text), in a corner, gone after a few seconds. %>
+<% if (toast = flash[:toast]) %>
+  <div class="toast <%= toast["kind"] == "nogo" ? "toast--nogo" : "toast--go" %>" role="status" data-controller="toast" data-action="click->toast#dismiss"><%= toast["text"] %></div>
 <% end %>

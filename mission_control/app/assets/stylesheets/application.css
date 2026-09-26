@@ -185,24 +185,14 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .stat__value--none { color: var(--faint); }
 .notice__text { flex-grow: 1; }
 /* An update is out: the text and notes link, then the command and Copy on a line of their own. */
-/* The board's version: it leads to Houston's page; a pill says what's up (a newer one, updating, failed). */
+/* The board's version, with a pill when there's news (a newer one, updating, failed): the rest is in Settings › Houston. */
 .board__version { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 22px; }
-.board__version a.eyebrow { text-decoration: none; }
-.board__version a.eyebrow:hover, .board__version a.eyebrow:focus-visible { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .board__pill { padding: 3px 8px; background: var(--hold-bg); color: var(--hold-fg); font-size: 11px; letter-spacing: 0.08em; text-decoration: none; }
 .board__pill:hover, .board__pill:focus-visible { background: var(--ink); color: var(--on-dark); }
 .board__pill--failed { background: var(--nogo-bg); color: var(--nogo-fg); }
-/* Houston's page: a deploy page for the server itself. */
-.houston-head__actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-.houston-head__actions form { margin: 0; }
-.houston-side { display: flex; flex-direction: column; gap: 24px; width: 440px; flex-shrink: 0; min-width: 0; }
-.houston-side .deploy-steps { width: auto; }
-.houston-updates h2 { margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--rule); }
-.houston-updates ul { list-style: none; margin: 0; padding: 0; }
-.houston-updates li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 18px; border-bottom: 1px solid var(--rule); font-size: 13px; }
-.houston-updates li:last-child { border-bottom: 0; }
-.houston-updates li.is-current { background: var(--paper); }
-.houston-updates small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* Settings › Houston: the head's actions sit in a row. */
+.settings-section .panel__meta { flex-wrap: wrap; gap: 8px 12px; }
+.settings-section .panel__meta form { margin: 0; }
 .toast { position: fixed; right: 16px; bottom: 16px; z-index: 10; max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; font-size: 14px; line-height: 1.45; cursor: pointer; box-shadow: 0 6px 24px rgba(26, 29, 36, 0.18); }
 .toast--go { background: var(--ink); color: var(--on-dark); }
 .toast--nogo { background: var(--nogo-bg); color: var(--nogo-fg); border: 1px solid currentColor; }
@@ -601,7 +591,6 @@ a.button--primary { color: var(--on-dark); }
 .log { margin: 0; padding: 18px; max-height: 70vh; min-height: 320px; overflow: auto; color: #D8D4C8; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 1100px) {
   .deploy-body { flex-direction: column; align-items: stretch; }
-  .houston-side { width: auto; }
   .deploy-steps { width: auto; }
 }
 @media (max-width: 720px) {

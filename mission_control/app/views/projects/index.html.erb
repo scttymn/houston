@@ -10,15 +10,15 @@
     <div class="board__title">
       <% server_update = ServerUpdate.shown %>
       <% newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release) %>
-      <%# The version leads to Houston's page (checking, updating, the update's log); a pill says what's up. %>
+      <%# The version, with a pill when there's news; the rest is in Settings › Houston. %>
       <div class="board__version">
-        <%= link_to "FLIGHT BOARD · #{base.upcase} · #{HoustonVersion.current.upcase}", server_update_path, class: "mono eyebrow", title: "Houston: check for a newer version, update" %>
+        <span class="mono eyebrow">FLIGHT BOARD · <%= base.upcase %> · <%= HoustonVersion.current.upcase %></span>
         <% if server_update&.status == "running" %>
-          <%= link_to server_update_path, class: "mono board__pill board__pill--updating", data: { controller: "refresh", refresh_every_value: 10000 } do %>Updating to <%= server_update.to_version %><%= server_update.step.present? ? " · #{server_update.step}" : "…" %><% if server_update.long? %> · taking long<% end %><% end %>
+          <%= link_to settings_update_path(server_update), class: "mono board__pill board__pill--updating", data: { controller: "refresh", refresh_every_value: 10000 } do %>Updating to <%= server_update.to_version %><%= server_update.step.present? ? " · #{server_update.step}" : "…" %><% if server_update.long? %> · taking long<% end %><% end %>
         <% elsif server_update && server_update.status.in?(%w[rolled_back no_go]) %>
-          <%= link_to "Update to #{server_update.to_version} failed", server_update_path, class: "mono board__pill board__pill--failed" %>
+          <%= link_to "Update to #{server_update.to_version} failed", settings_update_path(server_update), class: "mono board__pill board__pill--failed" %>
         <% elsif newer %>
-          <%= link_to "#{newer} available", server_update_path, class: "mono board__pill" %>
+          <%= link_to "#{newer} available", settings_path(anchor: "houston"), class: "mono board__pill" %>
         <% end %>
       </div>
       <div class="board__heading">
