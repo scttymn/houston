@@ -22,12 +22,17 @@ export default class extends Controller {
       requestAnimationFrame(() => { this.pending = false; this.update() })
     }
     this.release = () => { this.chosen = null }
+    // A page refresh in place (a Turbo morph, as Check for updates does)
+    // puts the menu back as the server sent it, unmarked: mark it again.
+    this.onMorph = () => this.update()
+    document.addEventListener("turbo:morph", this.onMorph)
     window.addEventListener("scroll", this.onScroll, { passive: true })
     for (const event of [ "wheel", "touchmove", "keydown" ]) window.addEventListener(event, this.release, { passive: true })
     this.update()
   }
 
   disconnect() {
+    document.removeEventListener("turbo:morph", this.onMorph)
     window.removeEventListener("scroll", this.onScroll)
     for (const event of [ "wheel", "touchmove", "keydown" ]) window.removeEventListener(event, this.release)
   }

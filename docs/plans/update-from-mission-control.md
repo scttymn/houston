@@ -196,6 +196,8 @@ Evidence:
   - (The browser tool's own click scrolls a button to the middle of the window first, which looked like a jump.)
   - Update keeps a normal visit, so opening an update's log adds to the history and Back works.
 
+- **The menu keeps its place too** (your report: checking "clears the selected navigation"). The morph puts the Settings menu back as the server sent it, with nothing marked, and the menu's controller survives the morph without marking it again. It now marks the section in view again on `turbo:morph`. Checked in a browser: Releases chosen, then Check for updates, and Releases stays marked. With the old controller, the same steps left nothing marked.
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 
