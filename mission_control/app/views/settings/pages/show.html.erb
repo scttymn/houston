@@ -105,10 +105,33 @@
       <% end %>
     </section>
 
-    <section class="settings-section" id="houston">
+    <section class="settings-section" id="port">
+      <div class="panel__head"><h2 class="disp panel__title">Port 3000</h2></div>
+      <% address = PortExposure.address %>
+      <p class="panel__row">
+        <% if address.nil? %>
+          Houston can't tell what port 3000 is bound to right now (it asks Docker).
+        <% elsif address == "127.0.0.1" %>
+          <%= state_pill(:go, "CLOSED") %> only on this server (127.0.0.1). Reach it with <span class="mono">ssh -L 3000:127.0.0.1:3000</span>, then <span class="mono">http://localhost:3000</span>.
+        <% elsif address == "0.0.0.0" %>
+          <%= state_pill(:hold, "OPEN") %> to your network, over plain HTTP, at <span class="mono">http://&lt;server address&gt;:3000</span>.
+        <% else %>
+          <%= state_pill(:hold, "OPEN") %> on <span class="mono"><%= address %></span>, over plain HTTP (the installer's HOUSTON_BIND).
+        <% end %>
+      </p>
+      <% unless address.nil? %>
+        <%= form_with url: settings_port_path, method: :patch, class: "panel__row inline-form" do |f| %>
+          <%= hidden_field_tag :open, address == "127.0.0.1" ? "1" : "0" %>
+          <%= f.button address == "127.0.0.1" ? "Open port 3000 to the network" : "Close port 3000", class: "button button--small" %>
+        <% end %>
+      <% end %>
+      <p class="panel__row panel__row--muted">Mission Control is always at <span class="mono">https://admin.<%= @installation.base_domain %></span>. Port 3000 is for first-run setup and your own network. On a server with a public address, close it: Docker publishes it straight past the server's firewall. Changing it restarts Mission Control for a few seconds. The installer keeps your choice.</p>
+    </section>
+
+    <section class="settings-section" id="releases">
       <% running = @updates.first if @updates.first&.status == "running" %>
       <div class="panel__head">
-        <h2 class="disp panel__title">Houston</h2>
+        <h2 class="disp panel__title">Releases</h2>
         <span class="panel__meta">
           <span class="mono eyebrow"><%= HoustonVersion.current.upcase %></span>
           <%= button_to "Check for updates", check_settings_updates_path, class: "button button--small" %>
@@ -146,29 +169,6 @@
           <%= link_to "Log", settings_update_path(u) %>
         </div>
       <% end %>
-    </section>
-
-    <section class="settings-section" id="port">
-      <div class="panel__head"><h2 class="disp panel__title">Port 3000</h2></div>
-      <% address = PortExposure.address %>
-      <p class="panel__row">
-        <% if address.nil? %>
-          Houston can't tell what port 3000 is bound to right now (it asks Docker).
-        <% elsif address == "127.0.0.1" %>
-          <%= state_pill(:go, "CLOSED") %> only on this server (127.0.0.1). Reach it with <span class="mono">ssh -L 3000:127.0.0.1:3000</span>, then <span class="mono">http://localhost:3000</span>.
-        <% elsif address == "0.0.0.0" %>
-          <%= state_pill(:hold, "OPEN") %> to your network, over plain HTTP, at <span class="mono">http://&lt;server address&gt;:3000</span>.
-        <% else %>
-          <%= state_pill(:hold, "OPEN") %> on <span class="mono"><%= address %></span>, over plain HTTP (the installer's HOUSTON_BIND).
-        <% end %>
-      </p>
-      <% unless address.nil? %>
-        <%= form_with url: settings_port_path, method: :patch, class: "panel__row inline-form" do |f| %>
-          <%= hidden_field_tag :open, address == "127.0.0.1" ? "1" : "0" %>
-          <%= f.button address == "127.0.0.1" ? "Open port 3000 to the network" : "Close port 3000", class: "button button--small" %>
-        <% end %>
-      <% end %>
-      <p class="panel__row panel__row--muted">Mission Control is always at <span class="mono">https://admin.<%= @installation.base_domain %></span>. Port 3000 is for first-run setup and your own network. On a server with a public address, close it: Docker publishes it straight past the server's firewall. Changing it restarts Mission Control for a few seconds. The installer keeps your choice.</p>
     </section>
 
     <section class="settings-section" id="storage">

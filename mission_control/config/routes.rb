@@ -125,7 +125,7 @@ Rails.application.routes.draw do
       post :repair
     end
     resource :port, only: :update, controller: "port"
-    # Settings › Houston: check for a newer version, update to it, each update's log.
+    # Settings › Releases: check for a newer version, update to it, each update's log.
     resources :updates, only: %i[ show create ] do
       post :check, on: :collection
     end

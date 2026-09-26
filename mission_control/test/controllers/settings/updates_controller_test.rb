@@ -1,7 +1,7 @@
 require "test_helper"
 require_relative "../../support/fake_docker"
 
-# Settings › Houston: the version, checking for a newer one, updating, and
+# Settings › Releases: the version, checking for a newer one, updating, and
 # each update's log (docs/plans/update-from-mission-control.md, Batch 3).
 class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
   include FakeDockerHelper
@@ -23,12 +23,12 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
   def github(tag) = stub_request(:get, RELEASES).to_return(body: { tag_name: tag, html_url: "https://github.com/scttymn/houston/releases/tag/#{tag}" }.to_json)
   def update!(**attrs) = ServerUpdate.create!({ to_version: "v0.4.3", from_version: "v0.4.2", status: "go", started_at: 1.hour.ago, finished_at: 1.hour.ago + 40, log: LOG }.merge(attrs))
 
-  test "Settings › Houston: the version, checking, updating, and the updates" do
+  test "Settings › Releases: the version, checking, updating, and the updates" do
     sign_in_as users(:one)
     get settings_path
-    assert_select ".section-nav a[href='#houston']", "Houston"
-    assert_select "section#houston" do
-      assert_select ".panel__title", "Houston"
+    assert_select ".section-nav a[href='#releases']", "Releases"
+    assert_select "section#releases" do
+      assert_select ".panel__title", "Releases"
       assert_select ".panel__meta .eyebrow", "V0.4.2"
       assert_select ".panel__meta form[action='#{check_settings_updates_path}'] button", "Check for updates"
       assert_select ".panel__meta form[action='#{settings_updates_path}']" do
@@ -45,7 +45,7 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
     failed = update!(status: "rolled_back", started_at: 3.hours.ago, finished_at: 3.hours.ago + 95)
     good = update!
     get settings_path
-    assert_select "section#houston" do
+    assert_select "section#releases" do
       assert_select ".panel__meta form[action='#{settings_updates_path}']", 0, "nothing newer"
       assert_select ".panel__row", /v0\.4\.3 is the latest release/
       assert_select ".history__row", 3
@@ -62,11 +62,11 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "while one runs, Settings › Houston says so and keeps checking" do
+  test "while one runs, Settings › Releases says so and keeps checking" do
     sign_in_as users(:one)
     running = update!(status: "running", finished_at: nil, started_at: 1.minute.ago, step: "Pulling Houston v0.4.3")
     get settings_path
-    assert_select "section#houston" do
+    assert_select "section#releases" do
       assert_select "form[action='#{settings_updates_path}']", 0, "no second update meanwhile"
       assert_select ".panel__row[data-controller=refresh]", /Updating to v0\.4\.3 · Pulling Houston v0\.4\.3/
       assert_select ".history__row .state", "UPDATING"
@@ -79,7 +79,7 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
     update = update!(status: "running", finished_at: nil, started_at: 1.minute.ago, step: "Pulling Houston v0.4.3")
     get settings_update_path(update)
     assert_response :success
-    assert_select "nav.crumbs a[href='#{settings_path(anchor: "houston")}']", "Houston"
+    assert_select "nav.crumbs a[href='#{settings_path(anchor: "releases")}']", "Releases"
     assert_select "h1", "Update ##{update.id}"
     assert_select ".deploy-head__meta", /v0\.4\.2 → v0\.4\.3/
     assert_select "[data-controller=refresh]", 1, "it refreshes while the update runs"
@@ -108,7 +108,7 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
     sign_in_as users(:one)
     github("v0.4.2")
     post check_settings_updates_path
-    assert_redirected_to settings_path(anchor: "houston")
+    assert_redirected_to settings_path(anchor: "releases")
     follow_redirect!
     assert_select ".toast.toast--go[role=status][data-controller=toast]", "v0.4.2 is the latest."
 
@@ -135,7 +135,7 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
 
     ServerUpdate.delete_all
     use_fake_docker(docker) { |fake| post settings_updates_path, params: { version: "v0.4.2" }; @runs = runs(fake) }
-    assert_redirected_to settings_path(anchor: "houston")
+    assert_redirected_to settings_path(anchor: "releases")
     follow_redirect!
     assert_select ".toast--nogo", /isn't newer/
     assert_equal [ 0, 0 ], [ @runs, ServerUpdate.count ]

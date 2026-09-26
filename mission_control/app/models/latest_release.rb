@@ -23,7 +23,7 @@ module LatestRelease
     nil
   end
 
-  # A check someone asked for (Check for updates in Settings › Houston, houston update --check): what
+  # A check someone asked for (Check for updates in Settings › Releases, houston update --check): what
   # it found, in words, or nil when GitHub didn't answer.
   def self.check_and_say
     tag = check! or return nil

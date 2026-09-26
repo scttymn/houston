@@ -185,6 +185,8 @@ Evidence:
 - Visual check (a throwaway Mission Control) at 1280 and 375 px: the section with three updates (GO, a rollback, GO), and a rollback's log page.
   - At 375 px the section's buttons overflowed by 12 px. They wrap now.
 
+- **Renamed:** the section is **Settings › Releases** (`#releases`), your call ("that makes a lot more sense"). It sits after Port 3000, in the menu's alphabetical order. Live check: the server updated itself v0.4.5 → v0.4.6 from Houston's page (update #3, GO in 23 s).
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 

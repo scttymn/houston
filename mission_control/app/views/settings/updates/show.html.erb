@@ -1,8 +1,8 @@
-<% content_for :title, "Update ##{@update.id} · Houston · Mission Control" %>
+<% content_for :title, "Update ##{@update.id} · Releases · Mission Control" %>
 <% turbo_refreshes_with method: :morph, scroll: :preserve %>
 <% running = @update.status == "running" %>
 <main class="page deploy-page">
-  <nav class="mono crumbs"><%= link_to "Settings", settings_path %> <span>/</span> <%= link_to "Houston", settings_path(anchor: "houston") %> <span>/</span> <span class="crumbs__here">Update #<%= @update.id %></span></nav>
+  <nav class="mono crumbs"><%= link_to "Settings", settings_path %> <span>/</span> <%= link_to "Releases", settings_path(anchor: "releases") %> <span>/</span> <span class="crumbs__here">Update #<%= @update.id %></span></nav>
 
   <div class="deploy-status">
     <div class="deploy-head">

@@ -10,7 +10,7 @@
     <div class="board__title">
       <% server_update = ServerUpdate.shown %>
       <% newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release) %>
-      <%# The version, with a pill when there's news; the rest is in Settings › Houston. %>
+      <%# The version, with a pill when there's news; the rest is in Settings › Releases. %>
       <div class="board__version">
         <span class="mono eyebrow">FLIGHT BOARD · <%= base.upcase %> · <%= HoustonVersion.current.upcase %></span>
         <% if server_update&.status == "running" %>
@@ -18,7 +18,7 @@
         <% elsif server_update && server_update.status.in?(%w[rolled_back no_go]) %>
           <%= link_to "Update to #{server_update.to_version} failed", settings_update_path(server_update), class: "mono board__pill board__pill--failed" %>
         <% elsif newer %>
-          <%= link_to "#{newer} available", settings_path(anchor: "houston"), class: "mono board__pill" %>
+          <%= link_to "#{newer} available", settings_path(anchor: "releases"), class: "mono board__pill" %>
         <% end %>
       </div>
       <div class="board__heading">

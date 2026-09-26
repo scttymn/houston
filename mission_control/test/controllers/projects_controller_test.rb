@@ -210,7 +210,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
   end
 
   # The version beside the board's name, with a pill when there's news; the
-  # rest is in Settings › Houston (docs/plans/update-from-mission-control.md, Batch 3).
+  # rest is in Settings › Releases (docs/plans/update-from-mission-control.md, Batch 3).
   test "the flight board's version, and news of a newer one" do
     stub_tunnel
     ENV["HOUSTON_VERSION"] = "v0.4.2"
@@ -223,7 +223,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
     Installation.current.update!(latest_release: "v0.4.3", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.4.3")
     get root_path
-    assert_select ".board__version a.board__pill[href='#{settings_path(anchor: "houston")}']", "v0.4.3 available"
+    assert_select ".board__version a.board__pill[href='#{settings_path(anchor: "releases")}']", "v0.4.3 available"
     assert_select ".update-notice, .server-update", 0, "no banner"
   ensure
     ENV.delete("HOUSTON_VERSION")
