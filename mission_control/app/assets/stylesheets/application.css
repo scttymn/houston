@@ -486,7 +486,7 @@ a.button--primary { color: var(--on-dark); }
 /* One set of columns for the whole board (the rows are subgrids), sized to
    what they hold: status, name, SHA and backup take what they need (names
    never wrap); domains and the last deploy share the rest. */
-.panel.flight { display: grid; grid-template-columns: max-content max-content max-content minmax(0, 1.4fr) minmax(12rem, 1fr) max-content; column-gap: 32px; font-size: 14px; }
+.panel.flight { display: grid; grid-template-columns: max-content max-content max-content minmax(0, 1.4fr) minmax(12rem, 1fr) max-content max-content; column-gap: 32px; font-size: 14px; }
 .flight-head, .flight__row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; padding: 22px 24px; align-items: start; }
 .flight__name, .flight__backup > span { white-space: nowrap; }
 .flight-head { padding: 12px 24px; border-bottom: 1px solid var(--ink); font-size: 11px; letter-spacing: 0.14em; color: var(--muted); }
@@ -512,6 +512,18 @@ a.button--primary { color: var(--on-dark); }
 .flight__plain { color: var(--ink); text-decoration: none; }
 .flight__plain:hover { text-decoration: underline; }
 .board__foot { margin: 0; font-size: 13px; color: var(--muted); }
+/* An app's CPU, memory and disk: an amount, and a donut where there's a limit. */
+.flight__resources { gap: 3px; }
+.usage { display: grid; grid-template-columns: 16px 36px max-content; align-items: center; gap: 6px; white-space: nowrap; }
+.usage__label { grid-column: 2; font-size: 11px; letter-spacing: 0.08em; color: var(--muted); }
+.usage__amount { grid-column: 3; font-variant-numeric: tabular-nums; }
+.donut { grid-column: 1; }
+.donut__track { fill: none; stroke: var(--rule); stroke-width: 3; }
+.donut__fill { fill: none; stroke-width: 3; }
+.donut--go .donut__fill { stroke: #2F7D4A; }
+.donut--hold .donut__fill { stroke: #B7791F; }
+.donut--nogo .donut__fill { stroke: var(--signal); }
+.usage__stale { color: #75480A !important; font-size: 12px !important; }
 @media (max-width: 1100px) {
   .panel.flight { display: flex; }
   .flight-head { display: none; }

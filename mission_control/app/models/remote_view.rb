@@ -8,7 +8,8 @@ module RemoteView
     last = project.latest_deploy
     view = {
       name: project.name, status: project.status.to_s, running_sha: project.running_deploy&.sha,
-      host: project.host, domains: project.domain_states, last_deploy: last && deploy(last), maintenance: maintenance(project)
+      host: project.host, domains: project.domain_states, last_deploy: last && deploy(last), maintenance: maintenance(project),
+      stats: AppStats.for(project)&.as_json
     }
     return view unless detail
 

@@ -127,6 +127,7 @@ A static site deploys as `init` writes it. For anything else, **edit the default
   - `domains`, `deploy` (which branch or tag deploys), `backups`
 - **Service hostnames:** write `${DB_HOST:-db}` wherever the app names a service. Plain Compose uses `db`; on the server, Houston sets it to that service's container.
 - **Resource limits:** `deploy: { resources: { limits: { cpus: "2", memory: 2g } } }` on any service (the app or a database) caps it on the server as in `houston dev`, so apps sharing a server can't starve each other. Changing a database's limits restarts its container once at the next deploy; its data is kept.
+- **What each app uses:** the flight board's RESOURCES column shows each app's CPU, memory and disk right now (the app and its databases together), read from Docker every 30 seconds. They're amounts, and CPU and memory also get a small donut showing the share used when every one of the app's containers has a limit. `houston status <project>` prints the same.
 
 Then check it the way the server will run it:
 

@@ -1,10 +1,12 @@
 require "test_helper"
 require_relative "../support/cloudflare_stubs"
 require_relative "../support/project_helpers"
+require_relative "../support/fake_docker"
 
 class ProjectsControllerTest < ActionDispatch::IntegrationTest
   include CloudflareStubs
   include ProjectHelpers
+  include FakeDockerHelper
 
   setup do
     Installation.current.update!(cloudflare_account_id: ACCOUNT, tunnel_id: TUNNEL, cloudflare_api_token: TOKEN)
@@ -265,6 +267,52 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select ".board__pill--failed", 0, "a day later, it's gone"
   ensure
     ENV.delete("HOUSTON_VERSION")
+  end
+
+  # docs/plans/app-stats.md, row 7.
+  test "each row shows its app's CPU, memory and disk" do
+    travel_to Time.utc(2026, 9, 26, 12)
+    stub_tunnel
+    make_project("equip", services: %w[app db])
+    make_project("cart")
+    make_project("idle")
+    stats = [ { "ID" => "w1", "Name" => "equip-web-#{"a" * 40}", "CPUPerc" => "12.00%", "MemUsage" => "300MiB / 1GiB" },
+              { "ID" => "d1", "Name" => "equip-db", "CPUPerc" => "3.00%", "MemUsage" => "100MiB / 512MiB" },
+              { "ID" => "c1", "Name" => "cart-web-#{"b" * 40}", "CPUPerc" => "3.00%", "MemUsage" => "12MiB / 125.7GiB" } ].map(&:to_json).join("\n")
+    limits = { "w1" => "1073741824 2000000000", "d1" => "536870912 1000000000", "c1" => "0 0" }
+    df = [ { "Name" => "equip_storage", "Size" => "1.5GB" }, { "Name" => "cart_data", "Size" => "3MB" } ].to_json
+    fake = FakeDocker.new do |args|
+      case args.first
+      when "stats" then DockerCommand::Result.new(success: true, output: stats)
+      when "inspect" then DockerCommand::Result.new(success: true, output: args.drop(3).map { |id| "#{id} #{limits[id]}" }.join("\n"))
+      when "system" then DockerCommand::Result.new(success: true, output: df)
+      end
+    end
+    use_fake_docker(fake) { AppStats.sample! }
+
+    get root_path
+    assert_select ".flight-head", /RESOURCES/
+    assert_select "[data-project=equip] .flight__resources" do
+      assert_select ".usage", 3
+      assert_select ".usage--cpu[title='0.15 cores of the 3 cores limit (5%)']", /0\.15 cores/
+      assert_select ".usage--cpu svg.donut[aria-label='5%']", 1
+      assert_select ".usage--memory[title='400 MB of the 1.5 GB limit (26%)']", /400 MB/
+      assert_select ".usage--memory svg.donut[aria-label='26%']", 1
+      assert_select ".usage--disk", /1\.4 GB/
+      assert_select ".usage--disk svg", 0, "volumes have no limit"
+    end
+    assert_select "[data-project=cart] .flight__resources" do
+      assert_select "svg", 0, "no limits: amounts only"
+      assert_select ".usage--cpu", /0\.03 cores/
+      assert_select ".usage--memory", /12 MB/
+      assert_select ".usage--disk", /2\.86 MB/
+    end
+    assert_select "[data-project=idle] .flight__resources", /—/
+    assert_select "[data-project=idle] .flight__resources .usage", 0
+
+    travel 3.minutes
+    get root_path
+    assert_select "[data-project=equip] .flight__resources .usage__stale", /stale/
   end
 
   test "the flight board listens for changes" do

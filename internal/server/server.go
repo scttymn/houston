@@ -216,6 +216,7 @@ type Project struct {
 	Host       string                 `json:"host"`
 	Domains    map[string]DomainState `json:"domains"`
 	LastDeploy *Deploy                `json:"last_deploy"`
+	Stats      *Stats                 `json:"stats"`
 	// Only for a single project:
 	DeployRule struct {
 		On     string `json:"on"`
@@ -231,6 +232,17 @@ type Project struct {
 	Maintenance     Maintenance     `json:"maintenance"`
 	BackupSchedule  string          `json:"backup_schedule"`
 	TimeZone        string          `json:"time_zone"`
+}
+
+// Stats are an app's CPU (in cores), memory and disk right now, sampled
+// every 30 seconds on the server (docs/plans/app-stats.md). A limit is set
+// only when every running container of the app has one.
+type Stats struct {
+	CPUCores    float64  `json:"cpu_cores"`
+	CPULimit    *float64 `json:"cpu_limit"`
+	MemoryBytes int64    `json:"memory_bytes"`
+	MemoryLimit *int64   `json:"memory_limit"`
+	DiskBytes   int64    `json:"disk_bytes"`
 }
 
 // Settings are Houston's own: its base domain, and the time zone backup

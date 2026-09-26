@@ -144,3 +144,29 @@ func TestProjectResolution(t *testing.T) {
 		t.Errorf("broken compose: exit %d, %q", code, errOut)
 	}
 }
+
+// docs/plans/app-stats.md, row 8.
+func TestStatusPrintsStats(t *testing.T) {
+	stats := `,"stats":{"cpu_cores":0.15,"cpu_limit":3,"memory_bytes":419430400,"memory_limit":1610612736,"disk_bytes":1500000000,"sampled_at":"2026-09-26T12:00:00Z"}`
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/garage": respond(strings.TrimSuffix(garageJSON, "}") + stats + "}"),
+	})
+	t.Chdir(t.TempDir())
+	_, out, _ := run(&fakeDocker{}, "status", "--project", "garage")
+	if !strings.Contains(out, "usage     CPU 0.15 cores of 3 (5%) · MEM 400 MB of 1.5 GB (26%) · DISK 1.4 GB\n") {
+		t.Errorf("with limits:\n%s", out)
+	}
+
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/garage": respond(strings.TrimSuffix(garageJSON, "}") + `,"stats":{"cpu_cores":0.03,"memory_bytes":12582912,"disk_bytes":0,"sampled_at":"2026-09-26T12:00:00Z"}}`),
+	})
+	_, out, _ = run(&fakeDocker{}, "status", "--project", "garage")
+	if !strings.Contains(out, "usage     CPU 0.03 cores · MEM 12 MB · DISK 0 B\n") {
+		t.Errorf("without limits:\n%s", out)
+	}
+
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){"/api/v1/projects/garage": respond(garageJSON)})
+	if _, out, _ = run(&fakeDocker{}, "status", "--project", "garage"); strings.Contains(out, "usage") {
+		t.Errorf("nothing sampled:\n%s", out)
+	}
+}

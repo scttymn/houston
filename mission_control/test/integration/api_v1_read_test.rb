@@ -1,8 +1,10 @@
 require "test_helper"
 require_relative "../support/project_helpers"
+require_relative "../support/fake_docker"
 
 class ApiV1ReadTest < ActionDispatch::IntegrationTest
   include ProjectHelpers
+  include FakeDockerHelper
 
   setup do
     @token, = ApiToken.issue!("agent")
@@ -38,6 +40,28 @@ class ApiV1ReadTest < ActionDispatch::IntegrationTest
 
     api "/projects/nope"
     assert_response :not_found
+  end
+
+  # docs/plans/app-stats.md, row 8.
+  test "a project's stats" do
+    api "/projects/garage"
+    assert_nil json["stats"], "nothing sampled yet"
+
+    stats = { "ID" => "w1", "Name" => "garage-web-#{"a" * 40}", "CPUPerc" => "50.00%", "MemUsage" => "256MiB / 1GiB" }.to_json
+    fake = FakeDocker.new do |args|
+      case args.first
+      when "stats" then DockerCommand::Result.new(success: true, output: stats)
+      when "inspect" then DockerCommand::Result.new(success: true, output: "w1 1073741824 0")
+      when "system" then DockerCommand::Result.new(success: true, output: [ { "Name" => "garage_storage", "Size" => "2MB" } ].to_json)
+      end
+    end
+    use_fake_docker(fake) { AppStats.sample! }
+    api "/projects/garage"
+    assert_equal({ "cpu_cores" => 0.5, "cpu_limit" => nil, "memory_bytes" => 256 * 1024**2, "memory_limit" => 1024**3, "disk_bytes" => 2_000_000 },
+                 json["stats"].except("sampled_at"))
+    assert json["stats"]["sampled_at"]
+    api "/projects"
+    assert_equal 0.5, json["projects"].find { |p| p["name"] == "garage" }.dig("stats", "cpu_cores")
   end
 
   test "reading never reveals secrets" do

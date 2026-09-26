@@ -61,7 +61,7 @@
 
   <% if @projects.any? %>
     <section class="panel flight">
-      <div class="mono flight-head"><span>STATUS</span><span>PROJECT</span><span>RUNNING SHA</span><span>DOMAINS</span><span>LAST DEPLOY</span><span>LAST BACKUP</span></div>
+      <div class="mono flight-head"><span>STATUS</span><span>PROJECT</span><span>RUNNING SHA</span><span>DOMAINS</span><span>LAST DEPLOY</span><span>LAST BACKUP</span><span>RESOURCES</span></div>
       <% @projects.each do |project| %>
         <% latest, running, backup = project.latest_deploy, project.running_deploy, @last_backups[project.id] %>
         <div class="flight__row flight__row--<%= project.status.to_s.dasherize %>" data-project="<%= project.name %>">
@@ -109,6 +109,17 @@
             <% if backup %>
               <span><%= l(backup.finished_at, format: :short) %></span>
               <small><%= backup.kind %><%= " · #{number_to_human_size(backup.bytes)}" if backup.bytes %></small>
+            <% else %>
+              <span class="muted">—</span>
+            <% end %>
+          </span>
+          <%# Right now, from Docker every 30 seconds (AppStats); a donut where there's a limit. %>
+          <span class="flight__cell flight__resources">
+            <% if (stats = AppStats.for(project)) %>
+              <%= usage(:cpu, "CPU", cores_words(stats.cpu_cores), limit: stats.cpu_limit && cores_words(stats.cpu_limit), percent: stats.cpu_percent) %>
+              <%= usage(:memory, "MEM", number_to_human_size(stats.memory_bytes), limit: stats.memory_limit && number_to_human_size(stats.memory_limit), percent: stats.memory_percent) %>
+              <%= usage(:disk, "DISK", number_to_human_size(stats.disk_bytes)) %>
+              <% if stats.stale? %><small class="usage__stale">stale: read <%= time_ago_in_words(stats.sampled_at) %> ago</small><% end %>
             <% else %>
               <span class="muted">—</span>
             <% end %>

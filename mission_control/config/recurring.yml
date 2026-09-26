@@ -28,3 +28,6 @@ production:
   settle_server_update:
     class: ServerUpdateJob
     schedule: every minute
+  sample_app_stats:
+    class: AppStatsJob
+    schedule: every 30 seconds

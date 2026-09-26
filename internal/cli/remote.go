@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scttymn/houston/internal/humanize"
 	"github.com/scttymn/houston/internal/server"
 )
 
@@ -126,6 +127,9 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 		}
 		fmt.Fprintln(stdout, line)
 	}
+	if s := p.Stats; s != nil {
+		fmt.Fprintf(stdout, "usage     %s\n", usageLine(s))
+	}
 	fmt.Fprintf(stdout, "backup    %s\n", backupLine(p.LastBackup))
 	if p.BackupSchedule != "" {
 		fmt.Fprintf(stdout, "schedule  %s (%s)\n", p.BackupSchedule, p.TimeZone)
@@ -229,4 +233,24 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// usageLine is an app's CPU, memory and disk, with the share of a limit
+// where there is one: "CPU 0.15 cores of 3 (5%) · MEM 400 MB of 1.5 GB (26%) · DISK 1.4 GB".
+func usageLine(s *server.Stats) string {
+	cores := func(c float64) string {
+		return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(c, 'f', 2, 64), "0"), ".")
+	}
+	cpu := "CPU " + cores(s.CPUCores) + " cores"
+	if s.CPUCores == 1 {
+		cpu = "CPU 1 core"
+	}
+	if l := s.CPULimit; l != nil && *l > 0 {
+		cpu += fmt.Sprintf(" of %s (%.0f%%)", cores(*l), 100*s.CPUCores / *l)
+	}
+	mem := "MEM " + humanize.Bytes(s.MemoryBytes)
+	if l := s.MemoryLimit; l != nil && *l > 0 {
+		mem += fmt.Sprintf(" of %s (%.0f%%)", humanize.Bytes(*l), 100*float64(s.MemoryBytes)/float64(*l))
+	}
+	return cpu + " · " + mem + " · DISK " + humanize.Bytes(s.DiskBytes)
 }
