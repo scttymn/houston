@@ -187,6 +187,8 @@ Evidence:
 
 - **Renamed:** the section is **Settings › Releases** (`#releases`), your call ("that makes a lot more sense"). It sits after Port 3000, in the menu's alphabetical order. Live check: the server updated itself v0.4.5 → v0.4.6 from Houston's page (update #3, GO in 23 s).
 
+- **Settings › Port 3000 is Settings › Security** (`#security`), your call, so other security settings can join it. Port 3000 is its first group, under a "PORT 3000" subheading (`#port`, so old links still land). The installer's messages and the docs say Settings › Security. `install/test/install-bind.sh` and `install-version.sh` pass.
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 

@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-// houston port [open|close]: Settings › Port 3000
+// houston port [open|close]: Settings › Security
 // (docs/plans/security-fixes.md, H3). Mission Control restarts for a few
 // seconds to change it; the installer keeps the choice.
 func runPort(file, change string, asJSON bool, stdout, stderr io.Writer) int {

@@ -29,7 +29,7 @@ REGISTRY_IMAGE="registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf6820
 RUNNER_IMAGE="houston/runner:local"
 RUNNERS="${HOUSTON_RUNNERS:-2}"
 # Where Mission Control's port 3000 listens (an IPv4 address). Unset: the
-# choice saved in Settings › Port 3000 (open on a new install; choose_bind).
+# choice saved in Settings › Security (open on a new install; choose_bind).
 HOUSTON_BIND="${HOUSTON_BIND:-}"
 
 say() { printf '%s\n' "$*"; }
@@ -408,7 +408,7 @@ RUNNER
 
 # choose_bind: where port 3000 listens this run. compose.yml binds
 # ${HOUSTON_BIND:-127.0.0.1}. A first install opens it to the network, for
-# setup in a browser. A rerun keeps the choice saved in Settings › Port 3000
+# setup in a browser. A rerun keeps the choice saved in Settings › Security
 # (open unless someone closed it; an older Mission Control has no choice
 # saved: open, as it was). A rerun that can't ask binds 127.0.0.1, and the
 # report says how to open it. HOUSTON_BIND chooses for this run.
@@ -454,7 +454,7 @@ services:
       HOUSTON_TUNNEL_TOKEN_PATH: /houston/tunnel-token
       HOUSTON_RUNNERS: "$RUNNERS"
       HOUSTON_TOOLS_IMAGE: $IMAGE
-      # Settings › Port 3000 recreates Mission Control with the runner image
+      # Settings › Security recreates Mission Control with the runner image
       # (it has docker compose).
       HOUSTON_RUNNER_IMAGE: $RUNNER_IMAGE
       # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
@@ -573,12 +573,12 @@ report() {
     say "Houston $(installed_version) is running."
     say "Finish setup at  $url"
     say "Setup code       $code"
-    [ "$bind" = 0.0.0.0 ] && say "Port 3000 is plain HTTP, open to your network for setup. Once admin.<your base domain> works, you can close it in Settings › Port 3000."
+    [ "$bind" = 0.0.0.0 ] && say "Port 3000 is plain HTTP, open to your network for setup. Once admin.<your base domain> works, you can close it in Settings › Security."
   else
     say ""
     say "Houston $(installed_version) is running. Setup is already complete. Sign in at https://admin.<your base domain>."
     if [ "$bind" = 0.0.0.0 ]; then
-      say "Port 3000 is open to your network, over plain HTTP. Close it in Settings › Port 3000 (or: houston port close), especially on a server with a public address."
+      say "Port 3000 is open to your network, over plain HTTP. Close it in Settings › Security (or: houston port close), especially on a server with a public address."
       return 0
     fi
   fi
@@ -586,7 +586,7 @@ report() {
     say "Port 3000 answers only on this server. From another machine: ssh -L 3000:127.0.0.1:3000 <you>@${address:-<this server>}, then open http://localhost:3000."
   fi
   if [ -n "${bind_unknown:-}" ]; then
-    say "Couldn't ask Mission Control for the choice in Settings › Port 3000, so port 3000 is closed to the network. Open it there, or run this installer again with HOUSTON_BIND=0.0.0.0."
+    say "Couldn't ask Mission Control for the choice in Settings › Security, so port 3000 is closed to the network. Open it there, or run this installer again with HOUSTON_BIND=0.0.0.0."
   fi
 }
 

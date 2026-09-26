@@ -192,6 +192,9 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .board__pill--failed { background: var(--nogo-bg); color: var(--nogo-fg); }
 /* Settings › Releases: the head's actions sit in a row. */
 .settings-section .panel__meta { flex-wrap: wrap; gap: 8px 12px; }
+/* A section's group (Settings › Security's port 3000), under a small heading. */
+.settings-subsection { display: flex; flex-direction: column; }
+.settings-subhead { margin: 0; padding: 14px 20px 0; }
 .settings-section .panel__meta form { margin: 0; }
 .toast { position: fixed; right: 16px; bottom: 16px; z-index: 10; max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; font-size: 14px; line-height: 1.45; cursor: pointer; box-shadow: 0 6px 24px rgba(26, 29, 36, 0.18); }
 .toast--go { background: var(--ink); color: var(--on-dark); }

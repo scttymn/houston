@@ -699,7 +699,7 @@ func (cl *Client) RepairCloudflare(ctx context.Context) ([]CloudflareRepairResul
 	return res.Results, cl.postJSON(ctx, "/api/v1/cloudflare/repair", nil, &res)
 }
 
-// PortView is Settings › Port 3000: what it's bound to now (Address empty
+// PortView is Settings › Security: what it's bound to now (Address empty
 // when Mission Control can't tell), and the saved choice.
 type PortView struct {
 	Open    bool   `json:"open"`

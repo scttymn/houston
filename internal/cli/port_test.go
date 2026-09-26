@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// houston port / port open / port close: Settings › Port 3000
+// houston port / port open / port close: Settings › Security
 // (docs/plans/security-fixes.md, H3).
 func TestPortShow(t *testing.T) {
 	answer := `{"open":true,"address":"0.0.0.0","saved":"open"}`

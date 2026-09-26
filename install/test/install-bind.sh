@@ -5,7 +5,7 @@
 #   - compose.yml binds it to ${HOUSTON_BIND:-127.0.0.1}: closed unless a run
 #     says otherwise
 #   - a first install opens it to the network, for setup in a browser
-#   - a rerun keeps the choice saved in Settings › Port 3000: open or closed
+#   - a rerun keeps the choice saved in Settings › Security: open or closed
 #   - a rerun that can't ask binds 127.0.0.1, and says how to open it
 #   - HOUSTON_BIND chooses; anything but an IPv4 address is refused before
 #     anything changes
@@ -62,7 +62,7 @@ bound "0.0.0.0" "no compose.yml yet"
 grep -q "rails runner" /fake/docker.log && bad "checked setup with no install to ask" || ok "didn't ask a Mission Control that isn't there"
 [ "$(ports)" = '"${HOUSTON_BIND:-127.0.0.1}:3000:80"' ] && ok "compose.yml: closed unless a run says otherwise" || bad "ports: $(ports)"
 grep -qx '      HOUSTON_RUNNER_IMAGE: houston/runner:local' /opt/houston/compose.yml &&
-  ok "Mission Control knows the runner image (Settings › Port 3000 recreates it with that)" || bad "environment: $(grep -n 'HOUSTON_' /opt/houston/compose.yml)"
+  ok "Mission Control knows the runner image (Settings › Security recreates it with that)" || bad "environment: $(grep -n 'HOUSTON_' /opt/houston/compose.yml)"
 
 echo "== reruns"
 bound "0.0.0.0" "saved open (the default)" SAVED=0
@@ -90,7 +90,7 @@ out=$(LIB_CMD='bind=0.0.0.0; probe_address' lib 2>&1); [ "$out" = 127.0.0.1 ] &&
 echo "== the report"
 report() { LIB_CMD='host_address() { echo 192.168.0.56; }; installed_version() { echo v0.4.0; }; '"$1"'; report' lib "${@:2}" 2>&1; }
 out=$(report 'bind=0.0.0.0' SETUP_CODE=ABCD-EFGH)
-printf '%s' "$out" | grep -qF "Finish setup at  http://192.168.0.56:3000" && printf '%s' "$out" | grep -qF "Settings › Port 3000" &&
+printf '%s' "$out" | grep -qF "Finish setup at  http://192.168.0.56:3000" && printf '%s' "$out" | grep -qF "Settings › Security" &&
   ok "setup: the LAN address, and where to close the port once it's done" || bad "setup report: $out"
 out=$(report 'bind=127.0.0.1')
 printf '%s' "$out" | grep -qF "Sign in at https://admin.<your base domain>" && printf '%s' "$out" | grep -qF "ssh -L 3000:127.0.0.1:3000" &&

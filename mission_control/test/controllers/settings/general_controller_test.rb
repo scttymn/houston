@@ -9,8 +9,8 @@ class Settings::GeneralControllerTest < ActionDispatch::IntegrationTest
     get settings_path
     assert_select ".settings > nav.section-nav h1", /Settings/i
     links = css_select("nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
-    assert_equal [ [ "API tokens", "#tokens" ], [ "Cloudflare", "#cloudflare" ], [ "Port 3000", "#port" ], [ "Releases", "#releases" ], [ "Storage", "#storage" ], [ "Time zone", "#time-zone" ] ], links
-    assert_equal %w[tokens cloudflare port releases storage time-zone], css_select(".settings__body > section").map { |s| s["id"] }
+    assert_equal [ [ "API tokens", "#tokens" ], [ "Cloudflare", "#cloudflare" ], [ "Releases", "#releases" ], [ "Security", "#security" ], [ "Storage", "#storage" ], [ "Time zone", "#time-zone" ] ], links
+    assert_equal %w[tokens cloudflare releases security storage time-zone], css_select(".settings__body > section").map { |s| s["id"] }
     assert_select "header a[href='#{settings_path}']", "Settings"
 
     { settings_general_path => "cloudflare", settings_storage_locations_path => "storage", settings_tokens_path => "tokens" }.each do |old, section|

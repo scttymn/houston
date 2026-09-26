@@ -33,7 +33,7 @@ curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.s
   2. A Cloudflare API token (Account › Cloudflare Tunnel › Edit, and Zone › DNS › Edit on the domain).
   3. Backup storage, and a restic password shown once, which they must save.
 - **Check:** `https://admin.<their domain>/up` answers 200.
-- Use `https://admin.<domain>` from here on. Port 3000 stays open to the network (plain HTTP) until someone closes it. **HUMAN:** on a server with a public address, they should: Settings › Port 3000, or `houston port close` with their OK. Mission Control restarts for a few seconds.
+- Use `https://admin.<domain>` from here on. Port 3000 stays open to the network (plain HTTP) until someone closes it. **HUMAN:** on a server with a public address, they should: Settings › Security, or `houston port close` with their OK. Mission Control restarts for a few seconds.
 
 ## 2. The CLI, and logging in
 Download the CLI (`darwin` or `linux`, `arm64` or `amd64`), and check its checksum. This is the latest release. If the server is pinned to an older one, use `releases/download/<tag>/…` for both files, and match `houston status`'s version.

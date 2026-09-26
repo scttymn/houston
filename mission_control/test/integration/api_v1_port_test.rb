@@ -1,7 +1,7 @@
 require "test_helper"
 require_relative "../support/fake_docker"
 
-# houston port / port open / port close (CLI-first): Settings › Port 3000
+# houston port / port open / port close (CLI-first): Settings › Security
 # over the remote API.
 class ApiV1PortTest < ActionDispatch::IntegrationTest
   include FakeDockerHelper

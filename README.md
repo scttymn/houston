@@ -66,7 +66,7 @@ Open the URL. The three steps:
 
 Mission Control is then at `https://admin.<base>`. Cloudflare Access in front of it is optional and recommended. Keep `hooks.<base>` outside Access.
 
-**Port 3000 stays open until you close it.** It's plain HTTP, open to your network, which is handy at home and risky on a server with a public address: Docker publishes it straight past the server's firewall. **Settings › Port 3000** shows whether it's open, and closes or opens it (Mission Control restarts for a few seconds; so does `houston port close` or `houston port open`). Closed, it's bound to `127.0.0.1`, so Mission Control answers only at `admin.<base>` and on the server itself. Updates keep your choice. If you need Mission Control without Cloudflare while it's closed, go through SSH:
+**Port 3000 stays open until you close it.** It's plain HTTP, open to your network, which is handy at home and risky on a server with a public address: Docker publishes it straight past the server's firewall. **Settings › Security** shows whether it's open, and closes or opens it (Mission Control restarts for a few seconds; so does `houston port close` or `houston port open`). Closed, it's bound to `127.0.0.1`, so Mission Control answers only at `admin.<base>` and on the server itself. Updates keep your choice. If you need Mission Control without Cloudflare while it's closed, go through SSH:
 
 ```sh
 ssh -L 3000:127.0.0.1:3000 you@<server>    # then open http://localhost:3000

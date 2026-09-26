@@ -230,7 +230,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	)
 	root.AddCommand(cloudflare)
 
-	// Port 3000 (docs/plans/security-fixes.md, H3): Settings › Port 3000.
+	// Port 3000 (docs/plans/security-fixes.md, H3): Settings › Security.
 	var portJSON bool
 	port := &cobra.Command{
 		Use:   "port [open|close]",

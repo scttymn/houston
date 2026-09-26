@@ -1,4 +1,4 @@
-# Settings › Port 3000 (security fixes, H3): open to the network (for
+# Settings › Security (security fixes, H3): open to the network (for
 # first-run setup, or on purpose) or closed, bound to 127.0.0.1. The choice
 # is saved, and the installer reads it on every run. It's applied by having
 # Mission Control recreated from its own compose.yml, which binds

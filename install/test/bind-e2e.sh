@@ -6,7 +6,7 @@
 # installer asks.
 #   - a first install opens port 3000 to the network; Mission Control sees
 #     that from its own container
-#   - Settings › Port 3000 closes it (PortSwitch, what the button calls):
+#   - Settings › Security closes it (PortSwitch, what the button calls):
 #     Mission Control recreates itself bound to 127.0.0.1, compose.yml as it
 #     was; a rerun keeps it closed, and says how to reach it
 #   - opened again the same way, a rerun keeps it open
@@ -38,7 +38,7 @@ echo "== first install"
 vm env HOUSTON_SOURCE="$repo" sh "$repo/install/install.sh" > /tmp/houston-bind-1.log 2>&1 || { bad "first install: $(tail -5 /tmp/houston-bind-1.log)"; exit 1; }
 ip=$(vm sh -c "hostname -I | awk '{print \$1}'")
 check "port 3000 answers on the network ($ip)" vm curl -fsS -o /dev/null "http://$ip:3000/up"
-grep -qF "Settings › Port 3000" /tmp/houston-bind-1.log && ok "the report says where to close port 3000" || bad "report: $(tail -4 /tmp/houston-bind-1.log)"
+grep -qF "Settings › Security" /tmp/houston-bind-1.log && ok "the report says where to close port 3000" || bad "report: $(tail -4 /tmp/houston-bind-1.log)"
 [ "$(mc 'p PortExposure.open?')" = true ] && ok "Mission Control sees port 3000 open, from its own container" || bad "PortExposure.open? said $(mc 'p PortExposure.open?')"
 # cloudflared restarts until setup gives it a token, and Docker's DNS names
 # only running containers, so the lookup is proven on the registry.
@@ -64,7 +64,7 @@ alerts=$(vm bash -c "$attempts")
 [ "$(printf '%s\n' "$alerts" | tail -1)" = "Try again later." ] && [ "$(printf '%s\n' "$alerts" | grep -c "Try another")" = 10 ] &&
   ok "spoofed X-Forwarded-For and Client-Ip still hit the sign-in limit" || bad "sign-in alerts: $alerts"
 
-echo "== Settings › Port 3000: close it"
+echo "== Settings › Security: close it"
 mc 'Installation.current.update!(cloudflare_connected_at: Time.current)' >/dev/null
 before=$(vm docker compose -f /opt/houston/compose.yml ps -q mission-control)
 mc 'PortSwitch.set!(open: false)' >/dev/null

@@ -1,4 +1,4 @@
-# houston port / port open / port close: Settings › Port 3000 (PortSwitch).
+# houston port / port open / port close: Settings › Security (PortSwitch).
 class Api::V1::PortController < Api::V1::BaseController
   def show
     render json: view
