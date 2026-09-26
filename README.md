@@ -138,7 +138,11 @@ houston init                 # again: "already set up" when nothing's missing
 ```
 
 **No ports in dev.** `houston dev` runs one small proxy container, `houston-dev-proxy` (kamal-proxy, as on the server), on port 80. Each `houston dev` registers its app there by name, so any number of projects run side by side with no host ports to pick or collide.
-- **Branches get their own copy.** On another branch (a git worktree, say), the app is at `http://<branch>.<name>.localhost`, as its own Compose project with its own volumes. On its first run, those start as a copy of main's data, taken with main paused for the seconds the copy lasts, so nothing a branch does touches main. `houston dev --fresh` copies main's data again. `--as <name>` names an instance yourself.
+- **Branches get their own copy.** On another branch (a git worktree, say), the app is at `http://<branch>.<name>.localhost`, as its own Compose project with its own volumes. On its first run, those start as a copy of main's data, taken with main paused for the seconds the copy lasts, so nothing a branch does touches main. `houston dev --fresh` copies main's data again. The data comes from this laptop's main instance, never from the server.
+- **Plain git worktrees work.** `git worktree add ../equip-login -b feature/login`, then `houston dev` in it:
+  - A worktree has no `.env` of its own (git leaves untracked files out), so it uses the main checkout's.
+  - `houston dev --as login` gives it a name of your own (`login.<name>.localhost`), and the worktree remembers it. `--as=` goes back to the branch's name.
+  - When you're done: `git worktree remove ../equip-login`, then `houston dev prune`. It lists the branch instances no checkout runs any more, with their data's size, and removes them when you say so (`--yes` to skip asking). It never touches main's data, and leaves branches alone.
 - **A branch's name has two levels**, and some frameworks' development host checks allow only one under `.localhost` (Rails, for one). If the app refuses it, `houston dev` says so; allow `.<name>.localhost` in the app's development settings. For Rails: `config.hosts << ".<name>.localhost"`.
 - `HOUSTON_DEV_PORT=8080` moves the proxy off port 80 (the app is then at `<name>.localhost:8080`), and `--ports` also publishes `compose.yml`'s `ports`, for a tool that needs one.
 

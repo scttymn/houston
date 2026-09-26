@@ -61,14 +61,22 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		}
 	}
 	var devOpts devOptions
-	dev := command("dev", "Run the project locally at http://<name>.localhost (a branch: <branch>.<name>.localhost), dev build target, code mounted", func() int {
+	var dev *cobra.Command
+	dev = command("dev", "Run the project locally at http://<name>.localhost (a branch: <branch>.<name>.localhost), dev build target, code mounted", func() int {
 		devOpts.production = production
+		devOpts.asSet = dev.Flags().Changed("as")
 		return runDev(file, devOpts, stderr, d)
 	})
 	dev.Flags().BoolVar(&production, "production", false, "run the production build target instead, with the code baked into the image")
 	dev.Flags().BoolVar(&devOpts.keepPorts, "ports", false, "also publish compose.yml's ports, as plain docker compose does")
-	dev.Flags().StringVar(&devOpts.as, "as", "", "name this instance (<name>.<project>.localhost) instead of taking the git branch")
+	dev.Flags().StringVar(&devOpts.as, "as", "", "name this instance (<name>.<project>.localhost) instead of taking the git branch; this checkout remembers it (--as= forgets)")
 	dev.Flags().BoolVar(&devOpts.fresh, "fresh", false, "on a branch: replace its data with a new copy of main's")
+	var pruneYes bool
+	prune := command("prune", "Remove the branch instances (containers, copied data) no checkout runs any more: a removed worktree's, say", func() int {
+		return runDevPrune(file, pruneYes, stdin, stdout, stderr, d)
+	})
+	prune.Flags().BoolVar(&pruneYes, "yes", false, "don't ask first")
+	dev.AddCommand(prune)
 	var consoleOnServer bool
 	consoleCmd := command("console", "Run x-houston.commands.console in the running app (--server: on the server, over SSH on the LAN)", func() int {
 		if consoleOnServer {

@@ -26,6 +26,10 @@ func devInstance(dir string, p *project.Project, as string) (string, error) {
 	if slug == "" {
 		return "", errors.New("can't make a name for this instance from " + `"` + name + `"` + "; name it with --as")
 	}
+	if slug == "production" {
+		// <name>-production is the main instance's --production project.
+		return "", errors.New(`"production" is houston dev --production's own name; name this instance with --as`)
+	}
 	return slug, nil
 }
 
@@ -50,38 +54,108 @@ func dnsLabel(s string) string {
 	return label
 }
 
-// gitBranch is the branch checked out at dir or a folder above it, read
-// from HEAD (a worktree's .git is a file naming its git dir); "" when
-// detached or not in git.
-func gitBranch(dir string) string {
+// gitDirs finds the git checkout at dir or a folder above it: its root, its
+// own git directory (a linked worktree's is <common>/worktrees/<id>, named in
+// its .git file) and the repo's shared one. All "" outside git.
+func gitDirs(dir string) (root, own, common string) {
 	for d := dir; ; d = filepath.Dir(d) {
 		gitDir := filepath.Join(d, ".git")
-		info, err := os.Stat(gitDir)
-		if err == nil {
+		if info, err := os.Stat(gitDir); err == nil {
 			if !info.IsDir() {
 				data, err := os.ReadFile(gitDir)
 				if err != nil {
-					return ""
+					return "", "", ""
 				}
 				gitDir = strings.TrimSpace(strings.TrimPrefix(string(data), "gitdir:"))
 				if !filepath.IsAbs(gitDir) {
 					gitDir = filepath.Join(d, gitDir)
 				}
 			}
-			head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
-			if err != nil {
-				return ""
+			common = gitDir
+			if data, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+				common = strings.TrimSpace(string(data))
+				if !filepath.IsAbs(common) {
+					common = filepath.Clean(filepath.Join(gitDir, common))
+				}
 			}
-			ref, ok := strings.CutPrefix(strings.TrimSpace(string(head)), "ref: refs/heads/")
-			if !ok {
-				return ""
-			}
-			return ref
+			return d, gitDir, common
 		}
 		if parent := filepath.Dir(d); parent == d {
-			return ""
+			return "", "", ""
 		}
 	}
+}
+
+// gitBranch is the branch checked out at dir or a folder above it, read
+// from HEAD (a worktree's .git is a file naming its git dir); "" when
+// detached or not in git.
+func gitBranch(dir string) string {
+	_, own, _ := gitDirs(dir)
+	if own == "" {
+		return ""
+	}
+	return headBranch(own)
+}
+
+func headBranch(gitDir string) string {
+	head, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	ref, ok := strings.CutPrefix(strings.TrimSpace(string(head)), "ref: refs/heads/")
+	if !ok {
+		return ""
+	}
+	return ref
+}
+
+// A checkout's remembered instance name (houston dev --as), kept in its own
+// git directory: never in the working tree, and gone with the worktree.
+const devNameFile = "houston-dev-name"
+
+func savedDevName(own string) string {
+	if own == "" {
+		return ""
+	}
+	data, _ := os.ReadFile(filepath.Join(own, devNameFile))
+	return strings.TrimSpace(string(data))
+}
+
+func saveDevName(own, name string) error {
+	path := filepath.Join(own, devNameFile)
+	if name == "" {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	return os.WriteFile(path, []byte(name+"\n"), 0o644)
+}
+
+// checkout is one of a repo's checkouts: the main one or a linked worktree.
+type checkout struct{ dir, own string }
+
+// checkouts lists the repo's checkouts from its shared git directory, as git
+// keeps them: the main one beside it, and each worktrees/<id>/gitdir.
+func checkouts(common string) []checkout {
+	var all []checkout
+	if filepath.Base(common) == ".git" {
+		all = append(all, checkout{dir: filepath.Dir(common), own: common})
+	}
+	entries, _ := os.ReadDir(filepath.Join(common, "worktrees"))
+	for _, e := range entries {
+		own := filepath.Join(common, "worktrees", e.Name())
+		data, err := os.ReadFile(filepath.Join(own, "gitdir"))
+		if err != nil {
+			continue
+		}
+		dir := filepath.Dir(strings.TrimSpace(string(data)))
+		if _, err := os.Stat(dir); err != nil {
+			continue // removed by hand; git prunes its entry later
+		}
+		all = append(all, checkout{dir: dir, own: own})
+	}
+	return all
 }
 
 // devNames are one instance's names: where it's served, its Compose

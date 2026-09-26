@@ -29,10 +29,17 @@ func TestDevInstanceName(t *testing.T) {
 		{"slashes, case and underscores", "ref: refs/heads/Feature/Login_Fix\n", "", "feature-login-fix"},
 		{"a detached HEAD is main", "4be21c0c0ffee4be21c0c0ffee4be21c0c0ffee0\n", "", ""},
 		{"--as wins", "ref: refs/heads/feature1\n", "Demo Day", "demo-day"},
+		{"production is --production's", "ref: refs/heads/production\n", "", "error"},
 		{"too long for a DNS label", "ref: refs/heads/" + strings.Repeat("a", 80) + "\n", "", strings.Repeat("a", 63)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := devInstance(repo(tc.head), p, tc.as)
+			if tc.want == "error" {
+				if err == nil {
+					t.Errorf("devInstance = %q, want a refusal", got)
+				}
+				return
+			}
 			if err != nil || got != tc.want {
 				t.Errorf("devInstance = %q, %v; want %q", got, err, tc.want)
 			}

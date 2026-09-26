@@ -36,7 +36,14 @@ func runDev(file string, o devOptions, stderr io.Writer, d docker.Runner) int {
 		return exitUsage
 	}
 	dir := filepath.Dir(abs)
-	instance, err := devInstance(dir, p, o.as)
+	root, own, common := gitDirs(dir)
+	// --as names this instance, and this checkout remembers it; --as= forgets
+	// it. Otherwise the remembered name, else the branch.
+	as := o.as
+	if !o.asSet {
+		as = savedDevName(own)
+	}
+	instance, err := devInstance(dir, p, as)
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
 		return exitUsage
@@ -48,13 +55,30 @@ func runDev(file string, o devOptions, stderr io.Writer, d docker.Runner) int {
 	if !preflight(d, stderr) {
 		return exitFailure
 	}
-	values, ok := warnAboutVariables(dir, p, stderr)
+	envFile := filepath.Join(dir, ".env")
+	fromMain := ""
+	if _, err := os.Stat(envFile); errors.Is(err, fs.ErrNotExist) {
+		if fromMain = mainCheckoutEnv(dir, root, own, common); fromMain != "" {
+			envFile = fromMain
+			fmt.Fprintf(stderr, "houston: no .env here; using the main checkout's (%s)\n", fromMain)
+		}
+	}
+	values, ok := warnAboutVariables(envFile, p, stderr)
 	if !ok {
 		return exitUsage
 	}
 	warnAboutOverrideFiles(dir, stderr)
 
 	n := devNaming(p.Name, instance, o.production)
+	if name := dnsLabel(o.as); o.asSet && own != "" && savedDevName(own) != name {
+		if err := saveDevName(own, name); err != nil {
+			fmt.Fprintf(stderr, "warning: couldn't remember --as: %v\n", err)
+		} else if name == "" {
+			fmt.Fprintf(stderr, "houston: this checkout goes back to its branch's name: %s\n", n.Host)
+		} else {
+			fmt.Fprintf(stderr, "houston: this checkout is %s from now on (houston dev --as= goes back to its branch's name)\n", n.Host)
+		}
+	}
 	if other := nameInUse(d, n.Project, dir); other != "" {
 		fmt.Fprintf(stderr, "houston: %s is already running from %s; give this one another name with --as <name>\n", n.Host, other)
 		return exitUsage
@@ -64,6 +88,12 @@ func runDev(file string, o devOptions, stderr io.Writer, d docker.Runner) int {
 		return exitFailure
 	}
 	if instance != "" {
+		if common != "" {
+			// houston dev prune removes it once no checkout runs it.
+			if err := recordDevInstance(common, devRecord{Project: n.Project, App: p.Name, Host: n.Host, Dir: dir}); err != nil {
+				fmt.Fprintf(stderr, "warning: couldn't record %s for houston dev prune: %v\n", n.Host, err)
+			}
+		}
 		if err := copyMainData(d, p, n, o.fresh, stderr); err != nil {
 			fmt.Fprintf(stderr, "houston: %v\n", err)
 			if errors.As(err, new(usageError)) {
@@ -90,7 +120,12 @@ func runDev(file string, o devOptions, stderr io.Writer, d docker.Runner) int {
 	stop := routeWhenUp(d, p.Name, n, port, p.Houston.Health, hostPort, stderr)
 	// -p pins the project name: compose would otherwise let a stray
 	// COMPOSE_PROJECT_NAME (shell or .env) rename the containers.
-	code, err := d.Run(dir, nil, "compose", "-p", n.Project, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
+	args := []string{"compose", "-p", n.Project}
+	if fromMain != "" {
+		args = append(args, "--env-file", fromMain)
+	}
+	args = append(args, "--project-directory", dir, "-f", abs, "-f", override, "up", "--build")
+	code, err := d.Run(dir, nil, args...)
 	stop()
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
@@ -103,6 +138,7 @@ func runDev(file string, o devOptions, stderr io.Writer, d docker.Runner) int {
 type devOptions struct {
 	production, keepPorts, fresh bool
 	as                           string
+	asSet                        bool // --as was given, even empty (--as= forgets the remembered name)
 }
 
 func preflight(d docker.Runner, stderr io.Writer) bool {
@@ -121,12 +157,29 @@ func preflight(d docker.Runner, stderr io.Writer) bool {
 
 func failed(_ []byte, err error) bool { return err != nil }
 
+// mainCheckoutEnv is the main checkout's .env, at the same place as dir in
+// this linked worktree ("" when this isn't one, or main has none): git leaves
+// untracked files like .env out of a new worktree.
+func mainCheckoutEnv(dir, root, own, common string) string {
+	if own == "" || filepath.Base(common) != ".git" {
+		return ""
+	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(filepath.Dir(common), rel, ".env")
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
 // warnAboutVariables warns, by name only, about required secrets that will be
-// blank because neither .env nor the shell sets them. Compose reads .env
-// itself; this parses it with compose-go's parser so both agree. It returns
-// .env's values, and false when .env can't be parsed.
-func warnAboutVariables(dir string, p *project.Project, stderr io.Writer) (map[string]string, bool) {
-	envPath := filepath.Join(dir, ".env")
+// blank because neither envPath (the .env Compose reads) nor the shell sets
+// them. It parses it with compose-go's parser so both agree. It returns its
+// values, and false when it can't be parsed.
+func warnAboutVariables(envPath string, p *project.Project, stderr io.Writer) (map[string]string, bool) {
 	values := map[string]string{}
 	_, statErr := os.Stat(envPath)
 	missingFile := errors.Is(statErr, fs.ErrNotExist)

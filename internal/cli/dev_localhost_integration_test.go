@@ -166,3 +166,62 @@ func TestDevBranchCopyIntegration(t *testing.T) {
 		t.Errorf("main is still paused")
 	}
 }
+
+// houston dev prune against real Docker (docs/plans/dev-worktrees.md, row 8):
+// a branch run in a linked worktree gets its copy of main's data; once the
+// worktree is removed, prune removes the copy, and main's data stays.
+func TestDevPruneIntegration(t *testing.T) {
+	bin := buildHouston(t)
+	mainDir, mainFile, name := fixtureProject(t, "")
+	must(t, os.MkdirAll(filepath.Join(mainDir, ".git"), 0o755))
+	must(t, os.WriteFile(filepath.Join(mainDir, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(mainDir, ".env"), []byte("APP_SECRET=dev-secret\n"), 0o644))
+	servable(t, mainDir, "main")
+
+	// A linked worktree on feature1, as git lays one out, with no .env of its own.
+	admin := filepath.Join(mainDir, ".git", "worktrees", "feature1")
+	must(t, os.MkdirAll(admin, 0o755))
+	wt, err := os.MkdirTemp(filepath.Dir(mainDir), "devapp-wt-")
+	must(t, err)
+	t.Cleanup(func() { os.RemoveAll(wt) })
+	for _, f := range []string{"Dockerfile", "compose.yml"} {
+		b, err := os.ReadFile(filepath.Join(mainDir, f))
+		must(t, err)
+		must(t, os.WriteFile(filepath.Join(wt, f), b, 0o644))
+	}
+	must(t, os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+admin+"\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(admin, "HEAD"), []byte("ref: refs/heads/feature1\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(admin, "commondir"), []byte("../..\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(admin, "gitdir"), []byte(filepath.Join(wt, ".git")+"\n"), 0o644))
+	servable(t, wt, "feature1")
+
+	volumesOf := func(project string) string {
+		out, _ := exec.Command("docker", "volume", "ls", "-q", "--filter", "label=com.docker.compose.project="+project).Output()
+		return strings.TrimSpace(string(out))
+	}
+
+	m := startDev(t, bin, mainFile, "is up at http://"+name+".localhost")
+	b := startDev(t, bin, filepath.Join(wt, "compose.yml"), "is up at http://feature1."+name+".localhost")
+	if !strings.Contains(b.output(), "using the main checkout's") {
+		t.Errorf("the worktree didn't use main's .env:\n%s", b.output())
+	}
+	b.stop(t)
+	m.stop(t)
+	if volumesOf(name+"-feature1") == "" {
+		t.Fatalf("no copy of main's data to prune")
+	}
+
+	// `git worktree remove`: the folder and its admin directory go.
+	must(t, os.RemoveAll(wt))
+	must(t, os.RemoveAll(admin))
+	out, err := exec.Command(bin, "-f", mainFile, "dev", "prune", "--yes").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "removed feature1."+name+".localhost") {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	if v := volumesOf(name + "-feature1"); v != "" {
+		t.Errorf("the branch's data is still there: %s", v)
+	}
+	if volumesOf(name) == "" {
+		t.Errorf("main's data went too")
+	}
+}

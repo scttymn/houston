@@ -140,6 +140,7 @@ There's no import command yet. The steps that worked, each with the human's OK:
 - **Rails:** `RAILS_MASTER_KEY` should be `${RAILS_MASTER_KEY:-}`, optional, because `houston test` gives required variables random values, and Rails can't decrypt with a random key. Set it on the server before the first deploy.
 - **The health path must not redirect.** Put it ahead of www or HTTPS redirects, since the check hits the container directly over http.
 - **Ports:** `init` may guess the wrong port: `expose` must be the one the dev server listens on.
+- **Worktrees:** `houston dev` in a plain `git worktree` uses the main checkout's `.env` when the worktree has none. `--as <name>` names the instance and the worktree remembers it (`--as=` forgets). After `git worktree remove`, `houston dev prune --yes` removes the instances no checkout runs any more (containers and copied data; never main's).
 - **Branch names are two levels deep** (`<branch>.<name>.localhost`). A development host check that allows only one level under `.localhost` refuses them, and `houston dev` says "answered 403 Forbidden". Rails: add `config.hosts << ".<name>.localhost"` to `config/environments/development.rb`. Vite: `server.allowedHosts: [".localhost"]`. Django: `ALLOWED_HOSTS` needs `.localhost`.
 - **An app that builds absolute URLs from a configured host** (mailer links, OAuth callbacks) needs `<name>.localhost` there in development.
 - **A gem that needs a system library** (like `ruby-vips`) may break CI jobs that just boot the app. `require: false` lets the framework load it lazily.
