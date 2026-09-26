@@ -27,9 +27,13 @@ class Settings::UpdatesControllerTest < ActionDispatch::IntegrationTest
     sign_in_as users(:one)
     get settings_path
     assert_select ".section-nav a[href='#releases']", "Releases"
+    assert_select "meta[name=turbo-refresh-method][content=morph]"
+    assert_select "meta[name=turbo-refresh-scroll][content=preserve]"
     assert_select "section#releases" do
       assert_select ".panel__title", "Releases"
       assert_select ".panel__meta .eyebrow", "V0.4.2"
+      # Checking refreshes Settings in place (a Turbo morph, the scroll kept), not from the top.
+      assert_select ".panel__meta form[action='#{check_settings_updates_path}'][data-turbo-action=replace]", 1
       assert_select ".panel__meta form[action='#{check_settings_updates_path}'] button", "Check for updates"
       assert_select ".panel__meta form[action='#{settings_updates_path}']" do
         assert_select "input[name=version][value='v0.4.3']", 1

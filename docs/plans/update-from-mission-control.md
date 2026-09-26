@@ -189,6 +189,13 @@ Evidence:
 
 - **Settings › Port 3000 is Settings › Security** (`#security`), your call, so other security settings can join it. Port 3000 is its first group, under a "PORT 3000" subheading (`#port`, so old links still land). The installer's messages and the docs say Settings › Security. `install/test/install-bind.sh` and `install-version.sh` pass.
 
+- **Check for updates refreshes in place** (your ask: it "reloads the page and causes it to scroll to the top").
+  - The cause: the redirect back to `/settings#releases` goes through `fetch`, which drops the `#releases`.
+  - The fix: Settings refreshes with a Turbo morph and keeps the scroll, and the Check form submits as a replace visit, which Turbo 8 treats as a page refresh.
+  - Checked by clicking it from JavaScript with Releases 20 px from the top of the window: afterwards it was still 20 px from the top, and the scroll was unchanged (936). The page didn't reload (a marker on `window` survived), and the toast showed.
+  - (The browser tool's own click scrolls a button to the middle of the window first, which looked like a jump.)
+  - Update keeps a normal visit, so opening an update's log adds to the history and Back works.
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 

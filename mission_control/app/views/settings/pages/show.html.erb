@@ -1,4 +1,6 @@
 <% content_for :title, "Settings · Mission Control" %>
+<%# A form that comes back here (Check for updates) refreshes the page in place, keeping the scroll. %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
 <% base = @installation.base_domain %>
 <%# One page, as the design's Settings: the menu on the left, the sections in one column. %>
 <main class="settings">
@@ -112,7 +114,7 @@
         <h2 class="disp panel__title">Releases</h2>
         <span class="panel__meta">
           <span class="mono eyebrow"><%= HoustonVersion.current.upcase %></span>
-          <%= button_to "Check for updates", check_settings_updates_path, class: "button button--small" %>
+          <%= button_to "Check for updates", check_settings_updates_path, class: "button button--small", form: { data: { turbo_action: "replace" } } %>
           <% if @newer && !running %>
             <%= form_with url: settings_updates_path do %>
               <%= hidden_field_tag :version, @newer, id: nil %>
