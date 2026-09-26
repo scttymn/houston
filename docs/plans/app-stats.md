@@ -73,3 +73,15 @@
   - No overflow at 1440, 800 (two columns) and 375 px.
   - To share readings between a runner and the server, the dev cache was switched to a file store for the check and put back.
 - **Live on the server:** once this is released and the server updated, the three apps' figures are to be checked against `docker stats` there.
+
+## Revised: tick gauges (your design, 2026-09-26)
+- **What you said:** "how can a CPU have 0 cores?", "There's got to be a more efficient way to display this content that's meaningful", then "I prefer tick gauges like in the mockups here", with the Claude Design canvas (its `UsageOptions` artboard).
+- **Donuts replaced by the design's tick gauges.** Each figure is one line: label, ten ticks (one per 10% of the limit), the percentage, and the amount against the limit ("351 MB / 512 MB").
+  - Unlit ticks are filled (#E2DBC9) where there's a limit, and outlined (the rule colour) where there isn't, so the column stays lined up. Without a limit, the percentage is a faint "—".
+  - At 85% and up, the lit ticks and the amount turn amber (#B7791F, #75480A), and the percentage goes bold. The "/ limit" stays grey.
+  - Hovers read as the design's: "MEM 351 MB of 512 MB (69%)", "DISK 20 MB · no limit set".
+  - Phone sizes come from the `MobileFlightBoard` artboard: 9 px gaps, a 10 px label, and a 14 px amount.
+  - Sizes on the board say "0 B", not "0 Bytes", as the CLI does.
+- **Tests:** `test/helpers/usage_helper_test.rb` covers ticks per percentage (0, 4, 5, 16, 42, 69, 95, 100, 140% and no limit), amber from 85% (84% isn't), outlined ticks without a limit, and sizes and cores in words. The board test pins the ticks, percentages, amounts and hovers. Rails: 417 runs, 0 failures.
+- **Seen locally** with real stand-in containers (shop limited, docs at 90% of 256 MB, blog unlimited, wiki idle), at 1440 and 375 px with no overflow.
+- **Not built here:** the `MobileFlightBoard` artboard's labelled phone cards (DOMAINS, RUNNING SHA, LAST DEPLOY, LAST BACKUP, RESOURCES). That's a redesign of the phone board of its own.

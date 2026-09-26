@@ -294,18 +294,32 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     assert_select ".flight-head", /RESOURCES/
     assert_select "[data-project=equip] .flight__resources" do
       assert_select ".usage", 3
-      assert_select ".usage--cpu[title='0.15 cores of the 3 cores limit (5%)']", /0\.15 cores/
-      assert_select ".usage--cpu svg.donut[aria-label='5%']", 1
-      assert_select ".usage--memory[title='400 MB of the 1.5 GB limit (26%)']", /400 MB/
-      assert_select ".usage--memory svg.donut[aria-label='26%']", 1
-      assert_select ".usage--disk", /1\.4 GB/
-      assert_select ".usage--disk svg", 0, "volumes have no limit"
+      assert_select ".usage--cpu[title='CPU 0.15 cores of 3 cores (5%)']" do
+        assert_select ".gauge[aria-label='5%'] .gauge__tick", 10
+        assert_select ".gauge__tick.is-on", 1
+        assert_select ".usage__percent", "5%"
+        assert_select ".usage__amount", "0.15 cores / 3 cores"
+      end
+      assert_select ".usage--memory[title='MEM 400 MB of 1.5 GB (26%)']" do
+        assert_select ".gauge__tick.is-on", 3
+        assert_select ".usage__percent", "26%"
+        assert_select ".usage__amount", "400 MB / 1.5 GB"
+      end
+      assert_select ".usage--disk[title='DISK 1.4 GB · no limit set']" do
+        assert_select ".gauge--open .gauge__tick", 10, "volumes have no limit: outlined ticks keep the column lined up"
+        assert_select ".gauge__tick.is-on", 0
+        assert_select ".usage__percent", "—"
+        assert_select ".usage__amount", "1.4 GB"
+      end
+      assert_select ".usage--near", 0
     end
     assert_select "[data-project=cart] .flight__resources" do
-      assert_select "svg", 0, "no limits: amounts only"
-      assert_select ".usage--cpu", /0\.03 cores/
-      assert_select ".usage--memory", /12 MB/
-      assert_select ".usage--disk", /2\.86 MB/
+      assert_select ".gauge__tick.is-on", 0, "no limits: amounts only"
+      assert_select ".usage__percent", { text: "—", count: 3 }
+      assert_select ".gauge--open", 3
+      assert_select ".usage--cpu .usage__amount", "0.03 cores"
+      assert_select ".usage--memory .usage__amount", "12 MB"
+      assert_select ".usage--disk .usage__amount", "2.86 MB"
     end
     assert_select "[data-project=idle] .flight__resources", /—/
     assert_select "[data-project=idle] .flight__resources .usage", 0
