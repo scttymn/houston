@@ -18,7 +18,8 @@ class ServerUpdate < ApplicationRecord
   LONG = 20.minutes
   # How long the board says how the last one went.
   SHOWN_FOR = 1.day
-  LOG_LINES = 20
+  # The helper's log kept: plenty for an installer run, bounded.
+  LOG_LINES = 500
 
   validates :status, inclusion: { in: STATUSES }
 
@@ -31,6 +32,24 @@ class ServerUpdate < ApplicationRecord
   def self.shown = running.first || where(finished_at: SHOWN_FOR.ago..).order(:finished_at).last
 
   def long? = status == "running" && started_at < LONG.ago
+
+  # The installer's steps so far (its "==> " lines), each with its state as
+  # a deploy page shows them: the last one is current while it runs, and the
+  # one that broke is failed. After a rollback that's the step before the
+  # helper put the old version back; the old version's own steps are done.
+  def steps
+    names = log.to_s.lines.filter_map { |line| self.class.step_name(line) if line.start_with?("==> ") }
+    states = Array.new(names.size, :done)
+    back = names.index { it.include?("didn't install; putting") }
+    states[back - 1] = :failed if back&.positive?
+    case status
+    when "running" then states[-1] = :current if names.any?
+    when "no_go" then states[-1] = :failed if names.any?
+    end
+    names.zip(states)
+  end
+
+  def self.step_name(line) = line.delete_prefix("==> ").delete_prefix("houston update: ").strip.sub(/\A[a-z](?!\d)/, &:upcase).truncate(120)
 
   # Starts the update to version (default: the latest release known).
   # Refused, with nothing saved and no helper, when it can't run now.
@@ -72,6 +91,7 @@ class ServerUpdate < ApplicationRecord
       raise
     end
     Rails.logger.info("houston: updating to #{to} from #{from} (#{HELPER})")
+    ServerUpdateJob.set(wait: ServerUpdateJob::FOLLOW_EVERY).perform_later(true)
     FlightBoard.refresh!
     update
   end
@@ -94,6 +114,7 @@ class ServerUpdate < ApplicationRecord
     if state.success
       status, code = state.output.split
       unless status.in?(%w[exited dead])
+        follow(update)
         Rails.logger.warn("houston: the update to #{update.to_version} has run for #{((Time.current - update.started_at) / 60).floor} minutes; see docker logs #{HELPER} on the server") if update.long?
         return
       end
@@ -111,6 +132,21 @@ class ServerUpdate < ApplicationRecord
     Rails.logger.public_send(result == "go" ? :info : :warn, "houston: the update to #{update.to_version}: #{result}")
     FlightBoard.refresh!
   end
+
+  # Saves what the running update is doing: its log so far (Houston's page
+  # shows it) and the installer's latest step (a "==> " line); the board
+  # refreshes when the step changes.
+  def self.follow(update)
+    result = DockerCommand.run("logs", "--tail", LOG_LINES.to_s, HELPER, timeout: 10)
+    return unless result.success
+    line = result.output.lines.reverse.find { it.start_with?("==> ") }
+    step = line ? step_name(line) : update.step
+    moved = step != update.step
+    return unless moved || result.output != update.log
+    update.update_columns(step:, log: result.output, updated_at: Time.current)
+    FlightBoard.refresh! if moved
+  end
+  private_class_method :follow
 
   # The helper exits 0 when it installed the new version, and 3 when it
   # failed and put the old one back.

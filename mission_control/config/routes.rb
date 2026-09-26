@@ -59,7 +59,9 @@ Rails.application.routes.draw do
         post :repair
       end
       resource :port, only: %i[ show update ], controller: "port"
-      resource :update, only: %i[ show create ], controller: "update"
+      resource :update, only: %i[ show create ], controller: "update" do
+        post :check
+      end
       resources :storage, only: %i[ index update ], param: :name
       resources :projects, only: %i[ index show ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
@@ -125,8 +127,10 @@ Rails.application.routes.draw do
     resource :port, only: :update, controller: "port"
   end
 
-  # The flight board's Update button.
-  resource :server_update, only: :create, path: "update"
+  # Houston's own page: its version, checking for a newer one, updating, and the update's log.
+  resource :server_update, only: %i[ show create ], path: "update" do
+    post :check
+  end
 
   root "projects#index"
 end

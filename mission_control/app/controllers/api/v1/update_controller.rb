@@ -17,11 +17,20 @@ class Api::V1::UpdateController < Api::V1::BaseController
     render json: { error: "Houston #{e.message}" }, status: :unprocessable_entity
   end
 
+  # POST /api/v1/update/check: asks GitHub for the latest release now.
+  def check
+    if (found = LatestRelease.check_and_say)
+      render json: view.merge(message: found)
+    else
+      render json: { error: ServerUpdatesController::GITHUB_DOWN }, status: :bad_gateway
+    end
+  end
+
   private
     def view
       last = ServerUpdate.order(:id).last
       { version: HoustonVersion.current, latest: UpdateNotice.newer(HoustonVersion.current, Installation.current.latest_release),
-        update: last && { id: last.id, to: last.to_version, from: last.from_version, status: last.status,
+        update: last && { id: last.id, to: last.to_version, from: last.from_version, status: last.status, step: last.step,
                           started_at: last.started_at, finished_at: last.finished_at, log: last.log } }
     end
 end

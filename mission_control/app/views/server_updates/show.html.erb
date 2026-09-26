@@ -1,0 +1,90 @@
+<% content_for :title, "Houston · Mission Control" %>
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%# Live: an update's step changes refresh this, as they do the flight board. %>
+<%= turbo_stream_from FlightBoard::STREAM %>
+<% running = @update&.status == "running" %>
+<main class="page deploy-page houston-page">
+  <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <span class="crumbs__here">Houston</span></nav>
+
+  <div class="deploy-status">
+    <div class="deploy-head">
+      <div class="deploy-head__main">
+        <div class="deploy-head__title">
+          <h1 class="disp">Houston <%= HoustonVersion.current %></h1>
+          <% if running %><%= state_pill(:in_flight, "UPDATING") %><% end %>
+        </div>
+        <p class="deploy-head__meta houston-head__meta">
+          <% if @installation.latest_release.blank? %>
+            No release checked yet.
+          <% elsif @newer %>
+            <%= @newer %> is out<% if @installation.latest_release_checked_at %> (checked <%= time_ago_in_words(@installation.latest_release_checked_at) %> ago)<% end %>.
+            <%= link_to "Release notes ↗", @installation.latest_release_url, target: "_blank", rel: "noopener noreferrer" %>
+          <% else %>
+            <%= @installation.latest_release %> is the latest release<% if @installation.latest_release_checked_at %> (checked <%= time_ago_in_words(@installation.latest_release_checked_at) %> ago)<% end %>.
+          <% end %>
+        </p>
+      </div>
+      <div class="houston-head__actions">
+        <%= button_to "Check now", check_server_update_path, class: "button button--medium" %>
+        <% if @newer && !ServerUpdate.running? %>
+          <%= form_with url: server_update_path do %>
+            <%= hidden_field_tag :version, @newer, id: nil %>
+            <button type="submit" class="button button--primary button--medium" data-turbo-confirm="Update this server to <%= @newer %>? Mission Control restarts on the way, and deploys and backups wait until it's done. If <%= @newer %> doesn't install, the server goes back to <%= HoustonVersion.current %>.">Update to <%= @newer %></button>
+          <% end %>
+        <% end %>
+      </div>
+    </div>
+
+    <% if running %>
+      <div class="serving houston-serving" data-controller="refresh" data-refresh-every-value="5000">
+        <span class="serving__dot"></span>
+        <span><%= @update.from_version %> keeps running your apps while it updates. Mission Control restarts on the way, and this page comes back when it's up. Deploys and backups wait.<% if @update.long? %> It's taking long: <span class="mono">docker logs houston-update</span> on the server has the rest.<% end %></span>
+      </div>
+    <% elsif @update&.status == "rolled_back" %>
+      <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">The update to <%= @update.to_version %> failed, so this server went back to <%= @update.from_version %>.</span></div>
+    <% elsif @update&.status == "no_go" %>
+      <div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">The update to <%= @update.to_version %> failed. This server runs <%= HoustonVersion.current %>; the log says why.</span></div>
+    <% end %>
+  </div>
+
+  <div class="deploy-body">
+    <div class="houston-side">
+      <% if @update %>
+        <ol class="panel deploy-steps">
+          <% @update.steps.each_with_index do |(name, state), i| %>
+            <li data-state="<%= state %>">
+              <span class="mono"><%= format("%02d", i) %></span>
+              <span><%= name %></span>
+              <span class="mono step__state"><%= { done: "DONE", current: "RUNNING", failed: "FAILED" }.fetch(state) %></span>
+            </li>
+          <% end %>
+        </ol>
+      <% end %>
+      <% if @updates.any? %>
+        <section class="panel houston-updates">
+          <h2 class="mono eyebrow">UPDATES</h2>
+          <ul>
+            <% @updates.each do |u| %>
+              <li class="<%= "is-current" if u == @update %>">
+                <%= link_to "#{u.from_version} → #{u.to_version}", server_update_path(id: u.id), class: "mono" %>
+                <%= u.status == "running" ? state_pill(:in_flight, "UPDATING") : state_pill(u.status == "go" ? :go : :no_go) %>
+                <small><%= time_ago_in_words(u.started_at) %> ago</small>
+              </li>
+            <% end %>
+          </ul>
+        </section>
+      <% end %>
+    </div>
+    <section class="log-panel" data-controller="follow clipboard">
+      <div class="log-panel__head">
+        <% if running %><span class="mono log-panel__live">LIVE</span><% end %>
+        <span class="mono log-panel__what"><%= @update ? "#{@update.from_version} → #{@update.to_version}" : "no update yet" %></span>
+        <span class="log-panel__spacer"></span>
+        <label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"> Follow</label>
+        <button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+      </div>
+      <pre class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled"><%= @update ? @update.log.presence || "Starting…" : "No update has run from Mission Control yet. When a newer Houston is out, update to it here, and its log shows here." %></pre>
+    </section>
+  </div>
+  <%= render "shared/toast" %>
+</main>

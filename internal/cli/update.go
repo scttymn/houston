@@ -35,7 +35,7 @@ func runUpdate(file, version string, stdout, stderr io.Writer) int {
 	fmt.Fprintln(stdout, v.Message)
 	id := v.Update.ID
 
-	quiet := false
+	quiet, step := false, ""
 	for deadline := time.Now().Add(updateWait); time.Now().Before(deadline); time.Sleep(updatePoll) {
 		v, err := client.Update(ctx)
 		if errors.Is(err, server.ErrRefused) {
@@ -49,7 +49,14 @@ func runUpdate(file, version string, stdout, stderr io.Writer) int {
 			continue
 		}
 		u := v.Update
-		if u == nil || u.ID != id || u.Status == "running" {
+		if u == nil || u.ID != id {
+			continue
+		}
+		if u.Step != "" && u.Step != step {
+			fmt.Fprintf(stdout, "  %s\n", u.Step)
+			step = u.Step
+		}
+		if u.Status == "running" {
 			continue
 		}
 		switch u.Status {
@@ -68,4 +75,23 @@ func runUpdate(file, version string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stderr, "houston: the update hasn't finished after %s; see the flight board, or docker logs houston-update on the server\n", updateWait)
 	return exitFailure
+}
+
+// houston update --check: the server asks GitHub for the latest release now,
+// as Check now on Houston's page does.
+func runUpdateCheck(file string, stdout, stderr io.Writer) int {
+	client, _, code := remote(file, "", false, stderr)
+	if code != 0 {
+		return code
+	}
+	v, err := client.CheckUpdate(context.Background())
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	if v.Latest != "" {
+		fmt.Fprintf(stdout, "%s houston update installs it.\n", v.Message)
+		return 0
+	}
+	fmt.Fprintln(stdout, v.Message)
+	return 0
 }

@@ -66,6 +66,40 @@ class ServerUpdateJobTest < ActiveJob::TestCase
     assert_equal "the other check's", update.reload.log
   end
 
+  test "a running update says what it's doing" do
+    update = running
+    logs = "==> houston update: installing v0.4.3\n==> Docker is installed\n==> Pulling Houston v0.4.3\n"
+    boards = refreshes { use_fake_docker(helper("running 0", logs:)) { ServerUpdateJob.perform_now; ServerUpdateJob.perform_now } }
+    assert_equal [ "Pulling Houston v0.4.3", 1 ], [ update.reload.step, boards ], "saved, and the board refreshed once"
+    assert_equal logs, update.log, "the log so far, for Houston's page"
+    more = logs + "Status: Downloaded newer image\n"
+    assert_equal 0, refreshes { use_fake_docker(helper("running 0", logs: more)) { ServerUpdateJob.perform_now } }, "a longer log, the same step"
+    assert_equal more, update.reload.log
+
+    logs += "==> Writing /opt/houston/compose.yml\n==> Installing the houston CLI v0.4.3\n==> Starting Houston\n"
+    use_fake_docker(helper("running 0", logs:)) { ServerUpdateJob.perform_now }
+    assert_equal "Starting Houston", update.reload.step
+
+    use_fake_docker(helper("running 0", logs: "==> houston update: installing v0.4.3\n")) { ServerUpdateJob.perform_now }
+    assert_equal "Installing v0.4.3", update.reload.step
+    logs = "==> houston update: v0.4.3 didn't install; putting v0.4.2 back\n"
+    use_fake_docker(helper("running 0", logs:)) { ServerUpdateJob.perform_now }
+    assert_equal "v0.4.3 didn't install; putting v0.4.2 back", update.reload.step
+
+    fake = FakeDocker.new { |args| args.first == "inspect" ? DockerCommand::Result.new(success: true, output: "running 0\n") : failure("Cannot connect") }
+    use_fake_docker(fake) { ServerUpdateJob.perform_now }
+    assert_equal "v0.4.3 didn't install; putting v0.4.2 back", update.reload.step, "no log, no change"
+  end
+
+  test "while one runs, it's checked every 5 seconds" do
+    running
+    use_fake_docker(helper("running 0")) do
+      assert_enqueued_with(job: ServerUpdateJob, args: [ true ]) { ServerUpdateJob.perform_now(true) }
+      assert_no_enqueued_jobs { ServerUpdateJob.perform_now }
+    end
+    use_fake_docker(helper("exited 0")) { assert_no_enqueued_jobs { ServerUpdateJob.perform_now(true) } }
+  end
+
   test "a running helper, or Docker not answering, changes nothing" do
     update = running
     use_fake_docker(helper("running 0")) { ServerUpdateJob.perform_now }

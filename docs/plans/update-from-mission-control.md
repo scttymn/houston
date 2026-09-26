@@ -108,6 +108,53 @@
   - The second half, an update from the board, waits for the next release.
 - **Fixed in passing:** at 375 px, a pre-flight check's error with a long URL in it overflowed by 12 px. It now wraps.
 
+## Batch 2: Houston's page, instead of banners (2026-09-26)
+Your direction:
+- "Instead of the massive banner we have now, I think having a refresh icon next to the version would be good… a small update link… After update, the new version would be displayed."
+- "It would be nice to have some indicator of how the deploy is going."
+- "What if clicking on the version took you to a deploy log page that looked like the app deploy/logs but for the server. It's also where we could allow the user to manually check for new version."
+
+What changed:
+- **The flight board:**
+  - The version in its eyebrow leads to Houston's page (`/update`).
+  - A small pill beside it says what's up, and leads there too: "v0.4.5 available", "Updating to v0.4.5 · Pulling Houston v0.4.5" (refreshing every 10 seconds), or a red "Update to v0.4.5 failed" for a day.
+  - The UPDATE banner, with its command to copy, is gone, and so are the GO and NO-GO update banners.
+- **Houston's page**, laid out like a deploy's:
+  - The version, the latest release and when it was checked, with release notes.
+  - **Check now**, which asks GitHub right away and says what it found in a toast.
+  - **Update to vX.Y.Z**, with a confirm step.
+  - The installer's steps: DONE, RUNNING, or FAILED at the step that broke. After a rollback, the old version's own steps are done.
+  - The log in the deploy page's panel: LIVE, Follow and Copy log, with a refresh every 5 seconds while the update runs.
+  - The last 10 updates, each opening its own log (`?id=`).
+- **Progress:**
+  - While an update runs, `ServerUpdateJob` follows it every 5 seconds, starting from `start!` (its queued jobs outlive Mission Control's restart). It saves the helper's log and its latest `==>` step, and refreshes the board when the step changes.
+  - The helper's rollback lines are `==>` steps now.
+  - The log kept is the helper's last 500 lines, not 20.
+- **Toasts:** the check and a started or refused update say so in a toast on Houston's page. The board never showed flash messages, so "Updating to…" had gone nowhere.
+- **The refresh controller** fetches before it refreshes, so while Mission Control restarts, a Cloudflare error page can't replace the page and stop the refreshing. Tried by stopping a server under an open page: the page stayed.
+- **CLI-first:**
+  - `houston update --check` (`POST /api/v1/update/check`) does what **Check now** does.
+  - `houston update` prints each step as it goes.
+  - `GET /api/v1/update` returns the step.
+- **Cut:** `LatestRelease.update_command`, which had no caller once the banner went.
+
+Evidence:
+- Rails: 407 runs, 0 failures; rubocop clean. Go: `bin/go test ./...` passes; gofmt clean.
+- New or rewritten tests:
+  - `ServerUpdatesControllerTest` ("Houston's page: the version, checking, and updating", "Houston's page follows an update's log", check and sign-in)
+  - `ServerUpdateJobTest` ("a running update says what it's doing", "while one runs, it's checked every 5 seconds")
+  - `ProjectsControllerTest` (the version link and its pills)
+  - `ApiV1UpdateTest` (check, step)
+  - Go `TestUpdateCheck`, `TestUpdatePrintsSteps`
+- Mutation check: 17, each caught.
+  - Among them: the refresh on every log change, the log not saved, the failed-step rules, the follow chain, the Update button while one runs, `?id=`, the failed pill, the check's wording, the step in the API, and the CLI's step printing.
+  - One survived at first because the test's "older" update had the newer id. Now `?id=` is tested against the other update.
+  - One condition, preferring the running update over the newest, was redundant and was cut: the running one is always the newest.
+- Visual check (a throwaway Mission Control) at 800, 1280 and 375 px, with no overflow:
+  - the board's pills
+  - Houston's page while updating, and with v0.4.5 out
+  - the toast from a real check against GitHub
+
 ## Deploy notes
 - The server gets this with one more update by hand (v0.4.3). After that, updates start from the board or `houston update`.
 

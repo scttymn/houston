@@ -32,6 +32,10 @@ class ApiV1UpdateTest < ActionDispatch::IntegrationTest
     assert_equal({ "id" => id, "to" => "v0.4.3", "from" => "v0.4.2", "status" => "running" }, json["update"].slice("id", "to", "from", "status"))
     assert_match(/Updating to v0\.4\.3/, json["message"])
 
+    ServerUpdate.sole.update!(step: "Pulling Houston v0.4.3")
+    get "/api/v1/update", headers: auth
+    assert_equal "Pulling Houston v0.4.3", json["update"]["step"]
+
     ServerUpdate.sole.update!(status: "rolled_back", finished_at: Time.current, log: "404\n")
     get "/api/v1/update", headers: auth
     assert_equal [ id, "rolled_back", "404\n" ], json["update"].values_at("id", "status", "log")
@@ -53,6 +57,22 @@ class ApiV1UpdateTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
     assert_equal [ 0, 0 ], [ @calls, ServerUpdate.count ]
     get "/api/v1/update"
+    assert_response :unauthorized
+  end
+
+  test "check asks GitHub now" do
+    stub_request(:get, "https://api.github.com/repos/scttymn/houston/releases/latest")
+      .to_return(body: { tag_name: "v0.4.5", html_url: "https://github.com/scttymn/houston/releases/tag/v0.4.5" }.to_json)
+    post "/api/v1/update/check", headers: auth
+    assert_response :success
+    assert_equal [ "v0.4.2", "v0.4.5", "v0.4.5 is out." ], json.values_at("version", "latest", "message")
+
+    stub_request(:get, "https://api.github.com/repos/scttymn/houston/releases/latest").to_timeout
+    post "/api/v1/update/check", headers: auth
+    assert_response :bad_gateway
+    assert_match(/Couldn't reach GitHub/, json["error"])
+
+    post "/api/v1/update/check"
     assert_response :unauthorized
   end
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_010000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -198,6 +198,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_000000) do
     t.text "log"
     t.datetime "started_at", null: false
     t.string "status", default: "running", null: false
+    t.string "step"
     t.string "to_version", null: false
     t.datetime "updated_at", null: false
     t.index ["status"], name: "index_server_updates_one_running", unique: true, where: "status = 'running'"

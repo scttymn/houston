@@ -1,0 +1,4 @@
+<%# What just happened (a flash), in a corner, gone after a few seconds. %>
+<% if notice || alert %>
+  <div class="toast <%= alert ? "toast--nogo" : "toast--go" %>" role="status" data-controller="toast" data-action="click->toast#dismiss"><%= alert || notice %></div>
+<% end %>

@@ -121,3 +121,50 @@ func TestStatusSaysWhenUpdating(t *testing.T) {
 		t.Errorf("status while updating:\n%s", out)
 	}
 }
+
+func TestUpdateCheck(t *testing.T) {
+	status, answer := http.StatusOK, `{"version":"v0.4.4","latest":"v0.4.5","update":null,"message":"v0.4.5 is out."}`
+	var posts int
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/update/check": func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				posts++
+			}
+			w.WriteHeader(status)
+			io.WriteString(w, answer)
+		},
+		"/api/v1/update": func(w http.ResponseWriter, r *http.Request) { t.Error("--check started an update") },
+	})
+	t.Chdir(t.TempDir())
+
+	code, out, errOut := run(&fakeDocker{}, "update", "--check")
+	if code != 0 || posts != 1 || !strings.Contains(out, "v0.4.5 is out. houston update installs it.") {
+		t.Errorf("newer: exit %d, %d posts\n%s%s", code, posts, out, errOut)
+	}
+	answer = `{"version":"v0.4.5","latest":null,"update":null,"message":"v0.4.5 is the latest."}`
+	if code, out, _ := run(&fakeDocker{}, "update", "--check"); code != 0 || strings.TrimSpace(out) != "v0.4.5 is the latest." {
+		t.Errorf("current: exit %d\n%s", code, out)
+	}
+	status, answer = http.StatusBadGateway, `{"error":"Couldn't reach GitHub just now; try again in a minute."}`
+	if code, _, errOut := run(&fakeDocker{}, "update", "--check"); code != 1 || !strings.Contains(errOut, "Couldn't reach GitHub") {
+		t.Errorf("GitHub down: exit %d: %s", code, errOut)
+	}
+	if code, _, _ := run(&fakeDocker{}, "update", "--check", "v0.4.5"); code != 2 {
+		t.Errorf("--check with a version: exit %d", code)
+	}
+}
+
+func TestUpdatePrintsSteps(t *testing.T) {
+	defer func(d time.Duration) { updatePoll = d }(updatePoll)
+	updatePoll = time.Millisecond
+	t.Chdir(t.TempDir())
+	step := func(s string) string {
+		return `{"version":"v0.4.2","update":{"id":7,"to":"v0.4.3","from":"v0.4.2","status":"running","step":"` + s + `"}}`
+	}
+	updateServer(t, step("Docker is installed"), step("Pulling Houston v0.4.3"), step("Pulling Houston v0.4.3"), "", step("Starting Houston"), updateAnswer(7, "go", ""))
+	code, out, errOut := run(&fakeDocker{}, "update")
+	want := "  Docker is installed\n  Pulling Houston v0.4.3\n  Starting Houston\nGO  the server runs v0.4.3\n"
+	if code != 0 || !strings.HasSuffix(out, want) {
+		t.Errorf("exit %d\n%s\nwant it to end with\n%s%s", code, out, want, errOut)
+	}
+}

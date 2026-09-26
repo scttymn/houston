@@ -247,11 +247,21 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	}
 	port.Flags().BoolVar(&portJSON, "json", false, "print the API's JSON")
 	root.AddCommand(port)
-	root.AddCommand(&cobra.Command{
+	var checkOnly bool
+	update := &cobra.Command{
 		Use:   "update [vX.Y.Z]",
 		Short: "Update the Houston server to the latest release (or vX.Y.Z), from anywhere, and follow it to its result",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if checkOnly && len(args) > 0 {
+				fmt.Fprintln(stderr, "houston update: --check takes no version")
+				code = exitUsage
+				return nil
+			}
+			if checkOnly {
+				code = runUpdateCheck(file, stdout, stderr)
+				return nil
+			}
 			version := ""
 			if len(args) > 0 {
 				version = args[0]
@@ -259,7 +269,9 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 			code = runUpdate(file, version, stdout, stderr)
 			return nil
 		},
-	})
+	}
+	update.Flags().BoolVar(&checkOnly, "check", false, "only ask GitHub now whether a newer release is out")
+	root.AddCommand(update)
 
 	var snapshotsJSON, backupFollow bool
 	snapshots := command("snapshots", "A project's snapshots on the server (code and data together), newest first", func() int {

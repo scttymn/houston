@@ -25,7 +25,7 @@ install() {
 }
 
 install "$HOUSTON_UPDATE_TO" && exit 0
-echo "houston update: $HOUSTON_UPDATE_TO didn't install; putting $HOUSTON_UPDATE_FROM back"
+echo "==> houston update: $HOUSTON_UPDATE_TO didn't install; putting $HOUSTON_UPDATE_FROM back"
 install "$HOUSTON_UPDATE_FROM" && exit 3
-echo "houston update: $HOUSTON_UPDATE_FROM didn't install either; run the installer on the server"
+echo "==> houston update: $HOUSTON_UPDATE_FROM didn't install either; run the installer on the server"
 exit 1

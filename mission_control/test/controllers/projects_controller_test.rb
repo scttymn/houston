@@ -204,74 +204,66 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     stub_tunnel
     ENV["HOUSTON_VERSION"] = "v0.1.0"
     get root_path
-    assert_select ".board__title > .eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.1.0"
+    assert_select ".board__title > .board__version > .eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.1.0"
   ensure
     ENV.delete("HOUSTON_VERSION")
   end
 
-  test "the flight board says when an update is out" do
+  # The version beside the board's name leads to Houston's page, where it's
+  # checked and updated (docs/plans/update-from-mission-control.md, Batch 2).
+  test "the flight board's version leads to Houston's page" do
     stub_tunnel
-    ENV["HOUSTON_VERSION"] = "v0.1.0"
-    Installation.current.update!(latest_release: "v0.1.1", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.1.1")
+    ENV["HOUSTON_VERSION"] = "v0.4.2"
+    Installation.current.update!(latest_release: "v0.4.2")
     get root_path
-    assert_select ".update-notice" do
-      assert_select ".notice__text", /v0\.1\.1 is out\. This server runs v0\.1\.0\./
-      assert_select "a[href='https://github.com/scttymn/houston/releases/tag/v0.1.1']", /release notes/i
-      assert_select "[data-clipboard-target=source]", "curl -fsSL https://github.com/scttymn/houston/releases/latest/download/install.sh | sudo HOUSTON_VERSION=v0.1.1 sh"
-      assert_select "button[data-action='clipboard#copy']", "Copy"
+    assert_select ".board__version" do
+      assert_select "a.eyebrow[href='#{server_update_path}']", /V0\.4\.2/
+      assert_select ".board__pill", 0, "nothing newer: no pill"
+      assert_select "form", 0, "checking and updating are on Houston's page"
     end
 
-    ENV["HOUSTON_VERSION"] = "v0.1.1"
+    Installation.current.update!(latest_release: "v0.4.3", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.4.3")
     get root_path
-    assert_select ".update-notice", 0, "current"
+    assert_select ".board__version a.board__pill[href='#{server_update_path}']", "v0.4.3 available"
+    assert_select ".update-notice, .server-update", 0, "no banner"
   ensure
     ENV.delete("HOUSTON_VERSION")
   end
 
-  # docs/plans/update-from-mission-control.md, row 9.
+  # docs/plans/update-from-mission-control.md, row 9 and Batch 2.
   test "the flight board updates the server" do
     travel_to Time.utc(2026, 9, 25, 22, 54)
     stub_tunnel
     ENV["HOUSTON_VERSION"] = "v0.4.2"
     Installation.current.update!(latest_release: "v0.4.3", latest_release_url: "https://github.com/scttymn/houston/releases/tag/v0.4.3")
+    update = ServerUpdate.create!(to_version: "v0.4.3", from_version: "v0.4.2", status: "running", started_at: 3.minutes.ago)
     get root_path
-    assert_select ".update-notice" do
-      assert_select "form[action='#{server_update_path}'][method=post]" do
-        assert_select "input[name=version][value='v0.4.3']", 1
-        assert_select "button[data-turbo-confirm*='Mission Control restarts']", "Update to v0.4.3"
-      end
-      assert_select "[data-clipboard-target=source]", /HOUSTON_VERSION=v0\.4\.3/, "the command stays for SSH"
-    end
-
-    update = ServerUpdate.create!(to_version: "v0.4.3", from_version: "v0.4.2", status: "running", started_at: Time.zone.parse("2026-09-25 22:51:00 UTC"))
+    assert_select ".board__version a.board__pill--updating[href='#{server_update_path}'][data-controller=refresh]", "Updating to v0.4.3…"
+    assert_select ".board__pill", 1, "not also \"available\""
+    update.update!(step: "Pulling Houston v0.4.3")
     get root_path
-    assert_select ".update-notice form", 0, "no second update while one runs"
-    assert_select ".server-update.notice--hold .notice__text", /Updating to v0\.4\.3 since 22:51 UTC\. Mission Control restarts on the way; deploys and backups wait\./
-    assert_select ".server-update", { text: /taking long/, count: 0 }
+    assert_select ".board__pill--updating", "Updating to v0.4.3 · Pulling Houston v0.4.3"
     update.update!(started_at: 25.minutes.ago)
     get root_path
-    assert_select ".server-update .notice__text", /taking long.*docker logs houston-update/m
+    assert_select ".board__pill--updating", /· taking long/
 
+    # Updated: the version says so, and nothing else.
     ENV["HOUSTON_VERSION"] = "v0.4.3"
-    update.update!(status: "go", finished_at: 1.minute.ago, log: "==> Starting Houston\n")
+    update.update!(status: "go", finished_at: 1.minute.ago)
     get root_path
-    assert_select ".server-update.notice--go .notice__text", /Updated to v0\.4\.3\./
-    assert_select ".update-notice", 0
+    assert_select ".board__version a.eyebrow", /V0\.4\.3/
+    assert_select ".board__pill, .server-update", 0
 
+    # A failed update: a red pill to its page, for a day.
     ENV["HOUSTON_VERSION"] = "v0.4.2"
-    update.update!(status: "rolled_back", log: "curl: (22) The requested URL returned error: 404\n")
-    get root_path
-    assert_select ".server-update.notice--nogo" do
-      assert_select ".notice__text", /The update to v0\.4\.3 failed, so this server went back to v0\.4\.2\./
-      assert_select "pre", /returned error: 404/
+    %w[rolled_back no_go].each do |status|
+      update.update!(status:)
+      get root_path
+      assert_select ".board__version a.board__pill--failed[href='#{server_update_path}']", "Update to v0.4.3 failed"
     end
-    update.update!(status: "no_go")
-    get root_path
-    assert_select ".server-update.notice--nogo .notice__text", /The update to v0\.4\.3 failed\./
-
     update.update!(finished_at: 25.hours.ago)
     get root_path
-    assert_select ".server-update", 0, "a day later, it's gone"
+    assert_select ".board__pill--failed", 0, "a day later, it's gone"
   ensure
     ENV.delete("HOUSTON_VERSION")
   end

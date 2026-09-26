@@ -6,6 +6,7 @@ require_relative "../support/project_helpers"
 # (docs/plans/update-from-mission-control.md): a helper container runs the
 # release's installer on the host, and puts the old version back if it fails.
 class ServerUpdateTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
   include FakeDockerHelper
   include ProjectHelpers
 
@@ -50,6 +51,7 @@ class ServerUpdateTest < ActiveSupport::TestCase
                      "--entrypoint", "sh", RUNNER, "-c", Rails.root.join("lib/update-helper.sh").read ], helper_runs(fake).sole.args
     end
     assert_equal [ "v0.4.3", "v0.4.2", "running" ], [ update.to_version, update.from_version, update.status ]
+    assert_enqueued_with(job: ServerUpdateJob, args: [ true ])
     assert_in_delta Time.current, update.started_at, 5
 
     ServerUpdate.delete_all

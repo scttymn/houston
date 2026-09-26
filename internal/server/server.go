@@ -741,12 +741,26 @@ type ServerUpdate struct {
 	To     string `json:"to"`
 	From   string `json:"from"`
 	Status string `json:"status"`
+	Step   string `json:"step"` // what a running update is doing: the installer's latest step
 	Log    string `json:"log"`
 }
 
 func (cl *Client) Update(ctx context.Context) (UpdateView, error) {
 	var v UpdateView
 	return v, cl.getJSON(ctx, "/api/v1/update", &v)
+}
+
+// CheckUpdate asks the server to check GitHub for the latest release now.
+func (cl *Client) CheckUpdate(ctx context.Context) (UpdateView, error) {
+	var v UpdateView
+	status, body, err := cl.do(ctx, http.MethodPost, "/api/v1/update/check", nil)
+	if err != nil {
+		return v, err
+	}
+	if status != http.StatusOK {
+		return v, fmt.Errorf("%s", message(body))
+	}
+	return v, json.Unmarshal(body, &v)
 }
 
 // StartUpdate updates the server to version ("" for the latest release).

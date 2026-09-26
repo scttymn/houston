@@ -9,11 +9,6 @@ module LatestRelease
 
   def self.repo = ENV["HOUSTON_REPO"].presence || "scttymn/houston"
 
-  # The command a server updates with, the one the README gives.
-  def self.update_command(tag)
-    "curl -fsSL https://github.com/#{repo}/releases/latest/download/install.sh | sudo HOUSTON_VERSION=#{tag} sh"
-  end
-
   # The latest release's tag, or nil when the check failed.
   def self.check!(installation = Installation.current)
     return nil unless installation.persisted?
@@ -26,6 +21,14 @@ module LatestRelease
   rescue StandardError => e
     Rails.logger.warn("houston: couldn't check the latest release: #{e.class}: #{e.message}")
     nil
+  end
+
+  # A check someone asked for (Check now on Houston's page, houston update --check): what
+  # it found, in words, or nil when GitHub didn't answer.
+  def self.check_and_say
+    tag = check! or return nil
+    newer = UpdateNotice.newer(HoustonVersion.current, tag)
+    newer ? "#{newer} is out." : "#{tag} is the latest."
   end
 
   def self.fetch
