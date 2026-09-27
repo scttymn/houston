@@ -12,9 +12,11 @@ class RestoreData < DataRun
     vol="$1"; shift;
     find /v -mindepth 1 -delete &&
     if [ -d "/restore/data/$vol" ]; then cp -a "/restore/data/$vol/." /v/; fi &&
-    while [ "$#" -gt 1 ]; do
-      mkdir -p "$(dirname "/v/$2")" && cp "/restore/out/$1" "/v/$2" && rm -f "/v/$2-wal" "/v/$2-shm" "/v/$2-journal" || exit 1;
-      shift 2;
+    while [ "$#" -gt 3 ]; do
+      mkdir -p "$(dirname "/v/$2")" && cp "/restore/out/$1" "/v/$2" && rm -f "/v/$2-wal" "/v/$2-shm" "/v/$2-journal" &&
+      if [ "$3" != "-" ]; then chown "$3" "/v/$2"; else chown --reference="$(dirname "/v/$2")" "/v/$2"; fi &&
+      if [ "$4" != "-" ]; then chmod "$4" "/v/$2"; fi || exit 1;
+      shift 4;
     done
   SH
   PG_READY = 'pg_isready -U "${POSTGRES_USER:-postgres}" -d postgres'
@@ -111,8 +113,21 @@ class RestoreData < DataRun
 
     def fill(volume, sqlite)
       filled = docker("run", "--rm", "--name", container(:fill), "--user", "0", "-v", "#{@target.volume(volume)}:/v", "-v", "#{staging}:/restore:ro",
-                      "--entrypoint", "sh", tools, "-c", FILL, "sh", volume, *sqlite.flat_map { |s| [ s["file"], s["path"] ] })
+                      "--entrypoint", "sh", tools, "-c", FILL, "sh", volume, *sqlite.flat_map { |s| [ s["file"], s["path"], owner(s), mode(s) ] })
       raise Failed, "couldn't restore the volume #{volume}: #{tail(filled.output)}" unless filled.success
+    end
+
+    # A database's owner and permissions as the manifest recorded them, or
+    # "-" (an older snapshot, or anything but numbers): then FILL gives it
+    # its folder's owner and cp's permissions.
+    def owner(entry)
+      uid, gid = entry.values_at("uid", "gid")
+      [ uid, gid ].all? { |id| id.is_a?(Integer) && id.between?(0, 2**31 - 1) } ? "#{uid}:#{gid}" : "-"
+    end
+
+    def mode(entry)
+      mode = entry["mode"]
+      mode.is_a?(Integer) && mode.between?(0, 0o7777) ? format("%o", mode) : "-"
     end
 
     def restore_postgres(pg)

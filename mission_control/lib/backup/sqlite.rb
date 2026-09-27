@@ -11,7 +11,7 @@
 # <out>/.houston/exclude lists each live file and its -wal, -shm and
 # -journal as literal restic patterns, so the file copy leaves them out.
 #
-# The last line of output is JSON: {"sqlite": [{volume, path, file}],
+# The last line of output is JSON: {"sqlite": [{volume, path, file, uid, gid, mode}],
 # "warnings": [...], "errors": [{volume, path, message}]}. The exit status
 # is 1 when a database couldn't be copied.
 require "json"
@@ -69,7 +69,10 @@ found.each_with_index do |(volume, path), i|
     errors << { volume:, path: relative, message: output.strip.empty? ? "sqlite3 exited #{status.exitstatus}" : output.strip }
     next
   end
-  copied << { volume:, path: relative, file: }
+  # Its owner, group and permissions: a restore puts the copy back as the
+  # app's to write (an app that isn't root can't write a root-owned file).
+  stat = File.stat(path)
+  copied << { volume:, path: relative, file:, uid: stat.uid, gid: stat.gid, mode: stat.mode & 0o7777 }
 
   if path.match?(/[\r\n]/)
     warnings << "#{volume}/#{relative}: its name has a line break, so its live file is backed up as well"

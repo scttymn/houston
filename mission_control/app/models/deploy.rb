@@ -251,7 +251,8 @@ class Deploy < ApplicationRecord
       if copy.handed_over_at
         copy.update!(status: "no_go", error: "#{error.presence || "the copy's deploy failed"}; it serves the hosts it took, so #{copy.to} is kept")
       else
-        copy.update!(status: "no_go", error:)
+        # The new project goes, and its deploys with it: the log stays here.
+        copy.update!(status: "no_go", error:, log: self.class.where(id:).pick(:log))
         CopyCleanupJob.perform_later(copy)
       end
     end

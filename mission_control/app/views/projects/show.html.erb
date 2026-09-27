@@ -64,6 +64,17 @@
       <span class="notice__text">Copying <%= @project.name %> to <%= @copy_active.to %>; <%= @project.name %> keeps serving until it's GO. <%= link_to "Follow it", project_deploy_path(@copy_active.to, @copy_active.deploy.number) if @copy_active.deploy %></span>
     </div>
   <% end %>
+  <% if @copy_failed %>
+    <div class="notice notice--nogo">
+      <span class="mono">NO-GO</span>
+      <span class="notice__text">
+        The copy to <%= @copy_failed.to %> failed: <%= @copy_failed.error %>. <%= @project.name %> kept serving, and <%= @copy_failed.to %> was removed; fix it and copy again.
+        <% if @copy_failed.log.present? %>
+          <details class="copy-log"><summary>Its log</summary><pre class="mono log"><%= @copy_failed.log.lines.last(60).join %></pre></details>
+        <% end %>
+      </span>
+    </div>
+  <% end %>
   <% if @copy_to %>
     <div class="notice notice--go">
       <span class="mono">COPIED</span>

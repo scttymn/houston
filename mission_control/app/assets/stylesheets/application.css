@@ -286,6 +286,8 @@ a.button--danger { color: #fff; }
 .danger { border-color: var(--signal); }
 .danger .panel__row { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
 .delete-list dd { overflow-wrap: anywhere; }
+.copy-log { margin-top: 8px; }
+.copy-log pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 @media (max-width: 640px) { .danger .panel__row { flex-direction: column; align-items: flex-start; } }
 .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--ink); }
 .panel__head .panel__title { padding: 0; border: 0; font-size: 24px; }

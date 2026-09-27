@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_030000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -111,6 +111,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_020000) do
     t.integer "from_project_id"
     t.json "handed_over", default: [], null: false
     t.datetime "handed_over_at"
+    t.text "log"
     t.integer "project_id"
     t.string "sha", null: false
     t.integer "snapshot_run_id"

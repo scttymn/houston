@@ -109,11 +109,13 @@ class ApiCopiesTest < ActionDispatch::IntegrationTest
 
   test "a copy that fails before its handover takes the new project away; after it, never" do
     token, = claim
+    @deploy.update_columns(log: "Build…\n")
     assert_enqueued_with(job: CopyCleanupJob) do
       patch "/api/deploys/#{@deploy.id}", params: { status: "no_go", error: "kamal deploy failed" }.to_json, headers: api_headers.merge("X-Houston-Deploy-Token" => token)
     end
     @copy.reload
     assert_equal [ "no_go", "kamal deploy failed" ], [ @copy.status, @copy.error ]
+    assert_equal "Build…\n", @copy.log, "the deploy's log outlives the new project"
     perform_enqueued_jobs(only: CopyCleanupJob)
     deletion = @new.deletions.sole
     assert_equal [ true, "Houston (the copy of equip failed)" ], [ deletion.delete_backups, deletion.by ]

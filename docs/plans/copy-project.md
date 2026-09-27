@@ -219,3 +219,21 @@ Your question: "So basically if I push a duplicate named app, it goes on hold. T
   - **Not in the real run:** a copy failing before its handover (the new project removed, the old one serving). That's covered by `api_copies_test.rb`.
   - **Found on the way:** the first run's log check failed because the log read "handed over: spike.[secret KAMAL_REGISTRY_PASSWORD].test". The local registry's placeholder password is "houston", and the runner masks every occurrence in every deploy log. It's not this feature's: it's filed as its own task, and the run checks the handover in the database.
 - **Visual check** (sample projects on a dev server, since removed): the proposal notice, the confirm page, the copy's deploy page with Cancel, and both projects' notices with Undo in the Danger zone, all at 375 px with no overflow. The confirm page's long "<NEW> GETS" label ran into its text, so it's now "GETS".
+
+## After v0.4.12: the first real copy (valleybuiltcrossfit-go → valleybuiltcrossfit)
+- **What happened:** the copy's deploy went NO-GO at its health check: `web: attempt to write a readonly database (8)`, over and over, then "target failed to become healthy within configured timeout (30s)". valleybuiltcrossfit-go kept serving, and the new project was removed, as designed.
+- **Why:** the Go app runs as 65532 (`COPY --chown=65532:65532 /out/data /data`). A backup keeps each SQLite database as a `.backup` copy, written by a root helper, and leaves the live file out of the file copy. So a restore put the database back **root-owned, mode 644**: readable, but not writable by the app.
+  - This was never a copy bug alone: a restore of any SQLite app that isn't root had it.
+  - The real runs missed it because the spike fixture runs as root.
+- **The fix:**
+  - `lib/backup/sqlite.rb` records each database's `uid`, `gid` and `mode` in the manifest.
+  - `RestoreData`'s `FILL` puts them back. Only numbers are accepted (anything else is `-`). An older snapshot without them gives the database its folder's owner (`chown --reference`).
+  - Tests: `test/lib/backup_sqlite_script_test.rb` `"records each database's owner and permissions"`; `test/models/restore_data_test.rb` `"FILL puts databases back with their owner and permissions"` (FILL run for real, as root with GNU coreutils) and `"a manifest's owner and permissions are used only when they're numbers"`.
+  - `install/test/copy-project.sh` now makes spike-go's database 65532's, mode 640, before the copy, and checks the copy's is the same.
+- **Also found: the failed copy's log was lost.** Its new project, and so its deploys, were deleted, and the cause had to be read from the runner's container log. Now the copy keeps its deploy's log (`project_copies.log`), and the old project's page shows "The copy to X failed: …" with the log's last 60 lines, for a day (until a copy succeeds).
+- **Mutation checks, each caught:** FILL never chowning; the manifest's owner ignored; no owner recorded; the log not kept.
+- **Suites:** 500 runs, 0 failures; 323 files, no offenses.
+- **`install/test/copy-project.sh`: PASS** (31 ok):
+  - "the copied database is still 65532's, mode 640"
+  - every request 200 through the copy (301), the undo (95) and the delete (75)
+

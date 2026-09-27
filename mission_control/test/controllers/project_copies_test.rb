@@ -101,4 +101,13 @@ class ProjectCopiesTest < ActionDispatch::IntegrationTest
     assert_redirected_to sign_in_path
     assert_equal 0, ProjectCopy.count
   end
+
+  test "a failed copy is said on the old project's page, with its log" do
+    copy = copied
+    copy.update!(status: "no_go", error: "kamal deploy failed (exit 1); the old version keeps serving",
+                 log: "Build…\n ERROR web: attempt to write a readonly database (8)\n")
+    get project_path("equip-go")
+    assert_select ".notice--nogo", /The copy to equip failed: kamal deploy failed/
+    assert_select ".notice--nogo details pre", /attempt to write a readonly database/
+  end
 end

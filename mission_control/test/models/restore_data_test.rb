@@ -1,4 +1,5 @@
 require "test_helper"
+require "open3"
 require_relative "../support/project_helpers"
 require_relative "../support/fake_docker"
 require_relative "../support/backup_helpers"
@@ -75,7 +76,7 @@ class RestoreDataTest < ActiveSupport::TestCase
     # The volume: emptied, refilled, SQLite put in place (names and paths as argv).
     fill = calls[7]
     assert_equal [ "run", "--rm", "--name", "houston-restore.equip.fill", "--user", "0", "-v", "equip.g2_storage:/v", "-v", "#{STAGING}:/restore:ro",
-                   "--entrypoint", "sh", BackupHelpers::TOOLS, "-c", RestoreData::FILL, "sh", "storage", "sqlite/1.sqlite3", "production.sqlite3" ], fill
+                   "--entrypoint", "sh", BackupHelpers::TOOLS, "-c", RestoreData::FILL, "sh", "storage", "sqlite/1.sqlite3", "production.sqlite3", "-", "-" ], fill
     assert_match "find /v -mindepth 1 -delete", RestoreData::FILL
     assert_match(/rm -f "\/v\/\$2-wal" "\/v\/\$2-shm" "\/v\/\$2-journal"/, RestoreData::FILL)
 
@@ -201,5 +202,37 @@ class RestoreDataTest < ActiveSupport::TestCase
       assert_equal "no_go", run.reload.status
       assert_match(/the snapshot is of someone, not equip|taken at bbbbbbb, not the snapshot's aaaaaaa/, run.error)
     end
+  end
+
+  # FILL, run for real (this container is root with GNU coreutils, as
+  # Mission Control's image is): a database comes back its owner's, with its
+  # permissions, so an app that isn't root can write it (docs/plans/copy-project.md).
+  test "FILL puts databases back with their owner and permissions" do
+    dir = Dir.mktmpdir
+    v, restore = File.join(dir, "v"), File.join(dir, "restore")
+    FileUtils.mkdir_p([ v, File.join(restore, "data/storage/db"), File.join(restore, "out/sqlite") ])
+    File.write(File.join(restore, "data/storage/db/uploads.txt"), "kept")
+    File.chown(65532, 65532, File.join(restore, "data/storage/db"))
+    File.write(File.join(restore, "out/sqlite/1.sqlite3"), "one")
+    File.write(File.join(restore, "out/sqlite/2.sqlite3"), "two")
+    script = RestoreData::FILL.gsub("/restore", restore).gsub(%r{/v\b}, v)
+
+    _, status = Open3.capture2e("sh", "-c", script, "sh", "storage", "sqlite/1.sqlite3", "db/app.sqlite3", "65532:65533", "640",
+                                "sqlite/2.sqlite3", "db/old.sqlite3", "-", "-")
+    assert status.success?
+    recorded, older = File.stat(File.join(v, "db/app.sqlite3")), File.stat(File.join(v, "db/old.sqlite3"))
+    assert_equal [ 65532, 65533, 0o640 ], [ recorded.uid, recorded.gid, recorded.mode & 0o7777 ]
+    assert_equal [ 65532, 65532 ], [ older.uid, older.gid ], "an older snapshot's database takes its folder's owner"
+    assert_equal "kept", File.read(File.join(v, "db/uploads.txt"))
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  test "a manifest's owner and permissions are used only when they're numbers" do
+    fake = restore_docker(manifest(sqlite: [ { volume: "storage", path: "a.sqlite3", file: "sqlite/1.sqlite3", uid: 65532, gid: 65532, mode: 0o644 },
+                                             { volume: "storage", path: "b.sqlite3", file: "sqlite/2.sqlite3", uid: "0; rm -rf /", gid: 1, mode: 0o10000 } ]))
+    restore(fake)
+    fill = fake.calls.map(&:args).find { |a| a.include?(RestoreData::FILL) }
+    assert_equal [ "sqlite/1.sqlite3", "a.sqlite3", "65532:65532", "644", "sqlite/2.sqlite3", "b.sqlite3", "-", "-" ], fill.drop(fill.index("storage") + 1)
   end
 end

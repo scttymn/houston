@@ -94,6 +94,9 @@ result=$(wait_for_deploy spike-go 1)
 [ "${result%%|*}" = go ] && ok "spike-go deploy #1 GO" || bad "spike-go deploy #1: $result"
 psql_in spike-go-db "create table t (v text); insert into t values ('kept')" >/dev/null
 for _ in $(seq 1 30); do sqlite_in spike-go_data "create table t (v); insert into t values ('kept')" >/dev/null && break; sleep 5; done
+# As an app that isn't root keeps it (valleybuiltcrossfit-go's runs as 65532):
+# the copy must come back that user's, or the app can't write it.
+vm docker run --rm --user 0 -v spike-go_data:/data --entrypoint sh houston/mission-control:local -c 'chown 65532:65532 /data/app.sqlite3 && chmod 640 /data/app.sqlite3'
 [ "$(through_proxy spike /env/DB_HOST)" = spike-go-db ] && [ "$(through_proxy spike-go /env/DB_HOST)" = spike-go-db ] &&
   ok "spike-go serves spike-go.houston.test and spike.houston.test" || bad "before: $(through_proxy spike /env/DB_HOST)"
 
@@ -137,6 +140,8 @@ done
 [ "$(rails 'puts ProjectCopy.order(:id).last.handed_over.join(",")')" = spike.houston.test ] && ok "the copy handed over spike.houston.test" || bad "handed over: $(rails 'puts ProjectCopy.order(:id).last.handed_over.inspect')"
 [ "$(psql_in spike-db 'select v from t')" = kept ] && [ "$(sqlite_in spike_data 'select v from t')" = kept ] && ok "spike's Postgres and SQLite (on NFS) say 'kept'" || bad "copied data: $(psql_in spike-db 'select v from t') / $(sqlite_in spike_data 'select v from t')"
 vm test -f /srv/nfs/volumes/spike/data/app.sqlite3 && ok "spike's data is in volumes/spike/data on vm-nfs" || bad "no volumes/spike/data/app.sqlite3 on vm-nfs"
+owned=$(vm stat -c '%u:%g %a' /srv/nfs/volumes/spike/data/app.sqlite3)
+[ "$owned" = "65532:65532 640" ] && ok "the copied database is still 65532's, mode 640 (an app that isn't root can write it)" || bad "the copied database is $owned"
 [ "$(through_proxy spike-go /env/DB_HOST)" = spike-go-db ] && [ "$(psql_in spike-go-db 'select v from t')" = kept ] && ok "spike-go still serves its own host, its data untouched" || bad "spike-go after the copy"
 routes=$(vm docker exec kamal-proxy kamal-proxy list | sed 's/\x1b\[[0-9;]*m//g')
 printf '%s\n' "$routes" | grep -qE '^spike-web +spike\.houston\.test ' && printf '%s\n' "$routes" | grep -qE '^spike-go-web +spike-go\.houston\.test ' &&

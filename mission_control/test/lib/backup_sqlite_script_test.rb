@@ -90,4 +90,17 @@ class BackupSqliteScriptTest < ActiveSupport::TestCase
     assert_equal "broken.sqlite3", result["errors"].first["path"]
     assert result["errors"].first["message"].present?
   end
+
+  # docs/plans/copy-project.md: a restored database must be the app's to
+  # write, so each one's owner, group and permissions go in the manifest.
+  test "records each database's owner and permissions" do
+    path = File.join(@data, "storage/production.sqlite3")
+    make_db(path, 2).close
+    File.chown(65532, 65533, path)
+    File.chmod(0o640, path)
+    output, status = run_script
+    assert status.success?, output
+    entry = JSON.parse(output.lines.last)["sqlite"].sole
+    assert_equal [ 65532, 65533, 0o640 ], entry.values_at("uid", "gid", "mode")
+  end
 end
