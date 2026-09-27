@@ -67,12 +67,19 @@ func ensureDevProxy(d docker.Runner, port string) error {
 
 func proxyFailed(err error, port string) error {
 	msg := err.Error()
+	other := "8080"
+	if port == "8080" {
+		other = "8081"
+	}
 	if strings.Contains(msg, "port is already allocated") || strings.Contains(msg, "address already in use") {
-		other := "8080"
-		if port == "8080" {
-			other = "8081"
-		}
 		return fmt.Errorf("port %s is taken on this machine, so houston-dev-proxy can't serve *.localhost there; free it, or run with HOUSTON_DEV_PORT=%s (the app is then at <name>.localhost:%s)", port, other, other)
+	}
+	// Rootless Docker: the kernel keeps ports under 1024 for root until told
+	// otherwise. Allowing it once keeps <name>.localhost free of a port.
+	if strings.Contains(msg, "cannot expose privileged port") {
+		return fmt.Errorf("rootless Docker can't bind port %s, so houston-dev-proxy can't serve *.localhost there. Allow it once with:\n"+
+			"  echo 'net.ipv4.ip_unprivileged_port_start=%s' | sudo tee /etc/sysctl.d/99-rootless-docker.conf && sudo sysctl --system\n"+
+			"or run with HOUSTON_DEV_PORT=%s (the app is then at <name>.localhost:%s)", port, port, other, other)
 	}
 	return fmt.Errorf("couldn't start houston-dev-proxy: %v", err)
 }

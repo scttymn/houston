@@ -104,6 +104,34 @@ func TestDevPortTaken(t *testing.T) {
 	}
 }
 
+// Rootless Docker can't bind a port under 1024 until the kernel allows it
+// (docs/plans/dev-localhost.md, row 14): the message leads with that one-time
+// fix, which keeps <name>.localhost portless, and names HOUSTON_DEV_PORT after.
+func TestDevPrivilegedPort(t *testing.T) {
+	_, path := newProject(t, phoenix, devEnv)
+	taken := proxyState("")
+	d := &fakeDocker{outputFn: func(args []string) ([]byte, error, bool) {
+		if args[0] == "run" {
+			return nil, errors.New("exit status 126: docker: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint houston-dev-proxy (e70ea6e3): error while calling RootlessKit PortManager.AddPort(): cannot expose privileged port 80, you can add 'net.ipv4.ip_unprivileged_port_start=80' to /etc/sysctl.conf (currently 1024), or set CAP_NET_BIND_SERVICE on rootlesskit binary, or choose a larger port number (>= 1024): listen tcp4 127.0.0.1:80: bind: permission denied"), true
+		}
+		return taken(args)
+	}}
+	code, _, stderr := run(d, "-f", path, "dev")
+	fix := "echo 'net.ipv4.ip_unprivileged_port_start=80' | sudo tee /etc/sysctl.d/99-rootless-docker.conf && sudo sysctl --system"
+	if code != 1 || len(d.runs) != 0 || !strings.Contains(stderr, "rootless Docker can't bind port 80") || !strings.Contains(stderr, fix) {
+		t.Errorf("exit %d, compose runs %q: %s", code, d.runs, stderr)
+	}
+	if i, j := strings.Index(stderr, fix), strings.Index(stderr, "HOUSTON_DEV_PORT=8080"); j < i {
+		t.Errorf("HOUSTON_DEV_PORT isn't offered after the fix: %s", stderr)
+	}
+	if strings.Contains(stderr, "RootlessKit") {
+		t.Errorf("Docker's own error is passed through: %s", stderr)
+	}
+	if !d.called("rm", "-f", devProxy) {
+		t.Errorf("the half-made proxy container is left: %q", d.outputs)
+	}
+}
+
 func TestDevRoutesAndCleansUp(t *testing.T) {
 	dir, path := newProject(t, phoenix, devEnv)
 	d := &fakeDocker{outputFn: proxyState("true " + devProxyImage + " 80")}

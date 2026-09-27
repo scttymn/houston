@@ -81,6 +81,7 @@
 | 11 | A name held by another checkout's running containers: a message and `--as`, not a silent takeover | `internal/cli` `TestDevNameInUse` |
 | 12 | Real Docker: a branch instance starts with main's data (a row written in main is there) and diverges (a write in the branch isn't in main) | `bin/test-integration` `TestDevBranchCopyIntegration` |
 | 13 | Checked by hand with equip: `houston dev` at `http://equip.localhost` in a browser, next to estherpictures | recorded here |
+| 14 | Rootless Docker refusing a port under 1024: nothing starts, the message gives the one-time sysctl that allows it, then `HOUSTON_DEV_PORT`, without Docker's own text | `internal/cli` `TestDevPrivilegedPort` |
 
 ## Evidence
 - **Tests first:** every new test failed first for the right reason, including:
@@ -106,3 +107,8 @@
   - **Found by the check, and fixed:** kamal-proxy's health check sends the *target's* name as Host. With an alias of `<project>.houston`, Rails blocked it ("Blocked hosts: houston-equip-test.houston:3000"), so the route never went live. Checked by hand that Docker's DNS resolves a `.localhost` alias inside the proxy (200). The alias is now the host itself.
   - A `feature1` worktree: "copying houston-equip-test's data … (storage, paused meanwhile)". Rails refused `feature1.houston-equip-test.localhost`: its `.localhost` rule allows one label (`SUBDOMAIN_REGEX = /(?:[a-z0-9-]+\.)/`, actionpack 8.1). Scotty chose to keep two-level names ("it's flexible and works for both"). So `houston dev` now checks the health path itself after 30 s, and says "answered 403 Forbidden: the app refuses that name" with the host to allow. That appeared on the real run. With `config.hosts << ".houston-equip-test.localhost"` in the copy, main and the branch both answered 200 side by side, and both rendered equip in a browser.
   - Everything the check made (both instances' containers and volumes, the copies) was removed afterwards. houston-dev-proxy stays, as designed.
+- **Row 14, added later (Omarchy, rootless Docker 29.7.2):**
+  - `houston dev` on a fresh laptop printed Docker's own error ("cannot expose privileged port 80, you can add 'net.ipv4.ip_unprivileged_port_start=80' to /etc/sysctl.conf …"), after the image pull's progress. `proxyFailed` only recognised a taken port.
+  - `TestDevPrivilegedPort` failed first on that passed-through text. All 4 mutations were caught: the error not recognised; `HOUSTON_DEV_PORT` offered before the fix; Docker's text appended; the wrong port in the sysctl.
+  - Real Docker says the same: `docker run -p 127.0.0.1:79:80 busybox` answered "cannot expose privileged port 79".
+  - The fix leads, not `HOUSTON_DEV_PORT`: a port in the URL is what `<name>.localhost` exists to avoid.
