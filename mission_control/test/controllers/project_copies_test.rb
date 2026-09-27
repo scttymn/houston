@@ -78,8 +78,15 @@ class ProjectCopiesTest < ActionDispatch::IntegrationTest
     assert_select ".notice--go a[href=?]", project_path("equip")
 
     get project_path("equip")
-    assert_select ".notice--go", /copied from equip-go/
+    assert_select ".notice--go", /copied from equip-go, which is still there: delete it when you're happy, or undo the copy/
     assert_select "section#danger form[action=?]", undo_project_copy_path("equip")
+
+    # Once the old project is deleted, the copy is settled: nothing to say.
+    copy.update_columns(from_project_id: nil)
+    get project_path("equip")
+    assert_select ".notice--go", 0
+    assert_select "section#danger form[action=?]", undo_project_copy_path("equip"), 0
+    copy.update_columns(from_project_id: @old.id)
 
     post undo_project_copy_path("equip"), params: { confirm: "nope" }
     assert_redirected_to project_path("equip")

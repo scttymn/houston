@@ -88,7 +88,8 @@
   <% if @copied_from %>
     <div class="notice notice--go">
       <span class="mono">COPIED</span>
-      <span class="notice__text"><%= @project.name %> was copied from <%= @copied_from.from %> (<%= l(@copied_from.created_at, format: :short) %>, by <%= @copied_from.by %>).</span>
+      <span class="notice__text"><%= @project.name %> was copied from <%= @copied_from.from %>, which is still there: delete it when you're happy, or undo the copy (Danger zone).</span>
+      <%= link_to "Go to #{@copied_from.from}", project_path(@copied_from.from), class: "button button--small" %>
     </div>
   <% end %>
   <% if (proposal = @project.copy_proposal) %>

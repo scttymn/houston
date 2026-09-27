@@ -24,7 +24,8 @@ module ProjectPage
       @copy_failed = project.copies_from.where(status: "no_go", updated_at: 1.day.ago..).order(:id).last
       @copy_failed = nil if @copy_active || (@copy_failed && project.copies_from.where(status: "go").where("id > ?", @copy_failed.id).exists?)
       @copy_to = project.copies_from.where(status: "go", undone_at: nil).where.not(project_id: nil).order(:id).last
-      @copied_from = project.copies.where(status: "go", undone_at: nil).order(:id).last
+      # Said only while the old project is there, which is while Undo can be.
+      @copied_from = project.copies.where(status: "go", undone_at: nil).where.not(from_project_id: nil).order(:id).last
       @deletion = project.deletions.order(:id).last
       @deletion = nil if @deletion&.cancelled? && @deletion.finished_at < 1.day.ago
     end
