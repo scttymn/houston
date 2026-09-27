@@ -27,10 +27,26 @@ type Route struct {
 }
 
 // DevOverride is the compose file Houston layers on top of compose.yml for
-// `houston dev`: the app's dev build target, and the route.
+// `houston dev`: the app's dev build target, without production's limits, and
+// the route.
 func DevOverride(p *project.Project, r Route) []byte {
-	app := []any{"build", mapping("target", scalar("dev"))}
+	app := append([]any{"build", mapping("target", scalar("dev"))}, unlimited(p)...)
 	return render(routed(p, r, app))
+}
+
+// unlimited resets the app's deploy.resources.limits, when compose.yml sets
+// them (docs/plans/dev-test-limits.md). They size the production image; in dev
+// and test the app's container also compiles and runs the tests, which needs
+// more than the output does. Accessories run production's image, so theirs stay.
+func unlimited(p *project.Project) []any {
+	if p.Compose == nil {
+		return nil
+	}
+	if d := p.Compose.Services[p.AppService].Deploy; d == nil || d.Resources.Limits == nil {
+		return nil
+	}
+	reset := &yaml.Node{Kind: yaml.MappingNode, Tag: "!reset", Style: yaml.FlowStyle}
+	return []any{"deploy", mapping("resources", mapping("limits", reset))}
 }
 
 // routed is the override with the app service's keys, plus the route: every
@@ -62,9 +78,10 @@ func routed(p *project.Project, r Route, app []any) *yaml.Node {
 }
 
 // TestOverride is the compose file Houston layers on top of compose.yml for
-// `houston test`: the test build target, no published ports anywhere, and
-// only the app's named volumes (bind mounts are dev-only). It uses compose's
-// !reset and !override tags to remove what the base file sets.
+// `houston test`: the test build target, no published ports anywhere, only the
+// app's named volumes (bind mounts are dev-only), and no production limits on
+// the app. It uses compose's !reset and !override tags to remove what the base
+// file sets.
 func TestOverride(p *project.Project) []byte {
 	var services []any
 	for _, name := range sortedServices(p) {
@@ -77,6 +94,7 @@ func TestOverride(p *project.Project) []byte {
 			if volumes := p.Compose.Services[name].Volumes; len(volumes) > 0 {
 				svc = append(svc, "volumes", namedVolumes(volumes))
 			}
+			svc = append(svc, unlimited(p)...)
 		}
 		services = append(services, name, mapping(svc...))
 	}

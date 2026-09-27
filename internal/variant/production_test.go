@@ -15,6 +15,8 @@ func TestProductionOverride(t *testing.T) {
 		compose string // "" → the PhoenixApp fixture
 		want    string
 	}{
+		// The fixture's app has limits, and --production keeps them
+		// (docs/plans/dev-test-limits.md, row 4): no deploy key here.
 		{"phoenix", "", header +
 			"  app:\n" +
 			"    build:\n" +

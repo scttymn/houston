@@ -15,7 +15,10 @@ func TestDevOverride_ForcesDevTarget(t *testing.T) {
 		"services:\n" +
 		"  app:\n" +
 		"    build:\n" +
-		"      target: dev\n"
+		"      target: dev\n" +
+		"    deploy:\n" +
+		"      resources:\n" +
+		"        limits: !reset {}\n"
 	first := string(DevOverride(p, Route{KeepPorts: true}))
 	if first != want {
 		t.Errorf("DevOverride =\n%s\nwant\n%s", first, want)
@@ -51,6 +54,9 @@ func TestDevOverrideRoutesByName(t *testing.T) {
 		"    build:\n" +
 		"      target: dev\n" +
 		"    ports: !reset []\n" +
+		"    deploy:\n" +
+		"      resources:\n" +
+		"        limits: !reset {}\n" +
 		"    networks:\n" +
 		"      default: {}\n" +
 		"      houston-dev:\n" +

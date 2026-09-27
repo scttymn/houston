@@ -21,6 +21,9 @@ func TestTestOverride_Phoenix(t *testing.T) {
 		"    ports: !reset []\n" +
 		"    volumes: !override\n" +
 		"      - media:/media\n" +
+		"    deploy:\n" +
+		"      resources:\n" +
+		"        limits: !reset {}\n" +
 		"  cache:\n" +
 		"    ports: !reset []\n" +
 		"  db:\n" +
