@@ -46,6 +46,8 @@
 | 7 | The row: amounts, a donut with its percentage and hover where there's a limit, dashes when nothing runs, "stale" when old | `projects_controller_test.rb` `test "each row shows its app's CPU, memory and disk"` | Contract |
 | 8 | The API carries `stats`; `houston status <project>` prints its line | `api_v1_read_test.rb`; Go `TestStatusPrintsStats` | Contract |
 | 9 | Visual check, 1280 and 375 px; live on the server: the three apps' figures against `docker stats` there | recorded here | Parity |
+| 10 | The gauge fills only as far as the share used: unlit ticks are outlines, one lit per 10% (rounded), and at least one for any use; none at 0% or without a limit | `usage_helper_test.rb` `test "one tick per 10% of the limit, and one for any use"` | Contract |
+| 11 | The board shows the amount used, not the limit; the hover keeps the limit ("MEM 1.9 GB of 2 GB (95%)"), and the project's page lists it | `usage_helper_test.rb` `test "amber at 85% and up"`; `projects_controller_test.rb` `test "each row shows its app's CPU, memory and disk"` | Contract |
 
 ## Evidence
 - **Tests:**
@@ -85,3 +87,21 @@
 - **Tests:** `test/helpers/usage_helper_test.rb` covers ticks per percentage (0, 4, 5, 16, 42, 69, 95, 100, 140% and no limit), amber from 85% (84% isn't), outlined ticks without a limit, and sizes and cores in words. The board test pins the ticks, percentages, amounts and hovers. Rails: 417 runs, 0 failures.
 - **Seen locally** with real stand-in containers (shop limited, docs at 90% of 256 MB, blog unlimited, wiki idle), at 1440 and 375 px with no overflow.
 - **Not built here:** the `MobileFlightBoard` artboard's labelled phone cards (DOMAINS, RUNNING SHA, LAST DEPLOY, LAST BACKUP, RESOURCES). That's a redesign of the phone board of its own.
+
+## Revised: usage only, and gauges that fill to it (rows 10 and 11, 2026-09-27)
+- **Direction:** "resource display is inconsistent. Since we display total resources on the detail page, let's just display usage on the flight board so all resources display the same… instead of: 0 cores / 0.5 cores, we'll just display the graph, 0% 0 cores." Then: "the graphs should somewhat represent the usage. So instead of the graph being 100% full, it should only fill up to the point of the percent in use."
+- **Evidence:**
+  - valleybuiltcrossfit's lines read "0 cores / 0.5 cores" and "7.88 MB / 384 MB" beside estherpictures' "0 cores" and "170 MB". On a tablet card the resources column grows to fit (`minmax(222px, max-content)`), so the limit squeezed that card's other details into one column while the others had two.
+  - Unlit ticks were filled (#E2DBC9), so at 0% and 2% (no tick lit: 2% rounded to 0) the gauge read as full.
+  - The project's page already lists the limits (the facts strip's RESOURCES, `resources_words`).
+- **As built:**
+  - The amount is what's used ("8.58 MB"). The hover keeps the limit and the share ("MEM 8.58 MB of 384 MB (2%)").
+  - Every tick is an outline, and a lit one is filled (ink, or amber from 85%). So a gauge fills only as far as the share used.
+  - One tick per 10%, rounded, with at least one for any use: 2% lights one, 26% three, 95% all ten. 0% lights none.
+  - Without a limit, no tick lights and the percentage is a faint "—", as before. With every tick an outline, that's the same gauge as 0%, and the dash is the difference.
+  - `.usage__limit` is gone.
+- **Tests first:** the helper tests failed on 1% lighting no tick and on the amount still carrying "/ 2 GB"; the board test on "0.15 cores / 3 cores". All 5 mutations were caught: no tick for small use; `ceil` for `round` (42% → 5); a tick at 0%; the limit back in the amount; the limit gone from the hover.
+- **Visual check,** rendered from a throwaway test with the real stylesheet and fonts, measured with Playwright: estherpictures without limits, valleybuiltcrossfit at 0% CPU of 0.5 cores and 2% of 384 MB, and equip at 26% CPU and 95% memory.
+  - 1440 px: the table's gauges show 3 ticks at 26%, 10 amber at 95%, 1 at 2%, and none at 0% or without a limit.
+  - 664 px: all three cards lay their details out in two columns, with resources 222–225 px wide. Before, the limit made valleybuiltcrossfit's one column.
+  - 375 px: the page is 375 px wide.

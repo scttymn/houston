@@ -5,8 +5,9 @@ require "test_helper"
 class UsageHelperTest < ActionView::TestCase
   def ticks_on(html) = Nokogiri::HTML.fragment(html).css(".gauge__tick.is-on").size
 
-  test "one tick per 10% of the limit" do
-    { 0 => 0, 4 => 0, 5 => 1, 16 => 2, 42 => 4, 69 => 7, 95 => 10, 100 => 10, 140 => 10 }.each do |percent, on|
+  # Any use lights a tick, so 2% doesn't look like 0% (docs/plans/app-stats.md, row 10).
+  test "one tick per 10% of the limit, and one for any use" do
+    { 0 => 0, 1 => 1, 2 => 1, 4 => 1, 5 => 1, 16 => 2, 26 => 3, 42 => 4, 69 => 7, 95 => 10, 100 => 10, 140 => 10 }.each do |percent, on|
       assert_equal on, ticks_on(gauge(percent)), "#{percent}%"
     end
     assert_equal 0, ticks_on(gauge(nil)), "no limit"
@@ -18,7 +19,8 @@ class UsageHelperTest < ActionView::TestCase
     near = Nokogiri::HTML.fragment(usage(:memory, "MEM", "1.9 GB", limit: "2 GB", percent: 95))
     assert near.at_css(".usage.usage--near")
     assert_equal "95%", near.at_css(".usage__percent").text
-    assert_equal "1.9 GB / 2 GB", near.at_css(".usage__amount").text
+    assert_equal "1.9 GB", near.at_css(".usage__amount").text, "the limit is on the project's page and in the hover"
+    assert_equal "MEM 1.9 GB of 2 GB (95%)", near.at_css(".usage")["title"]
     assert_nil Nokogiri::HTML.fragment(usage(:memory, "MEM", "1.7 GB", limit: "2 GB", percent: 84)).at_css(".usage--near")
     assert_nil Nokogiri::HTML.fragment(usage(:disk, "DISK", "3.8 GB")).at_css(".usage--near")
   end

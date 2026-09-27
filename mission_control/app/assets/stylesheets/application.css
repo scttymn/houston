@@ -517,22 +517,21 @@ a.button--primary { color: var(--on-dark); }
 .flight__plain:hover { text-decoration: underline; }
 .board__foot { margin: 0; font-size: 13px; color: var(--muted); }
 /* An app's CPU, memory and disk as tick gauges (the design's UsageOptions):
-   label, ten ticks (one per 10% of the limit), percentage, amount. Amber from
-   85%. Without a limit the ticks are outlined and the percentage is a dash. */
+   label, ten ticks, percentage, amount used. Unlit ticks are outlines, so the
+   gauge fills only as far as the share used. Amber from 85%. Without a limit
+   no tick lights and the percentage is a faint dash. */
 .flight__resources { gap: 7px; }
 .usage { display: grid; grid-template-columns: 34px max-content 34px max-content; align-items: center; column-gap: 9px; white-space: nowrap; }
 .usage__label { font-size: 10px; letter-spacing: 0.12em; color: var(--muted); }
 .gauge { display: flex; gap: 2px; }
-.gauge__tick { width: 5px; height: 12px; background: #E2DBC9; }
-.gauge__tick.is-on { background: var(--ink); }
-.usage--near .gauge__tick.is-on { background: #B7791F; }
-.gauge--open .gauge__tick { background: none; border: 1px solid var(--rule); box-sizing: border-box; }
+.gauge__tick { width: 5px; height: 12px; box-sizing: border-box; border: 1px solid var(--rule); }
+.gauge__tick.is-on { background: var(--ink); border-color: var(--ink); }
+.usage--near .gauge__tick.is-on { background: #B7791F; border-color: #B7791F; }
 .usage__percent { font-size: 11px; color: var(--muted); text-align: right; }
 .gauge--open + .usage__percent { color: var(--faint); }
 .usage--near .usage__percent { color: #75480A; font-weight: 600; }
 .usage__amount { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink); }
 .usage--near .usage__amount { color: #75480A; }
-.usage__limit { color: var(--muted); }
 .usage__stale { color: #75480A !important; font-size: 12px !important; }
 
 

@@ -299,12 +299,12 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
         assert_select ".gauge[aria-label='5%'] .gauge__tick", 10
         assert_select ".gauge__tick.is-on", 1
         assert_select ".usage__percent", "5%"
-        assert_select ".usage__amount", "0.15 cores / 3 cores"
+        assert_select ".usage__amount", "0.15 cores", "usage only: the limit is on the project's page, and in the hover"
       end
       assert_select ".usage--memory[title='MEM 400 MB of 1.5 GB (26%)']" do
         assert_select ".gauge__tick.is-on", 3
         assert_select ".usage__percent", "26%"
-        assert_select ".usage__amount", "400 MB / 1.5 GB"
+        assert_select ".usage__amount", "400 MB"
       end
       assert_select ".usage--disk[title='DISK 1.4 GB · no limit set']" do
         assert_select ".gauge--open .gauge__tick", 10, "volumes have no limit: outlined ticks keep the column lined up"
