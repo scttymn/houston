@@ -87,12 +87,13 @@ class ProjectPagesTest < ActionDispatch::IntegrationTest
     assert_select ".project > .project-head + .facts-strip + .project-layout"
     links = css_select(".project-layout > nav.section-nav a").map { |a| [ a.text.strip, a["href"] ] }
     ids = css_select(".project-sections > section").map { |s| s["id"] }
-    # Alphabetical, to scan ("order navigation and sections alphabetically").
-    assert_equal %w[webhook history maintenance secrets snapshots], ids
+    # Alphabetical, to scan ("order navigation and sections alphabetically"),
+    # then the Danger zone, last (docs/plans/delete-project.md).
+    assert_equal %w[webhook history maintenance secrets snapshots danger], ids
     assert_equal ids.map { |id| "##{id}" }, links.map(&:last)
     # A click marks its link until the reader scrolls (the last sections can't reach the top).
     assert_select ".section-nav a[data-action='section-nav#choose']", links.size
-    assert_equal [ "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots" ], links.map(&:first)
+    assert_equal [ "Connect pushes", "Deploy history", "Maintenance page", "Secrets", "Snapshots", "Danger zone" ], links.map(&:first)
     assert_select "section#snapshots > .panel__head form[action='/projects/garage/backups'] button", "Create"
     assert_select "section#snapshots > turbo-frame#snapshots-list[loading=lazy]"
     assert_select "section#snapshots > .panel__head", /unas-nfs/i

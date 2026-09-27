@@ -280,6 +280,13 @@ p.panel__row { display: block; } /* text flows; only row containers stack */
 .button--primary.button--small { color: var(--on-dark); }
 .link-button { border: 0; padding: 0; background: none; color: var(--link); font: 13px var(--text); text-decoration: underline; cursor: pointer; }
 .link-button--danger { color: #A8291A; }
+/* Deleting a project (docs/plans/delete-project.md): the one red button. */
+.button--danger { background: var(--signal); border-color: var(--signal); color: #fff; }
+a.button--danger { color: #fff; }
+.danger { border-color: var(--signal); }
+.danger .panel__row { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.delete-list dd { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .danger .panel__row { flex-direction: column; align-items: flex-start; } }
 .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--ink); }
 .panel__head .panel__title { padding: 0; border: 0; font-size: 24px; }
 .panel__meta { display: flex; align-items: center; gap: 16px; font-size: 13px; }

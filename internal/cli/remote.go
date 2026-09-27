@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -126,6 +127,13 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 			line += ": " + m.Message
 		}
 		fmt.Fprintln(stdout, line)
+	}
+	if d := p.Deleting; d != nil {
+		if d.Status == "no_go" {
+			fmt.Fprintf(stdout, "deleting  NO-GO: %s; houston delete --confirm %s finishes it\n", d.Error, p.Name)
+		} else {
+			fmt.Fprintf(stdout, "deleting  %s (deletion %d)\n", cmp.Or(d.Step, "queued"), d.ID)
+		}
 	}
 	if s := p.Stats; s != nil {
 		fmt.Fprintf(stdout, "usage     %s\n", usageLine(s))

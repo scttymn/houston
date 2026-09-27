@@ -108,6 +108,16 @@ class ApiDeploysTest < ActionDispatch::IntegrationTest
     assert_operator deploy.heartbeat_at, :>, before
   end
 
+  # docs/plans/delete-project.md, Batch 7: nothing is pushed while the
+  # registry is garbage-collected.
+  test "no deploy starts while the registry is cleaned" do
+    Installation.current.update!(registry_cleanup_since: Time.current)
+    start
+    assert_response :conflict
+    assert_match "Houston is cleaning its registry; try again in a minute", json["error"]
+    assert_equal 0, Deploy.count
+  end
+
   test "a finished deploy doesn't change" do
     id, token = started
     report(id, token, { status: "go", log: "done\n" })

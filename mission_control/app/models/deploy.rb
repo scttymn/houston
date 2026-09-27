@@ -18,6 +18,11 @@ class Deploy < ApplicationRecord
 
   class RestoreRefused < StandardError; end
 
+  # Houston's registry is being garbage-collected: nothing may push meanwhile.
+  class RegistryBusy < StandardError
+    def initialize = super("Houston is cleaning its registry; try again in a minute")
+  end
+
   STATUSES = %w[queued in_flight go no_go].freeze
   # houston deploy reports at least every 30 s; after this long without a
   # word, the next deploy may take over.
@@ -85,6 +90,8 @@ class Deploy < ApplicationRecord
   def self.start!(project, sha:, ref:)
     token = SecureRandom.urlsafe_base64(32)
     transaction do
+      project.refuse_while_deleting!
+      raise RegistryBusy if RegistryCleanup.running?
       took_over = nil
       if (current = project.deploys.in_flight.first)
         raise Busy, current if current.heartbeat_at > STALE_AFTER.ago
@@ -101,6 +108,7 @@ class Deploy < ApplicationRecord
   # the newest. Runs in the caller's transaction when there is one.
   def self.queue!(project, sha:, ref:)
     transaction do
+      project.refuse_while_deleting!
       if (queued = project.deploys.find_by(status: "queued"))
         queued.update!(sha:, ref:, log: queued.log + "A newer push switched to #{sha.first(7)} (#{ref}).\n")
         queued
@@ -117,6 +125,7 @@ class Deploy < ApplicationRecord
   # the repo included.
   def self.request_restore!(project, snapshot:, location:, confirm:)
     raise RestoreRefused, "type #{project.name} to confirm" unless confirm == project.name
+    project.refuse_while_deleting!(RestoreRefused)
     raise RestoreRefused, "link the repo first (houston link): a restore fetches the snapshot's commit from it" if project.repo_url.blank?
     if (busy = project.deploys.where(status: %w[queued in_flight]).order(:number).first)
       raise RestoreRefused, "#{busy.restore? ? "restore" : "deploy"} ##{busy.number} is #{busy.status.humanize(capitalize: false)}; wait for ##{busy.number}"
@@ -156,9 +165,10 @@ class Deploy < ApplicationRecord
   # None while the server updates: the installer recreates the runners.
   def self.claim_next!(runner:)
     transaction do
-      return nil if ServerUpdate.running?
+      return nil if ServerUpdate.running? || RegistryCleanup.running?
       took_over = in_flight.where(heartbeat_at: ...STALE_AFTER.ago).to_h { |stale| [ stale.project_id, stale.abandon! ] }
-      candidate = where(status: "queued").where.not(project_id: in_flight.select(:project_id)).order(:created_at, :id).first
+      candidate = where(status: "queued").where.not(project_id: in_flight.select(:project_id))
+                                         .where.not(project_id: ProjectDeletion.holding.where.not(project_id: nil).select(:project_id)).order(:created_at, :id).first
       deploy, token = candidate && claim!(candidate, runner:)
       deploy && [ deploy, token, took_over[deploy.project_id] ]
     end

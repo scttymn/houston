@@ -7,7 +7,7 @@ class TunnelRoutes
 
   def self.rules(base_domain)
     installation = Installation.new(base_domain:)
-    maintenance = Project.where.not(maintenance_since: nil).order(:name).flat_map { |p| p.hostnames(installation) }.uniq
+    maintenance = Project.where.not(maintenance_since: nil).where.not(id: ProjectDeletion.removing.select(:project_id)).order(:name).flat_map { |p| p.hostnames(installation) }.uniq
     [
       { hostname: "admin.#{base_domain}", service: mission_control },
       { hostname: "hooks.#{base_domain}", path: "^/[a-z0-9-]+$", service: mission_control },

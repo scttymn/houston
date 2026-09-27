@@ -77,4 +77,14 @@ class SnapshotsTest < ActiveSupport::TestCase
     listed = use_fake_docker(fake) { Snapshots.across(@project) }
     assert_equal [ [ "bbbbbbbb", "b2-offsite" ], [ "aaaaaaaa", "unas-nfs" ] ], listed.map { |s| [ s.short_id, s.location.name ] }
   end
+
+  # A project deleted with its backups kept, then added again under its
+  # name: its final snapshot's location is read, wherever it is.
+  test "a deleted project's snapshots" do
+    offsite = StorageLocation.create!(name: "b2-offsite", kind: "b2", settings: { "bucket" => "b" }, restic_password: "offsite-pw", verified_at: Time.current, acknowledged_at: Time.current)
+    ProjectDeletion.create!(name: "equip", by: "admin", status: "go", snapshot_id: "f" * 64, snapshot_location: offsite, heartbeat_at: Time.current)
+    ProjectDeletion.create!(name: "equip-x", by: "admin", status: "go", snapshot_id: "e" * 64,
+                            snapshot_location: StorageLocation.create!(name: "s3-other", kind: "s3", settings: {}, restic_password: "p", acknowledged_at: Time.current), heartbeat_at: Time.current)
+    assert_equal %w[b2-offsite unas-nfs], Snapshots.locations_for(@project).map(&:name)
+  end
 end

@@ -63,7 +63,8 @@ Rails.application.routes.draw do
         post :check
       end
       resources :storage, only: %i[ index update ], param: :name
-      resources :projects, only: %i[ index show ], param: :name do
+      resources :deletions, only: :show
+      resources :projects, only: %i[ index show destroy ], param: :name do
         resources :deploys, only: %i[ index show create ], param: :number
         resources :snapshots, only: :index
         resources :backups, only: %i[ create show ]
@@ -89,6 +90,9 @@ Rails.application.routes.draw do
   post "link", to: "project_links#create"
   delete "link", to: "project_links#destroy"
 
+  # A deletion outlives its project, so it's addressed by its own id.
+  resources :deletions, only: :show
+
   resources :projects, only: :show, param: :name do
     member do
       post :check
@@ -100,6 +104,7 @@ Rails.application.routes.draw do
     resources :volumes, only: :update, param: :name, controller: "project_volumes"
     resource :backup_target, only: :update, controller: "project_backup_targets"
     resources :restores, only: %i[ new create ], controller: "project_restores"
+    resource :deletion, only: %i[ new create ], controller: "project_deletions"
     resource :maintenance, only: :update, controller: "project_maintenance" do
       get :preview
     end

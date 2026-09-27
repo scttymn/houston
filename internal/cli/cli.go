@@ -374,6 +374,23 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	restore.Flags().StringVar(&restoreLocation, "location", "", "where the snapshot is (default: the project's backup location)")
 	restore.Flags().BoolVar(&restoreFollow, "follow", false, "follow it to its result; exit 0 on GO, 1 on NO-GO")
 	root.AddCommand(restore)
+
+	var deleteConfirm string
+	var deleteBackups, deleteFollow bool
+	deleteCmd := &cobra.Command{
+		Use:   "delete --confirm NAME",
+		Short: "Delete a project from the server: its containers, data, domains and settings (backups kept, with a final snapshot)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			code = runDelete(file, projectFlag, deleteConfirm, deleteBackups, deleteFollow, stdout, stderr)
+			return nil
+		},
+	}
+	deleteCmd.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	deleteCmd.Flags().StringVar(&deleteConfirm, "confirm", "", "the project's name: everything of it on the server goes")
+	deleteCmd.Flags().BoolVar(&deleteBackups, "delete-backups", false, "delete its backups too, and take no final snapshot (can't be undone)")
+	deleteCmd.Flags().BoolVar(&deleteFollow, "follow", false, "follow it to its result; exit 0 on GO, 1 on NO-GO")
+	root.AddCommand(deleteCmd)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

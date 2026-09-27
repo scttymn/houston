@@ -457,6 +457,9 @@ services:
       # Settings › Security recreates Mission Control with the runner image
       # (it has docker compose).
       HOUSTON_RUNNER_IMAGE: $RUNNER_IMAGE
+      # Deleting a project removes Kamal's files for it here (its env files
+      # hold secrets); the path is on the host, reached through a container.
+      HOUSTON_KAMAL_HOME: $houston_home/.kamal
       # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
       RAILS_MAX_THREADS: "8"
     ports:
@@ -487,6 +490,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5000:5000"
+    environment:
+      # Deleting a project deletes its images here, and garbage-collects them.
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
     volumes:
       - registry-data:/var/lib/registry
 

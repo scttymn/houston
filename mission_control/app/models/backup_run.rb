@@ -11,10 +11,12 @@ class BackupRun < ApplicationRecord
   NOTHING_DEPLOYED = "nothing deployed yet"
 
   STATUSES = %w[queued running go no_go skipped].freeze
-  KINDS = %w[auto deploy restore].freeze
+  # final: a deleted project's last snapshot (docs/plans/delete-project.md),
+  # which retention never forgets.
+  KINDS = %w[auto deploy restore final].freeze
   # backup: a snapshot; restore: a restore deploy's data put back from one.
   OPERATIONS = %w[backup restore].freeze
-  REASONS = %w[schedule manual deploy restore].freeze
+  REASONS = %w[schedule manual deploy restore delete].freeze
   # BackupJob beats every 15 s; after this long without a word, the run is
   # abandoned and the project's next backup may start.
   STALE_AFTER = 2.minutes
@@ -39,6 +41,7 @@ class BackupRun < ApplicationRecord
   # deploy_number: a pre-deploy snapshot (kind deploy), one per deploy, or,
   # with reason restore, a restore's safety snapshot, one per restore.
   def self.request!(project, reason: "manual", scheduled_for: nil, deploy_number: nil)
+    project.refuse_while_deleting!(Refused)
     raise Refused, NOTHING_DEPLOYED unless project.running_deploy
     location = project.backup_location
     raise Refused, "no backup storage yet (finish setup's storage step)" unless location

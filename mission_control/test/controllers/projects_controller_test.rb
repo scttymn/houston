@@ -462,4 +462,26 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
       assert_no_match(/MAINTENANCE/, row.text)
     end
   end
+
+  test "a project being deleted" do
+    stub_tunnel
+    equip = make_project("equip")
+    make_project("other")
+    ProjectDeletion.create!(project: equip, name: "equip", by: "admin@example.com", status: "running", heartbeat_at: Time.current)
+    get root_path
+    assert_select "[data-project='equip']", /DELETING/
+    assert_select "[data-card='equip']", /DELETING/
+    assert_select "[data-project='other']" do |row|
+      assert_no_match(/DELETING/, row.text)
+    end
+  end
+
+  test "a deletion refreshes the board" do
+    equip = make_project("equip")
+    deletion = nil
+    assert_equal 1, capture_turbo_stream_broadcasts(FlightBoard::STREAM) {
+      deletion = ProjectDeletion.create!(project: equip, name: "equip", by: "admin@example.com", heartbeat_at: Time.current)
+    }.count { |s| s["action"] == "refresh" }
+    assert_equal 1, capture_turbo_stream_broadcasts(FlightBoard::STREAM) { deletion.update!(status: "running") }.count { |s| s["action"] == "refresh" }
+  end
 end

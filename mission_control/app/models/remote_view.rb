@@ -9,6 +9,7 @@ module RemoteView
     view = {
       name: project.name, status: project.status.to_s, running_sha: project.running_deploy&.sha,
       host: project.host, domains: project.domain_states, last_deploy: last && deploy(last), maintenance: maintenance(project),
+      deleting: (deletion = project.deletion) && deletion(deletion).except(:log),
       stats: AppStats.for(project)&.as_json
     }
     return view unless detail
@@ -21,6 +22,13 @@ module RemoteView
       backup_schedule: project.backup_schedule, time_zone: Installation.current.time_zone,
       secrets: project.variables.map { |v| { name: v["name"], required: v["required"] == true, set: have.include?(v["name"]) } }
     )
+  end
+
+  # A deletion, with its log: it outlives the project.
+  def self.deletion(deletion)
+    { id: deletion.id, name: deletion.name, status: deletion.status, step: deletion.step, error: deletion.error, delete_backups: deletion.delete_backups,
+      snapshot_id: deletion.snapshot_id, snapshot_location: deletion.snapshot_location&.name, repo_url: deletion.repo_url, by: deletion.by,
+      queued_at: deletion.created_at, started_at: deletion.started_at, finished_at: deletion.finished_at, log: deletion.log.to_s }
   end
 
   def self.maintenance(project)

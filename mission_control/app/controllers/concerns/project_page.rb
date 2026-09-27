@@ -19,5 +19,7 @@ module ProjectPage
       @backup = project.backup_runs.order(:id).last
       @last_good_backup = project.backup_runs.where(status: "go").order(:id).last
       @live_locations = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?)
+      @deletion = project.deletions.order(:id).last
+      @deletion = nil if @deletion&.cancelled? && @deletion.finished_at < 1.day.ago
     end
 end

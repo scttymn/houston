@@ -22,6 +22,7 @@ class Api::ProjectsController < Api::BaseController
     return if payload.key?("claimed_deploy") && !claim_matches?(payload)
 
     if (existing = Project.find_by(name: payload["name"]))
+      return render json: { error: "#{existing.name} is being deleted" }, status: :conflict if existing.deleting?
       # A restore owns the project's config until it's done: its safety
       # snapshot and its cleanup read it. One gone silent doesn't: a hand
       # houston deploy (which syncs first) is how it's taken over.

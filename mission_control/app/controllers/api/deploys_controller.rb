@@ -9,6 +9,8 @@ class Api::DeploysController < Api::BaseController
     render json: { id: deploy.id, number: deploy.number, token:, took_over: }, status: :created
   rescue Deploy::Busy => e
     render json: { error: e.message, number: e.deploy.number }, status: :conflict
+  rescue Deploy::RegistryBusy => e
+    render json: { error: e.message }, status: :conflict
   rescue ActiveRecord::RecordNotUnique
     render json: { error: "another deploy of #{project.name} just started" }, status: :conflict
   rescue ActiveRecord::RecordInvalid => e

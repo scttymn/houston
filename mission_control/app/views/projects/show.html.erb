@@ -41,6 +41,23 @@
       <%= button_to "Turn it off", project_maintenance_path(@project.name), method: :patch, params: { on: "0" }, class: "button button--small" %>
     </div>
   <% end %>
+  <% if @deletion&.active? %>
+    <div class="notice notice--hold">
+      <span class="mono">DELETING</span>
+      <span class="notice__text"><%= @project.name %> is being deleted<%= " (#{ProjectDeletion::STEP_WORDS[@deletion.step].downcase_first})" if @deletion.step %>. <%= link_to "Follow it", deletion_path(@deletion) %></span>
+    </div>
+  <% elsif @deletion&.status == "no_go" && @deletion.removing? %>
+    <div class="notice notice--nogo">
+      <span class="mono">NO-GO</span>
+      <span class="notice__text">Deleting <%= @project.name %> <%= @deletion.error %>. It serves nothing new until it's finished. <%= link_to "The log", deletion_path(@deletion) %></span>
+      <%= button_to "Finish deleting", project_deletion_path(@project.name), params: { confirm: @project.name }, class: "button button--small" %>
+    </div>
+  <% elsif @deletion&.cancelled? %>
+    <div class="notice notice--nogo">
+      <span class="mono">NO-GO</span>
+      <span class="notice__text">Deleting <%= @project.name %> was <%= @deletion.error %>. Nothing was removed. <%= link_to "The log", deletion_path(@deletion) %></span>
+    </div>
+  <% end %>
   <% if notice %>
     <div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div>
   <% end %>
@@ -75,6 +92,8 @@
   <% sections << [ "Maintenance page", "maintenance" ] unless @project.maintenance? %>
   <% sections += [ [ "Secrets", "secrets" ], [ "Snapshots", "snapshots" ] ] %>
   <% sections << [ "Volumes", "volumes" ] if @project.volumes.any? %>
+  <%# Last, not alphabetical: nobody should land on it by accident. %>
+  <% sections << [ "Danger zone", "danger" ] %>
   <div class="project-layout">
     <%= render "shared/section_nav", label: "Project sections", items: sections %>
     <div class="project-sections">
@@ -244,6 +263,20 @@
         <p class="panel__row panel__row--muted">Chosen before Houston makes the volume, at its first deploy. Local disk is the server's own disk, and right for databases. Postgres data always stays on local disk.</p>
       </section>
     <% end %>
+
+      <section class="panel danger" id="danger">
+        <div class="panel__head"><h2 class="disp panel__title">Danger zone</h2></div>
+        <div class="panel__row">
+          <span>
+            <strong>Delete this project.</strong> Its containers, data, domains and settings go. A final snapshot is taken first and its backups are kept, unless you choose to delete them too.
+          </span>
+          <% if @project.deleting? %>
+            <span class="muted">Being deleted</span>
+          <% else %>
+            <%= link_to "Delete this project", new_project_deletion_path(@project.name), class: "button button--danger button--small" %>
+          <% end %>
+        </div>
+      </section>
   </div>
   </div>
 </main>

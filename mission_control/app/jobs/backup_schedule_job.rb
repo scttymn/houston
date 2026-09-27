@@ -10,6 +10,7 @@ class BackupScheduleJob < ApplicationJob
     Project.find_each do |project|
       next if project.volumes.empty? && project.databases.empty?
       next unless project.running_deploy && project.backup_location
+      next if project.deleting?
 
       schedule = BackupSchedule.new(project, zone)
       BackupRun.request!(project, reason: "schedule", scheduled_for: schedule.today(now)) if schedule.due?(now)

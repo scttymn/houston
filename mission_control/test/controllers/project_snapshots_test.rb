@@ -35,6 +35,20 @@ class ProjectSnapshotsTest < ActionDispatch::IntegrationTest
     assert_equal 1, fake.calls.size, "one listing serves both tabs"
   end
 
+  # A deleted project's final snapshot (docs/plans/delete-project.md), seen
+  # once a project of its name is added again: on the Pre-deploy tab, which
+  # keeps the snapshots taken before a change, and never counted against it.
+  test "a deleted project's final snapshot" do
+    sign_in_as users(:one)
+    fake = listing(snapshot_json(id: "33333333", time: "2026-09-22T12:31:00Z", kind: "deploy", reason: "deploy", deploy: 7),
+                   snapshot_json(id: "44444444", time: "2026-09-23T09:00:00Z", kind: "final", reason: "delete", sha: "e1e7ed0" + "0" * 33))
+    use_fake_docker(fake) { get project_snapshots_path("equip", kind: "deploy") }
+    assert_select "[data-snapshot]", 2
+    assert_select "[data-snapshot='44444444']", /before it was deleted.*e1e7ed0/m
+    assert_select "[data-snapshot='44444444'] a", "Restore"
+    assert_select "#snapshots-list", %r{kept 1 / 10}
+  end
+
   # (A project always has storage once setup is finished: its gate needs a default.)
   test "tabs by kind; the counts are in each tab's note" do
     sign_in_as users(:one)

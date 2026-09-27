@@ -116,6 +116,8 @@ class Backup < DataRun
     # default (host and paths) would keep every snapshot whose paths differ.
     # A failure is a warning; the new snapshot is safe and the next run tries again.
     def forget
+      return if @run.kind == "final"
+
       keep = @run.kind == "deploy" ? [ "--keep-last", @project.keep_deploy.to_s ] : [ "--keep-daily", @project.keep_auto.to_s ]
       ran = docker(*@location.restic_args("forget", "--retry-lock", "10m", "--host", "houston", "--tag", "project:#{@project.name},kind:#{@run.kind}", "--group-by", "", "--json", *keep),
                    env: @location.restic_env)

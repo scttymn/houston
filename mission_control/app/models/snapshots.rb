@@ -20,9 +20,12 @@ class Snapshots
     list(project, location).tap { |snapshots| Rails.cache.write(key, snapshots, expires_in: CACHE_FOR) }
   end
 
-  # Every location the project's backups used, and its current target.
+  # Every location the project's backups used, the ones holding the final
+  # snapshots of deleted projects of the same name, and its current target.
   def self.locations_for(project)
-    used = StorageLocation.where(id: project.backup_runs.where(operation: "backup").select(:location_id)).where.not(acknowledged_at: nil).to_a
+    used = StorageLocation.where(id: project.backup_runs.where(operation: "backup").select(:location_id))
+                          .or(StorageLocation.where(id: ProjectDeletion.where(name: project.name).select(:snapshot_location_id)))
+                          .where.not(acknowledged_at: nil).to_a
     (used + [ project.backup_location ].compact).uniq.sort_by(&:name)
   end
 

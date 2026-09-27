@@ -235,6 +235,28 @@ houston restore <snapshot> --confirm app --follow
 
   A failed restore leaves the running version untouched.
 
+## Deleting a project
+
+On the project page, **Danger zone › Delete this project** asks you to type the project's name, as GitHub does for a repo. Or:
+
+```sh
+houston delete --confirm app --follow --project app
+```
+
+- **Before anything is removed,** Houston checks Docker, Cloudflare and backup storage, then takes a final snapshot. If any of that fails, the deletion is cancelled and the app keeps serving, untouched.
+- **Then everything Houston made for it goes:**
+  - its containers and kamal-proxy's route
+  - its volumes, and their folders on NFS or a local path
+  - DNS records commented `managed-by:houston project:app` (nothing else)
+  - its maintenance routes
+  - its images, on the server and in Houston's registry. The registry is then garbage-collected: once no deploy is running, and holding new ones for those seconds, since a push during it could lose a layer.
+  - Kamal's files for it (they hold its secret values)
+  - the runners' checkouts
+  - its settings, secrets and history in Mission Control
+- **Backups are kept,** with the final snapshot. Add a project with the same name again, and `houston snapshots` lists them for `houston restore`. `--delete-backups` (a checkbox on the page) deletes them too, and takes no final snapshot. That can't be undone.
+- **If it stops partway,** the project stays deleting and serves nothing new. Running the same command again, or pressing **Finish deleting**, finishes it.
+- **Houston can't remove the deploy key and the webhook** on your git host; remove them there.
+
 ## Cloudflare
 
 **Settings › Cloudflare** shows the tunnel and each of its connections (the data centre, cloudflared's version, since when), the tunnel's live routes (marked DRIFT where they differ from Houston's), and Houston's DNS records in every zone, each with its project and whether it points at this server or another one. From there you can replace the API token (checked first; the old one stays if anything fails) and **Repair**, which pushes the routes and re-points Houston's own records.

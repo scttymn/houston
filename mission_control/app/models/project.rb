@@ -14,6 +14,8 @@ class Project < ApplicationRecord
   has_many :deploys, dependent: :delete_all
   has_many :backup_runs, dependent: :delete_all
   has_many :project_volumes, dependent: :delete_all
+  # A deletion outlives the row: its name, repo and final snapshot stay.
+  has_many :deletions, class_name: "ProjectDeletion", dependent: :nullify
 
   encrypts :deploy_key_private, :webhook_secret
 
@@ -76,6 +78,16 @@ class Project < ApplicationRecord
   def hostnames(installation = Installation.current) = [ host(installation) ] + domains
 
   def maintenance? = maintenance_since.present?
+
+  # Being deleted (docs/plans/delete-project.md): nothing new starts for it.
+  def deleting? = deletions.holding.exists?
+
+  # The deletion that holds it, or nil.
+  def deletion = deletions.holding.order(:id).last
+
+  def refuse_while_deleting!(error = Refused)
+    raise error, "#{name} is being deleted" if deleting?
+  end
 
   belongs_to :chosen_backup_location, class_name: "StorageLocation", foreign_key: :backup_location_id, optional: true
 

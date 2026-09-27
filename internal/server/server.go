@@ -217,6 +217,8 @@ type Project struct {
 	Domains    map[string]DomainState `json:"domains"`
 	LastDeploy *Deploy                `json:"last_deploy"`
 	Stats      *Stats                 `json:"stats"`
+	// A deletion under way, or one stopped partway (docs/plans/delete-project.md).
+	Deleting *Deletion `json:"deleting"`
 	// Only for a single project:
 	DeployRule struct {
 		On     string `json:"on"`
@@ -506,6 +508,43 @@ func (cl *Client) Restore(ctx context.Context, project, snapshot, location, conf
 	}
 	var d Deploy
 	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/restores", body, &d)
+}
+
+// Deletion is a project's deletion (docs/plans/delete-project.md). It
+// outlives the project, so it's read by its own id.
+type Deletion struct {
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	Status           string `json:"status"` // queued, running, go, no_go
+	Step             string `json:"step"`
+	Error            string `json:"error"`
+	DeleteBackups    bool   `json:"delete_backups"`
+	SnapshotID       string `json:"snapshot_id"`
+	SnapshotLocation string `json:"snapshot_location"`
+	RepoURL          string `json:"repo_url"`
+}
+
+// Delete queues the deletion of project (or resumes one that stopped
+// partway); confirm must be the project's name.
+func (cl *Client) Delete(ctx context.Context, project, confirm string, deleteBackups bool) (Deletion, error) {
+	var body struct {
+		Deletion Deletion `json:"deletion"`
+	}
+	status, raw, err := cl.do(ctx, http.MethodDelete, "/api/v1/projects/"+url.PathEscape(project), map[string]any{"confirm": confirm, "delete_backups": deleteBackups})
+	if err != nil {
+		return Deletion{}, err
+	}
+	if status < 200 || status > 299 {
+		return Deletion{}, fmt.Errorf("%s", message(raw))
+	}
+	err = json.Unmarshal(raw, &body)
+	return body.Deletion, err
+}
+
+// Deletion reads a deletion by its id.
+func (cl *Client) Deletion(ctx context.Context, id int) (Deletion, error) {
+	var d Deletion
+	return d, cl.getJSON(ctx, "/api/v1/deletions/"+fmt.Sprint(id), &d)
 }
 
 func (cl *Client) DeployNow(ctx context.Context, project string) (Deploy, error) {

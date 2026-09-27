@@ -501,6 +501,22 @@ class ApiSyncTest < ActionDispatch::IntegrationTest
     assert_equal [ 3, 3 ], [ json["generation"], project.reload.data_generation ]
   end
 
+  # A project being deleted isn't synced back into being (a hand houston
+  # deploy syncs first); once it's gone, a sync creates it anew.
+  test "a sync waits for a deletion" do
+    optional = [ { name: "RAILS_MASTER_KEY", required: false } ]
+    sync(equip_payload(variables: optional))
+    project = Project.find_by!(name: "equip")
+    ProjectDeletion.request!(project, confirm: "equip", delete_backups: false, by: "admin@example.com")
+    sync(equip_payload(variables: optional, volumes: [ { name: "other", path: "/other" } ]))
+    assert_response :conflict
+    assert_match "equip is being deleted", json["error"]
+    assert_equal [], project.reload.volumes
+
+    link = ProjectSync.new(equip_payload(variables: optional).deep_stringify_keys)
+    assert_match "equip is being deleted", assert_raises(ProjectSync::Refused) { link.save! }.message
+  end
+
   # A restore queued or in flight owns the project's config until it's done:
   # a hand houston deploy's sync would change what its snapshot and cleanup read.
   test "a sync waits for a restore" do

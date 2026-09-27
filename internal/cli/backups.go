@@ -42,6 +42,8 @@ func snapshotNote(s server.Snapshot) string {
 		return "daily"
 	case s.Reason == "restore":
 		return "before a restore"
+	case s.Reason == "delete":
+		return "before it was deleted"
 	case s.Deploy > 0:
 		return "before deploy #" + strconv.Itoa(s.Deploy)
 	}

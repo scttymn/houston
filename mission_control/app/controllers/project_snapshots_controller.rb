@@ -14,7 +14,8 @@ class ProjectSnapshotsController < ApplicationController
 
     all = Snapshots.for(@project, @location)
     @counts = all.group_by(&:kind).transform_values(&:size)
-    @snapshots = all.select { |s| s.kind == @kind }
+    # A deleted project's final snapshot sits with the ones taken before a change.
+    @snapshots = all.select { |s| s.kind == @kind || (@kind == "deploy" && s.kind == "final") }
   rescue Snapshots::Unavailable => e
     @error = e.message
   end

@@ -10,7 +10,7 @@ class ChangeCheck
   def run
     # A restore queued or in flight: nothing queues, and seen_refs stay as
     # they were, so the check after it queues what was pushed meanwhile.
-    return [] if restoring?
+    return [] if restoring? || @project.deleting?
 
     result = GitRemote.refs(@project)
     unless result.ok
@@ -23,6 +23,7 @@ class ChangeCheck
       # Another check (a webhook, the poll) may have queued since this one
       # loaded the project: compare with what's seen now, inside the write.
       @project.reload
+      return [] if @project.deleting?
       queued = wanted.reject { |ref, sha| @project.seen_refs[ref] == sha }.sort.map { |ref, sha| Deploy.queue!(@project, sha:, ref:) }
       @project.update!(seen_refs: wanted, last_checked_at: Time.current, last_check_error: nil)
       queued
@@ -36,6 +37,7 @@ class ChangeCheck
   # The branch head, or the highest tag by version order.
   def queue_head!
     raise Failed, "a restore of #{@project.name} is queued or in flight; deploy after it" if restoring?
+    @project.refuse_while_deleting!(Failed)
 
     result = GitRemote.refs(@project)
     raise Failed, result.error unless result.ok

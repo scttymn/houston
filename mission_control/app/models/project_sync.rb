@@ -38,6 +38,7 @@ class ProjectSync
   def save!(link: nil)
     Project.transaction do
       @project = Project.find_or_initialize_by(name: @payload["name"])
+      @project.refuse_while_deleting!(Refused) if @project.persisted?
       @dropped_domains = @project.domains.to_a - @payload["domains"].to_a
       @project.update!(app_service: @payload["app_service"], services: @payload["services"], domains: @payload["domains"],
                        variables: @payload["variables"].map { |v| { "name" => v["name"], "required" => v["required"] == true } },

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_26_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_000000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -94,10 +94,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_010000) do
     t.datetime "latest_release_checked_at"
     t.string "latest_release_url"
     t.boolean "port_open", default: true, null: false
+    t.datetime "registry_cleanup_since"
     t.string "time_zone", default: "UTC", null: false
     t.string "tunnel_id"
     t.text "tunnel_token"
     t.datetime "updated_at", null: false
+  end
+
+  create_table "project_deletions", force: :cascade do |t|
+    t.string "by", null: false
+    t.datetime "created_at", null: false
+    t.boolean "delete_backups", default: false, null: false
+    t.string "error", limit: 4000
+    t.datetime "finished_at"
+    t.datetime "heartbeat_at", null: false
+    t.text "log"
+    t.string "name", null: false
+    t.integer "project_id"
+    t.datetime "removing_at"
+    t.string "repo_url"
+    t.string "snapshot_id"
+    t.integer "snapshot_location_id"
+    t.datetime "started_at"
+    t.string "status", default: "queued", null: false
+    t.string "step"
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_project_deletions_on_name"
+    t.index ["project_id"], name: "index_project_deletions_on_project_id"
+    t.index ["project_id"], name: "index_project_deletions_one_active", unique: true, where: "status IN ('queued', 'running')"
+    t.index ["snapshot_location_id"], name: "index_project_deletions_on_snapshot_location_id"
   end
 
   create_table "project_hosts", force: :cascade do |t|
@@ -249,6 +274,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_26_010000) do
   add_foreign_key "backup_runs", "storage_locations", column: "location_id"
   add_foreign_key "deploys", "projects", on_delete: :cascade
   add_foreign_key "deploys", "storage_locations", column: "source_location_id"
+  add_foreign_key "project_deletions", "projects", on_delete: :nullify
+  add_foreign_key "project_deletions", "storage_locations", column: "snapshot_location_id"
   add_foreign_key "project_hosts", "projects", on_delete: :cascade
   add_foreign_key "project_volumes", "projects"
   add_foreign_key "project_volumes", "storage_locations", column: "location_id"
