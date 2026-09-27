@@ -42,6 +42,8 @@
 | 3 | A card per project: header links (name and chevron), pill, services; DOMAINS, RUNNING SHA, LAST DEPLOY, LAST BACKUP, RESOURCES with their values; not running: a dash | `test "each project has a phone card"` | Contract |
 | 4 | Add has a short label for phones | same test | Contract |
 | 5 | Visual check at 390 and 375 px against the artboards, and 1440 px unchanged; the menu opens and closes (button, ×, Escape) | recorded here | Parity |
+| 6 | The card's domains are in its header, under the name, as links of their own; the header still opens the project everywhere else; no DOMAINS section in the body | `test "each project has a card for tablets and phones"` | Contract |
+| 7 | The eyebrow names the base domain and the version running | `test "the flight board's eyebrow names the base domain and the version"`, `test "the flight board's version, and news of a newer one"` | Contract |
 
 ## As built (all three artboards)
 - **Breakpoints:**
@@ -62,7 +64,7 @@
   - "Add", the 2 × 2 stats, and the same card, stacked: DOMAINS, a two-column grid, then RESOURCES under a rule.
   - The menu is a full-screen panel: the design's rows, SYSTEMS (tunnel, registry, version) and Sign out.
   - × or Escape closes it. Opening it focuses ×, and closing it focuses the menu button.
-- **The eyebrow** names the base domain only, as all three artboards do. The version is in Settings › Releases and the phone menu. The update pills stay beside it (they only appear with news).
+- **The eyebrow** names the base domain and the version (`FLIGHT BOARD · SVNMNS.COM · V0.4.17`), with the update pills beside it (they only appear with news). It named the base domain only, as the artboards do, until row 7 put the version back.
 - **Shared cells:** domains, running SHA, last deploy, last backup and resources are partials used by the table and the cards. The services line is `services_words`.
 
 ## Evidence
@@ -71,3 +73,20 @@
   - No overflow at 1440, 1024, 768, 390 and 375 px, on the board, Settings and a project page.
   - The menu opens, closes (× and Escape), and moves focus as above.
   - The desktop hides the menu button and the strip.
+
+## Revised: domains in the card header, and the version back (rows 6 and 7)
+- **Direction:** "in card layout, domains should probably be in the card header since they collide with other content. Also, version is not showing on flight board anymore (it should)."
+- **Evidence:**
+  - At about 664 px wide, estherpictures' card ran its domains (`estherpictures.svnmns.com`, `www.estherpictures.com`) under RUNNING SHA and LAST DEPLOY. The tablet body's first column is `minmax(0, 1fr)`, and a hostname with its arrow is wider than what's left of it beside 190 px and 222 px.
+  - `d75cd31` dropped the version from the eyebrow to match the artboards. The README still says "The flight board's header and `houston status` say which version is running".
+- **As built:**
+  - The card header is a `div`, not a link, since a link can't hold the domains' own links. The name is the project's link, and its `::after` covers the header, so the whole header still opens the project. The domains row sits above it (`z-index`), and only the hostnames take clicks (`pointer-events`), so a click between them still opens the project.
+  - The domains take a line of their own under the name: wrapping on tablets, one per row on phones. A long hostname wraps rather than overflowing.
+  - The tablet body is RUNNING SHA, LAST DEPLOY and LAST BACKUP (a grid of at least 150 px columns: two or three across) beside RESOURCES. The phone body is unchanged except that DOMAINS is gone.
+- **Tests first:** the card test failed on the header still being a link, and both version tests on the eyebrow missing `V0.1.0` / `V0.4.2`. All 4 mutations were caught: no version; the domains back in the body; no domains in the card; the name not a link.
+- **Visual check:** the board rendered from a throwaway test with estherpictures (three domains, no limits), valleybuiltcrossfit and equip, served with the real stylesheet and fonts, measured with Playwright (Chromium 1243):
+  - At 1440, 768, 664, 390 and 375 px: the page is exactly as wide as the window, nothing is past the edge, and no hostname overlaps a cell or the resources.
+  - The eyebrow reads `FLIGHT BOARD · SVNMNS.COM · V0.4.17` at 1440 and 375 px.
+  - At 768 px, the three domains fit on one line under the name. At 664 px they wrap to two lines, and at 375 px they stack.
+  - Clicks: a hostname opens its site; the pill, the chevron, and the space right of the domains open the project. The last one found a gap (the domains row caught the click), fixed with `pointer-events`.
+  - The outlined ticks in the gauges are the design's "no limit", not missing glyphs.

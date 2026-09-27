@@ -202,13 +202,13 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
 
   # The design's Main: pills, services with images, host rows, and LAST BACKUP.
   # docs/plans/live-flight-board.md: the board redraws itself on changes.
-  # The design (desktop, tablet, phone) names the base domain only; the version
-  # is in Settings › Releases and the phone menu.
-  test "the flight board's eyebrow names the base domain" do
+  # The eyebrow names the base domain and the version running, as the README
+  # says it does (docs/plans/mobile-board.md, row 7).
+  test "the flight board's eyebrow names the base domain and the version" do
     stub_tunnel
     ENV["HOUSTON_VERSION"] = "v0.1.0"
     get root_path
-    assert_select ".board__title > .board__version > .eyebrow", "FLIGHT BOARD · SVNMNS.COM"
+    assert_select ".board__title > .board__version > .eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.1.0"
   ensure
     ENV.delete("HOUSTON_VERSION")
   end
@@ -221,7 +221,7 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
     Installation.current.update!(latest_release: "v0.4.2")
     get root_path
     assert_select ".board__version" do
-      assert_select "span.eyebrow", "FLIGHT BOARD · SVNMNS.COM"
+      assert_select "span.eyebrow", "FLIGHT BOARD · SVNMNS.COM · V0.4.2"
       assert_select "a", 0, "nothing newer: no pill, and the version isn't a link"
     end
 
@@ -367,15 +367,21 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
       assert_select ".add__short", "Add"
     end
     assert_select ".flight-cards article.flight-card[data-card=equip]" do
-      assert_select "a.flight-card__head[href='#{project_path("equip")}']" do
-        assert_select ".flight-card__name", "equip"
+      # The domains are in the header, under the name, where a long one has
+      # the card's width (docs/plans/mobile-board.md, row 6). The header is no
+      # longer one link, since a link can't hold the domains' own.
+      assert_select "a.flight-card__head", 0
+      assert_select ".flight-card__head" do
+        assert_select "a.flight-card__name[href='#{project_path("equip")}']", "equip"
         assert_select "small", /db/
         assert_select ".state-pill", /GO/
-        assert_select "svg", 1
+        assert_select "svg.flight-card__chevron", 1
+        assert_select ".flight-card__domains a", /equip\.svnmns\.com/
+        assert_select ".flight-card__domains a", /equipping\.com/
       end
-      [ "DOMAINS", "RUNNING SHA", "LAST DEPLOY", "LAST BACKUP", "RESOURCES" ].each { |label| assert_select ".flight-card__label", label }
-      assert_select ".flight-card__domains a", /equip\.svnmns\.com/
-      assert_select ".flight-card__domains a", /equipping\.com/
+      [ "RUNNING SHA", "LAST DEPLOY", "LAST BACKUP", "RESOURCES" ].each { |label| assert_select ".flight-card__label", label }
+      assert_select ".flight-card__label", { text: "DOMAINS", count: 0 }
+      assert_select ".flight-card__body .flight__host", 0
       assert_select ".flight-card__details .mono", "aaaaaaa"
       assert_select ".flight-card__resources .muted", "—", "nothing sampled: a dash"
     end

@@ -12,7 +12,7 @@
       <% newer = UpdateNotice.newer(HoustonVersion.current, @installation.latest_release) %>
       <%# The version, with a pill when there's news; the rest is in Settings › Releases. %>
       <div class="board__version">
-        <span class="mono eyebrow">FLIGHT BOARD · <%= base.upcase %></span>
+        <span class="mono eyebrow">FLIGHT BOARD · <%= base.upcase %> · <%= HoustonVersion.current.upcase %></span>
         <% if server_update&.status == "running" %>
           <%= link_to settings_update_path(server_update), class: "mono board__pill board__pill--updating", data: { controller: "refresh", refresh_every_value: 10000 } do %>Updating to <%= server_update.to_version %><%= server_update.step.present? ? " · #{server_update.step}" : "…" %><% if server_update.long? %> · taking long<% end %><% end %>
         <% elsif server_update && server_update.status.in?(%w[rolled_back no_go]) %>
@@ -101,20 +101,19 @@
       <% @projects.each do |project| %>
         <% latest, running, backup = project.latest_deploy, project.running_deploy, @last_backups[project.id] %>
         <article class="flight-card flight-card--<%= project.status.to_s.dasherize %>" data-card="<%= project.name %>">
-          <%= link_to project_path(project.name), class: "flight-card__head" do %>
-            <span class="flight-card__title"><span class="flight-card__name"><%= project.name %></span><small><%= services_words(project) %></small></span>
+          <%# The whole header opens the project (the name's link covers it), and
+              the domains, under the name, are links of their own above it. %>
+          <div class="flight-card__head">
+            <span class="flight-card__title"><%= link_to project.name, project_path(project.name), class: "flight-card__name" %><small><%= services_words(project) %></small></span>
             <% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %>
             <% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %>
             <% if @deleting.include?(project.id) %><small class="mono state state--nogo">DELETING</small><% end %>
             <% if (proposal = project.copy_proposal) %><small class="mono state state--hold">names <%= proposal.proposed_name %></small><% end %>
             <%= state_pill(project.status) %>
-            <svg width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true"><path d="M2 2l6 6-6 6" stroke="currentColor" stroke-width="1.6"/></svg>
-          <% end %>
+            <svg class="flight-card__chevron" width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true"><path d="M2 2l6 6-6 6" stroke="currentColor" stroke-width="1.6"/></svg>
+            <div class="flight-card__domains flight__domains"><%= render "projects/domains", project: %></div>
+          </div>
           <div class="flight-card__body">
-            <div class="flight-card__domains flight__domains">
-              <span class="mono flight-card__label">DOMAINS</span>
-              <%= render "projects/domains", project: %>
-            </div>
             <div class="flight-card__details">
               <div class="flight__cell"><span class="mono flight-card__label">RUNNING SHA</span><%= render "projects/running_sha", project:, running:, latest: %></div>
               <div class="flight__cell"><span class="mono flight-card__label">LAST DEPLOY</span><%= render "projects/last_deploy", project:, latest: %></div>
