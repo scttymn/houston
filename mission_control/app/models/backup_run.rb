@@ -31,6 +31,9 @@ class BackupRun < ApplicationRecord
   validates :operation, inclusion: { in: OPERATIONS }
 
   scope :running, -> { where(status: "running") }
+  # Runs that make a snapshot: what "last backup" means (a restore's data,
+  # and a copy's, is put back from one and has none of its own).
+  scope :backups, -> { where(operation: "backup") }
 
   def self.digest(token) = OpenSSL::Digest::SHA256.hexdigest(token)
 

@@ -10,8 +10,8 @@ class ProjectsController < ApplicationController
     @admin_route = SystemStatus.admin_route(@installation, on_admin: !@on_lan)
     @hooks_route = SystemStatus.route(@installation, "hooks")
     @next_backup = next_backup
-    @failed_backups = BackupRun.where(id: BackupRun.group(:project_id).select("MAX(id)")).where(status: "no_go").pluck(:project_id).to_set
-    @last_backups = BackupRun.where(id: BackupRun.where(status: "go").group(:project_id).select("MAX(id)")).index_by(&:project_id)
+    @failed_backups = BackupRun.where(id: BackupRun.backups.group(:project_id).select("MAX(id)")).where(status: "no_go").pluck(:project_id).to_set
+    @last_backups = BackupRun.where(id: BackupRun.backups.where(status: "go").group(:project_id).select("MAX(id)")).index_by(&:project_id)
     @deleting = ProjectDeletion.holding.where.not(project_id: nil).pluck(:project_id).to_set
   end
 

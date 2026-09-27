@@ -236,4 +236,5 @@ Your question: "So basically if I push a duplicate named app, it goes on hold. T
 - **`install/test/copy-project.sh`: PASS** (31 ok):
   - "the copied database is still 65532's, mode 640"
   - every request 200 through the copy (301), the undo (95) and the delete (75)
+- **Then: the new project's page was a 500** (`undefined method 'first' for nil` in `_backup_run`). The page, the board and the API took a project's latest backup run as its last backup, and a copied project's only run is its data's restore: GO, with no snapshot of its own. Only runs that make a snapshot count now (`BackupRun.backups`). Test: `"a copied project whose only run is its data's restore"`, which reproduced the 500 first. Suites: 501 runs, 0 failures; no offenses.
 

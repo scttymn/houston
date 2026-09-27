@@ -110,4 +110,26 @@ class ProjectCopiesTest < ActionDispatch::IntegrationTest
     assert_select ".notice--nogo", /The copy to equip failed: kamal deploy failed/
     assert_select ".notice--nogo details pre", /attempt to write a readonly database/
   end
+
+  # The first real copy: the new project's only run was its data's restore
+  # (GO, no snapshot of its own), and its page, the board and the API read
+  # it as its last backup: a 500 on the page.
+  test "a copied project whose only run is its data's restore" do
+    copy = copied
+    copy.update!(status: "go", handed_over_at: Time.current)
+    copy.deploy.update!(status: "go", finished_at: Time.current)
+    copy.project.backup_runs.create!(location: storage_locations(:unas), operation: "restore", kind: "restore", reason: "restore",
+                                     deploy_number: 1, status: "go", source_snapshot_id: "5c5edd4c" + "0" * 56, heartbeat_at: Time.current, finished_at: Time.current)
+    get project_path("equip")
+    assert_response :success
+    assert_select ".backup-run", /No backups yet/
+
+    get root_path
+    assert_response :success
+    assert_select "[data-project='equip']", /never|—/i
+
+    token, = ApiToken.issue!("agent")
+    get "/api/v1/projects/equip", headers: { "Authorization" => "Bearer #{token}" }
+    assert_nil response.parsed_body["last_backup"]
+  end
 end

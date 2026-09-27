@@ -20,7 +20,7 @@ module RemoteView
     view.merge(
       deploy_rule: project.deploy_rule, services: project.services, repo_url: project.repo_url, branch: project.branch,
       webhook_verified: project.webhook_verified_at.present?,
-      last_backup: project.backup_runs.order(:id).last&.then { |run| backup(run) },
+      last_backup: project.backup_runs.backups.order(:id).last&.then { |run| backup(run) },
       backup_schedule: project.backup_schedule, time_zone: Installation.current.time_zone,
       secrets: project.variables.map { |v| { name: v["name"], required: v["required"] == true, set: have.include?(v["name"]) } }
     )

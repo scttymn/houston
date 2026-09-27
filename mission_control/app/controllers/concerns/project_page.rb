@@ -16,8 +16,8 @@ module ProjectPage
       @secret_errors = secret_errors
       @hooks_route = SystemStatus.route(@installation, "hooks") if project.repo_url.present?
       @storage = project.backup_location
-      @backup = project.backup_runs.order(:id).last
-      @last_good_backup = project.backup_runs.where(status: "go").order(:id).last
+      @backup = project.backup_runs.backups.order(:id).last
+      @last_good_backup = project.backup_runs.backups.where(status: "go").order(:id).last
       @live_locations = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?)
       # Copies to and from a new name (docs/plans/copy-project.md).
       @copy_active = project.copies_from.active.order(:id).last
