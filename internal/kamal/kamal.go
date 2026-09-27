@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,11 @@ type Target struct {
 	BaseDomain string // <name>.<BaseDomain> is the app's default host
 	Arch       string // amd64 or arm64; Kamal requires builder.arch
 	Generation int    // the project's data generation; 0 or 1: today's names
+	// A copy's deploy (docs/plans/copy-project.md): hosts another project
+	// still serves, left for the handover, and hosts added meanwhile (a
+	// placeholder, so the service is never kamal-proxy's catch-all).
+	ExcludeHosts []string
+	ExtraHosts   []string
 }
 
 // Names are a project's Docker and Kamal names in one data generation. A
@@ -253,7 +259,7 @@ func (g *generator) config(t Target) deployYAML {
 		Service: p.Name,
 		Image:   p.Name,
 		Proxy: proxy{
-			Hosts:       proxyHosts(p, t.BaseDomain),
+			Hosts:       copyHosts(proxyHosts(p, t.BaseDomain), t),
 			AppPort:     p.AppPort,
 			Healthcheck: map[string]string{"path": p.Houston.Health},
 			Run:         map[string]bool{"publish": false},
@@ -313,6 +319,19 @@ func sortedServices(p *project.Project) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func copyHosts(hosts []string, t Target) []string {
+	if len(t.ExcludeHosts) == 0 && len(t.ExtraHosts) == 0 {
+		return hosts
+	}
+	kept := make([]string, 0, len(hosts)+len(t.ExtraHosts))
+	for _, h := range hosts {
+		if !slices.Contains(t.ExcludeHosts, h) {
+			kept = append(kept, h)
+		}
+	}
+	return append(kept, t.ExtraHosts...)
 }
 
 func proxyHosts(p *project.Project, base string) []string {

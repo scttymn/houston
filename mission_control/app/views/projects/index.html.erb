@@ -70,6 +70,7 @@
             <% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %>
             <% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %>
             <% if @deleting.include?(project.id) %><small class="mono state state--nogo">DELETING</small><% end %>
+            <% if (proposal = project.copy_proposal) %><small class="mono state state--hold">names <%= proposal.proposed_name %></small><% end %>
           </span>
           <span class="flight__cell">
             <%= link_to project.name, project_path(project.name), class: "flight__name" %>
@@ -105,6 +106,7 @@
             <% if @failed_backups.include?(project.id) %><small class="field__error">backup NO-GO</small><% end %>
             <% if project.maintenance? %><small class="mono state state--hold">MAINTENANCE</small><% end %>
             <% if @deleting.include?(project.id) %><small class="mono state state--nogo">DELETING</small><% end %>
+            <% if (proposal = project.copy_proposal) %><small class="mono state state--hold">names <%= proposal.proposed_name %></small><% end %>
             <%= state_pill(project.status) %>
             <svg width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true"><path d="M2 2l6 6-6 6" stroke="currentColor" stroke-width="1.6"/></svg>
           <% end %>

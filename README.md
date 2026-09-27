@@ -257,6 +257,28 @@ houston delete --confirm app --follow --project app
 - **If it stops partway,** the project stays deleting and serves nothing new. Running the same command again, or pressing **Finish deleting**, finishes it.
 - **Houston can't remove the deploy key and the webhook** on your git host; remove them there.
 
+## Renaming a project: copy it
+
+A project's name is `compose.yml`'s `name:`, so a new name is a new app. Houston copies the project to it, with no downtime, and you delete the old one when you're happy.
+
+1. Change `name:` and push. The old project's deploy goes to HOLD ("compose.yml names …"), and its page offers **Copy to <new name>**. Nothing else happens, and the old version keeps serving.
+2. Copy it, from the page or with:
+
+   ```sh
+   houston copy --confirm old-name --follow
+   ```
+
+   - **The new project** gets the old one's secrets, repo link and deploy key, webhook secret, volume placement and backup target.
+   - **Its image** is built, and **its data** is copied from a snapshot of the old project taken just before it boots.
+   - **Once its health check passes,** the hosts the two share move to it with no failed request (kamal-proxy's routes, and the DNS records' owner).
+3. When you're happy, **Delete** the old project. Its webhook URL keeps answering for the new one, so nothing changes on the git host.
+
+**Writes after the snapshot:** anything written to the old app after its snapshot stays in the old app. If that matters, put its maintenance page up before copying. Houston never does it for you.
+
+**Stopping or undoing:**
+- `houston copy --cancel` (or **Cancel the copy**) stops a copy before its handover: the new project goes.
+- `houston copy --undo --confirm new-name` (or **Undo the copy**) gives the hosts back to the old project with no failed request, then deletes the new one, keeping its backups.
+
 ## Cloudflare
 
 **Settings › Cloudflare** shows the tunnel and each of its connections (the data centre, cloudflared's version, since when), the tunnel's live routes (marked DRIFT where they differ from Houston's), and Houston's DNS records in every zone, each with its project and whether it points at this server or another one. From there you can replace the API token (checked first; the old one stays if anything fails) and **Repair**, which pushes the routes and re-points Houston's own records.

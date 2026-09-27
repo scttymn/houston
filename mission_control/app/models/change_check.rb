@@ -53,7 +53,8 @@ class ChangeCheck
   end
 
   private
-    def restoring? = @project.deploys.where(kind: "restore", status: %w[queued in_flight]).exists?
+    # A restore or a copy under way owns what's deployed next.
+    def restoring? = @project.deploys.where(kind: %w[restore copy], status: %w[queued in_flight]).exists?
 
     # ref → commit, for the refs the rule deploys. An annotated tag's peeled
     # ref (^{}) names the commit it points at.

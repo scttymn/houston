@@ -102,4 +102,29 @@ class WebhooksControllerTest < ActionDispatch::IntegrationTest
   ensure
     Rails.cache.clear
   end
+
+  # docs/plans/copy-project.md: once the old project of a copy is deleted,
+  # its webhook URL rings the new one, which has its webhook secret, so the
+  # git host needs no change. A project given the old name takes it back.
+  test "a copied project answers on its old project's webhook URL" do
+    garage = make_linked_project("garage-go")
+    garage.update!(webhook_secret: WEBHOOK_SECRET)
+    signed = { "X-Hub-Signature-256" => "sha256=#{hmac}" }
+    copy = ProjectCopy.create!(from_project: @project, project: garage, from: "garage", to: "garage-go", sha: "a" * 40, by: "admin", status: "go")
+
+    assert_enqueued_with(job: CheckForChangesJob, args: [ @project.id ]) { ring(headers: signed) }
+    @project.destroy!
+    assert_nil copy.reload.from_project_id
+
+    assert_enqueued_with(job: CheckForChangesJob, args: [ garage.id ]) { ring(headers: signed) }
+    assert_response :accepted
+
+    copy.update!(status: "no_go")
+    assert_no_enqueued_jobs { ring(headers: signed) }
+    assert_response :not_found
+    copy.update!(status: "go")
+
+    again = make_linked_project("garage")
+    assert_enqueued_with(job: CheckForChangesJob, args: [ again.id ]) { ring(headers: signed) }
+  end
 end

@@ -52,7 +52,7 @@ func remote(file, projectFlag string, needProject bool, stderr io.Writer) (*serv
 	return server.New(cfg), name, 0
 }
 
-var statusWords = map[string]string{"queued": "QUEUED", "in_flight": "IN FLIGHT", "go": "GO", "no_go": "NO-GO", "standby": "STANDBY"}
+var statusWords = map[string]string{"queued": "QUEUED", "in_flight": "IN FLIGHT", "go": "GO", "no_go": "NO-GO", "standby": "STANDBY", "hold": "HOLD"}
 
 func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) int {
 	client, name, code := remote(file, projectFlag, false, stderr)
@@ -127,6 +127,13 @@ func runStatus(file, projectFlag string, asJSON bool, stdout, stderr io.Writer) 
 			line += ": " + m.Message
 		}
 		fmt.Fprintln(stdout, line)
+	}
+	if c := p.CopyProposal; c != nil {
+		if c.Refusal != "" {
+			fmt.Fprintf(stdout, "hold      compose.yml names %s (#%d): %s\n", c.Name, c.Deploy, c.Refusal)
+		} else {
+			fmt.Fprintf(stdout, "hold      compose.yml names %s (#%d): houston copy --confirm %s\n", c.Name, c.Deploy, p.Name)
+		}
 	}
 	if d := p.Deleting; d != nil {
 		if d.Status == "no_go" {

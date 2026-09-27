@@ -45,8 +45,11 @@ class RestoreData < DataRun
     def restore
       # Defense in depth: the serving generation is never emptied or dropped,
       # whatever the restore's deploy row says.
+      # A copy's new project serves nothing yet (docs/plans/copy-project.md).
       serving = @project.serving_generation.number
-      raise Failed, "refusing to restore into generation #{serving}: generation #{serving} is the one serving" if @target.number == serving
+      if @target.number == serving && !(@restore.copy? && @project.running_deploy.nil?)
+        raise Failed, "refusing to restore into generation #{serving}: generation #{serving} is the one serving"
+      end
 
       raise Failed, "the restore's compose.yml wasn't checked (its runner is older than this Mission Control)" unless volumes
       VolumePlacement.new(@project, generation: @target.number, volumes:).place!
@@ -81,8 +84,14 @@ class RestoreData < DataRun
         raise Failed, "the snapshot's manifest isn't JSON"
       end
       raise Failed, "the snapshot's manifest isn't Houston's" unless manifest.is_a?(Hash) && %w[volumes postgres sqlite].all? { |k| manifest[k].is_a?(Array) }
-      raise Failed, "the snapshot is of #{manifest["project"]}, not #{@project.name}" unless manifest["project"] == @project.name
-      unless manifest["sha"] == @restore.sha
+      # A copy's snapshot is of the old project, at the commit it served.
+      copy = @restore.copy? ? @restore.copy : nil
+      of = copy ? copy.from : @project.name
+      raise Failed, "the snapshot is of #{manifest["project"]}, not #{of}" unless manifest["project"] == of
+      if copy
+        expected = copy.snapshot_run&.sha.to_s
+        raise Failed, "the snapshot was taken at #{manifest["sha"].to_s.first(7)}, not the snapshot's #{expected.first(7)}" unless manifest["sha"] == expected
+      elsif manifest["sha"] != @restore.sha
         raise Failed, "the snapshot was taken at #{manifest["sha"].to_s.first(7)}, not the restore's #{@restore.sha.first(7)}"
       end
 

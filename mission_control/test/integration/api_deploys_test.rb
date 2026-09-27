@@ -118,6 +118,25 @@ class ApiDeploysTest < ActionDispatch::IntegrationTest
     assert_equal 0, Deploy.count
   end
 
+  # docs/plans/copy-project.md, Batch 2: a deploy whose compose.yml names
+  # another project holds, with the name, instead of failing.
+  test "a deploy holds with the name compose.yml gives" do
+    id, token = started
+    report(id, token, { status: "hold", proposed_name: "shop", error: 'compose.yml names "shop", not "equip"', log: "HOLD: …\n" })
+    assert_response :success
+    deploy = Deploy.find(id)
+    assert_equal [ "hold", "shop" ], [ deploy.status, deploy.proposed_name ]
+    assert deploy.finished_at
+    assert_equal :hold, deploy.project.status
+
+    id, token = started
+    [ { status: "hold" }, { status: "hold", proposed_name: "Not A Name" }, { status: "go", proposed_name: "shop" } ].each do |bad|
+      report(id, token, bad)
+      assert_response :unprocessable_entity, bad.inspect
+    end
+    assert_equal "in_flight", Deploy.find(id).status
+  end
+
   test "a finished deploy doesn't change" do
     id, token = started
     report(id, token, { status: "go", log: "done\n" })

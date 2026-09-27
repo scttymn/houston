@@ -295,6 +295,7 @@ a.button--danger { color: #fff; }
 .state-pill__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .state-pill.state--go { background: var(--go-bg); }
 .state-pill.state--no-go { background: var(--nogo-bg); }
+.state-pill.state--hold { background: var(--hold-bg); color: var(--hold-fg); }
 .state-pill.state--in-flight { background: #F3E2BF; color: #75480A; }
 .state-pill.state--in-flight .state-pill__dot { background: #B7791F; }
 .state-pill.state--no-go .state-pill__dot { background: var(--signal); }

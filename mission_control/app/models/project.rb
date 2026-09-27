@@ -16,6 +16,10 @@ class Project < ApplicationRecord
   has_many :project_volumes, dependent: :delete_all
   # A deletion outlives the row: its name, repo and final snapshot stay.
   has_many :deletions, class_name: "ProjectDeletion", dependent: :nullify
+  # Copies to a new name (docs/plans/copy-project.md): this project's, as
+  # the old one, and the one that made it.
+  has_many :copies_from, class_name: "ProjectCopy", foreign_key: :from_project_id, dependent: :nullify
+  has_many :copies, class_name: "ProjectCopy", dependent: :nullify
 
   encrypts :deploy_key_private, :webhook_secret
 
@@ -75,7 +79,7 @@ class Project < ApplicationRecord
   def accessories = services - [ app_service ]
 
   # Every hostname the app answers on: <name>.<base> and its custom domains.
-  def hostnames(installation = Installation.current) = [ host(installation) ] + domains
+  def hostnames(installation = Installation.current) = ([ host(installation) ] + domains).uniq
 
   def maintenance? = maintenance_since.present?
 
@@ -114,6 +118,26 @@ class Project < ApplicationRecord
   def not_backed_up = accessories - databases.map { |d| d["service"] }
 
   def latest_deploy = deploys.summary.order(number: :desc).first
+
+  # The copy its latest deploy proposes (docs/plans/copy-project.md): that
+  # deploy, when it held because compose.yml names another project.
+  def copy_proposal
+    latest = latest_deploy
+    latest if latest&.status == "hold" && latest.proposed_name.present?
+  end
+
+  # The project a webhook at hooks.<base>/<name> rings: the one of that name,
+  # else the copy of a deleted one (docs/plans/copy-project.md), so the git
+  # host's webhook keeps working after the old project is gone.
+  def self.webhook_target(name)
+    find_by(name:) || ProjectCopy.where(from: name, status: "go", from_project_id: nil).order(:id).last&.project
+  end
+
+  # Why proposed_name can't be copied to, or nil when it can.
+  def self.name_refusal(name)
+    return "#{name} can't be a project's name" if !name.to_s.match?(ProjectSync::NAME) || ProjectSync::RESERVED.include?(name)
+    "#{name} is another project" if exists?(name:)
+  end
   # The latest GO deploy, or a restore that switched without getting to GO,
   # whichever is newer.
   def running_deploy

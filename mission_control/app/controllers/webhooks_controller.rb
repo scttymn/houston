@@ -22,7 +22,7 @@ class WebhooksController < ActionController::API
     body = request.body.read(MAX_BODY + 1).to_s
     return unverified(:content_too_large) if body.bytesize > MAX_BODY
 
-    project = Project.find_by(name: request.path_parameters[:name])
+    project = Project.webhook_target(request.path_parameters[:name])
     return unverified(:not_found) unless project && Webhook.verified?(request.headers, body, project.webhook_secret)
     return head :too_many_requests if count!("verified", project.name) > VERIFIED
 

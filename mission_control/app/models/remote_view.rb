@@ -10,6 +10,8 @@ module RemoteView
       name: project.name, status: project.status.to_s, running_sha: project.running_deploy&.sha,
       host: project.host, domains: project.domain_states, last_deploy: last && deploy(last), maintenance: maintenance(project),
       deleting: (deletion = project.deletion) && deletion(deletion).except(:log),
+      copy_proposal: (proposal = project.copy_proposal) && { name: proposal.proposed_name, sha: proposal.sha, deploy: proposal.number,
+                                                              refusal: Project.name_refusal(proposal.proposed_name) },
       stats: AppStats.for(project)&.as_json
     }
     return view unless detail
@@ -22,6 +24,12 @@ module RemoteView
       backup_schedule: project.backup_schedule, time_zone: Installation.current.time_zone,
       secrets: project.variables.map { |v| { name: v["name"], required: v["required"] == true, set: have.include?(v["name"]) } }
     )
+  end
+
+  # A copy to a new name (docs/plans/copy-project.md).
+  def self.copy(copy)
+    { id: copy.id, from: copy.from, to: copy.to, status: copy.status, deploy: copy.deploy&.number, sha: copy.sha, by: copy.by,
+      error: copy.error, handed_over: copy.handed_over, handed_over_at: copy.handed_over_at, undone_at: copy.undone_at }
   end
 
   # A deletion, with its log: it outlives the project.

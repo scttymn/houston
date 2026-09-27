@@ -171,4 +171,35 @@ class RestoreDataTest < ActiveSupport::TestCase
     assert_match "the restore's compose.yml wasn't checked", @run.error
     assert_empty fake.calls.select { |c| c.args.include?(RestoreData::FILL) || c.args[0..1] == %w[volume create] }
   end
+
+  # docs/plans/copy-project.md: a copy restores the old project's snapshot
+  # into the new project's generation 1, which serves nothing yet.
+  test "a copy's data, into a new project from another's snapshot" do
+    old = @project
+    new = make_project("equip-go", services: %w[app db cache])
+    new.update!(volumes: old.volumes, databases: old.databases)
+    copy_deploy = new.deploys.create!(number: 1, sha: "c" * 40, ref: "refs/heads/main", status: "in_flight", kind: "copy", token_digest: "d",
+                                      heartbeat_at: Time.current, source_snapshot_id: SNAPSHOT, source_location: storage_locations(:unas),
+                                      sync_payload: { "volumes" => [ { "name" => "storage", "path" => "/rails/storage" } ] })
+    snapshot = old.backup_runs.create!(location: storage_locations(:unas), kind: "deploy", reason: "copy", status: "go", sha: SHA, snapshot_id: SNAPSHOT, heartbeat_at: Time.current)
+    ProjectCopy.create!(from_project: old, project: new, deploy: copy_deploy, from: "equip", to: "equip-go", sha: "c" * 40, by: "admin", status: "running", snapshot_run: snapshot)
+    run = BackupRun.request_restore!(copy_deploy)
+    token = BackupRun.claim!(run)
+
+    fake = restore_docker # the manifest: project equip, at SHA
+    use_fake_docker(fake) { RestoreData.new(run, token).call }
+    assert_equal [ "go", nil ], [ run.reload.status, run.error ]
+    calls = fake.calls.map(&:args)
+    assert_includes calls, [ "volume", "create", "equip-go_storage" ]
+    assert calls.any? { |a| a.include?("equip-go-db") && a[0] == "exec" }, "into the new project's Postgres"
+    assert_not calls.flatten.any? { |a| a.to_s.match?(/\Aequip(_|-db\z|\.g)/) }, "nothing of the old project's is written"
+
+    # Another project's snapshot, or one at another commit, is refused.
+    [ manifest(project: "someone"), manifest(sha: "b" * 40) ].each do |wrong|
+      run.update_columns(status: "running")
+      use_fake_docker(restore_docker(wrong)) { RestoreData.new(run, token).call }
+      assert_equal "no_go", run.reload.status
+      assert_match(/the snapshot is of someone, not equip|taken at bbbbbbb, not the snapshot's aaaaaaa/, run.error)
+    end
+  end
 end

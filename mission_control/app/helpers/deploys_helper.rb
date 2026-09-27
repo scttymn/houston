@@ -1,5 +1,5 @@
 module DeploysHelper
-  STATE_LABELS = { queued: "QUEUED", in_flight: "IN FLIGHT", no_go: "NO-GO", go: "GO", standby: "STANDBY" }.freeze
+  STATE_LABELS = { queued: "QUEUED", in_flight: "IN FLIGHT", no_go: "NO-GO", go: "GO", standby: "STANDBY", hold: "HOLD" }.freeze
 
   def state_chip(status, tag: :span)
     status = status.to_sym

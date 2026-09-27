@@ -42,6 +42,9 @@ Rails.application.routes.draw do
     get "deploys/:id/snapshot", to: "snapshots#show"
     post "deploys/:id/restore_data", to: "restore_data#create"
     get "deploys/:id/restore_data", to: "restore_data#show"
+    post "deploys/:id/copy_data", to: "copies#create_data"
+    get "deploys/:id/copy_data", to: "copies#show_data"
+    post "deploys/:id/handover", to: "copies#handover"
     post "runner/jobs/claim", to: "runner_jobs#claim"
 
     namespace :v1 do
@@ -72,6 +75,10 @@ Rails.application.routes.draw do
         resource :backup_target, only: :update
         resource :maintenance, only: :update
         resources :restores, only: :create
+        resource :copy, only: :create do
+          post :cancel
+          post :undo
+        end
         resource :logs, only: :show
         resource :webhook, only: :show do
           post :rotate
@@ -105,6 +112,10 @@ Rails.application.routes.draw do
     resource :backup_target, only: :update, controller: "project_backup_targets"
     resources :restores, only: %i[ new create ], controller: "project_restores"
     resource :deletion, only: %i[ new create ], controller: "project_deletions"
+    resource :copy, only: %i[ new create ], controller: "project_copies" do
+      post :cancel
+      post :undo
+    end
     resource :maintenance, only: :update, controller: "project_maintenance" do
       get :preview
     end

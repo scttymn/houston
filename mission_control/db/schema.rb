@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_27_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_27_020000) do
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "last_used_at"
@@ -64,6 +64,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_000000) do
     t.text "log", default: "", null: false
     t.integer "number", null: false
     t.integer "project_id", null: false
+    t.string "proposed_name"
     t.string "ref", null: false
     t.string "runner"
     t.string "sha", null: false
@@ -99,6 +100,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_000000) do
     t.string "tunnel_id"
     t.text "tunnel_token"
     t.datetime "updated_at", null: false
+  end
+
+  create_table "project_copies", force: :cascade do |t|
+    t.string "by", null: false
+    t.datetime "created_at", null: false
+    t.integer "deploy_id"
+    t.string "error", limit: 4000
+    t.string "from", null: false
+    t.integer "from_project_id"
+    t.json "handed_over", default: [], null: false
+    t.datetime "handed_over_at"
+    t.integer "project_id"
+    t.string "sha", null: false
+    t.integer "snapshot_run_id"
+    t.string "status", default: "queued", null: false
+    t.string "to", null: false
+    t.datetime "undone_at"
+    t.datetime "updated_at", null: false
+    t.index ["deploy_id"], name: "index_project_copies_on_deploy_id"
+    t.index ["from"], name: "index_project_copies_on_from"
+    t.index ["from_project_id"], name: "index_project_copies_on_from_project_id"
+    t.index ["from_project_id"], name: "index_project_copies_one_active", unique: true, where: "status IN ('queued', 'running')"
+    t.index ["project_id"], name: "index_project_copies_on_project_id"
+    t.index ["snapshot_run_id"], name: "index_project_copies_on_snapshot_run_id"
   end
 
   create_table "project_deletions", force: :cascade do |t|
@@ -274,6 +299,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_27_000000) do
   add_foreign_key "backup_runs", "storage_locations", column: "location_id"
   add_foreign_key "deploys", "projects", on_delete: :cascade
   add_foreign_key "deploys", "storage_locations", column: "source_location_id"
+  add_foreign_key "project_copies", "backup_runs", column: "snapshot_run_id", on_delete: :nullify
+  add_foreign_key "project_copies", "deploys", on_delete: :nullify
+  add_foreign_key "project_copies", "projects", column: "from_project_id", on_delete: :nullify
+  add_foreign_key "project_copies", "projects", on_delete: :nullify
   add_foreign_key "project_deletions", "projects", on_delete: :nullify
   add_foreign_key "project_deletions", "storage_locations", column: "snapshot_location_id"
   add_foreign_key "project_hosts", "projects", on_delete: :cascade

@@ -220,7 +220,20 @@ type Deploy struct {
 	// its app volumes, and its Postgres containers (their volumes).
 	PreviousVolumes   []string `json:"previous_volumes"`
 	PreviousDatabases []string `json:"previous_databases"`
+	// A copy's deploy: kind "copy".
+	Copy *CopyJob `json:"copy"`
 }
+
+// CopyJob is what a copy's runner needs (docs/plans/copy-project.md): the
+// old project, the placeholder host, and the hosts left for the handover.
+type CopyJob struct {
+	From         string   `json:"from"`
+	Placeholder  string   `json:"placeholder"`
+	ExcludeHosts []string `json:"exclude_hosts"`
+}
+
+// IsCopy reports whether the deploy is a copy's.
+func (d Deploy) IsCopy() bool { return d.Kind == "copy" && d.Copy != nil }
 
 // Restore reports whether the deploy is a restore.
 func (d Deploy) Restore() bool { return d.Kind == "restore" }
@@ -251,8 +264,11 @@ func (c *Client) StartDeploy(ctx context.Context, project, sha, ref string) (Dep
 type Progress struct {
 	Step   string `json:"step,omitempty"`
 	Log    string `json:"log,omitempty"`
-	Status string `json:"status,omitempty"` // go or no_go
+	Status string `json:"status,omitempty"` // go, no_go, or hold (with ProposedName)
 	Error  string `json:"error,omitempty"`
+	// With hold: the name compose.yml gives instead of the claimed project's
+	// (docs/plans/copy-project.md): a copy Mission Control can offer.
+	ProposedName string `json:"proposed_name,omitempty"`
 }
 
 // Report sends progress on d. ErrTakenOver means stop.
@@ -336,6 +352,36 @@ func (c *Client) Snapshot(ctx context.Context, d Deploy) (Snapshot, error) {
 // SnapshotStatus is d's pre-deploy snapshot as it stands.
 func (c *Client) SnapshotStatus(ctx context.Context, d Deploy) (Snapshot, error) {
 	return c.snapshot(ctx, http.MethodGet, d)
+}
+
+// CopyData asks for a copy's data: a snapshot of the old project, restored
+// into the new one (a retry gets the same runs).
+func (c *Client) CopyData(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.deployRun(ctx, http.MethodPost, d, "copy_data")
+}
+
+// CopyDataStatus is a copy's data as it stands.
+func (c *Client) CopyDataStatus(ctx context.Context, d Deploy) (Snapshot, error) {
+	return c.deployRun(ctx, http.MethodGet, d, "copy_data")
+}
+
+// Handover moves the hosts a copy's old and new projects share to the new
+// one; it returns them.
+func (c *Client) Handover(ctx context.Context, d Deploy) ([]string, error) {
+	status, body, err := c.do(ctx, http.MethodPost, "/api/deploys/"+strconv.Itoa(d.ID)+"/handover", map[string]string{"X-Houston-Deploy-Token": d.Token}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusConflict {
+		return nil, fmt.Errorf("%w: %s", ErrTakenOver, message(body))
+	}
+	if status != http.StatusOK {
+		return nil, errors.New(message(body))
+	}
+	var moved struct {
+		HandedOver []string `json:"handed_over"`
+	}
+	return moved.HandedOver, json.Unmarshal(body, &moved)
 }
 
 // RestoreData asks for a restore's data to be put back (a retry gets the same run).

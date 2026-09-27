@@ -38,12 +38,22 @@ class Api::RunnerJobsController < Api::BaseController
         previous_databases: project.databases.map { |d| serving.container(d["service"]) } }
     end
 
+    # A copy's deploy leaves the hosts the old project serves for the
+    # handover, and keeps a placeholder so its service is never kamal-proxy's
+    # catch-all (docs/plans/copy-project.md).
+    def copy(deploy)
+      return {} unless deploy.copy? && (copy = deploy.copy)
+      old = copy.from_project
+      shared = old ? deploy.project.hostnames & old.hostnames : []
+      { copy: { from: copy.from, placeholder: Handover.placeholder(deploy.project.name), exclude_hosts: shared } }
+    end
+
     def job(deploy, token, took_over)
       project = deploy.project
       {
         deploy: { id: deploy.id, number: deploy.number, token:, sha: deploy.sha, ref: deploy.ref, took_over:,
                   kind: deploy.kind, generation: deploy.generation, previous_generation: deploy.previous_generation,
-                  **previous(deploy) },
+                  **previous(deploy), **copy(deploy) },
         project: { name: project.name, repo_url: project.repo_url, branch: project.branch, compose_path: project.compose_path,
                    deploy_key: project.deploy_key_private },
         known_hosts: GitRemote.known_hosts_for(project.repo_url)

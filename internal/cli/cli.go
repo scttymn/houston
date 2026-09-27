@@ -391,6 +391,24 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	deleteCmd.Flags().BoolVar(&deleteBackups, "delete-backups", false, "delete its backups too, and take no final snapshot (can't be undone)")
 	deleteCmd.Flags().BoolVar(&deleteFollow, "follow", false, "follow it to its result; exit 0 on GO, 1 on NO-GO")
 	root.AddCommand(deleteCmd)
+
+	var copyConfirm string
+	var copyCancel, copyUndo, copyFollow bool
+	copyCmd := &cobra.Command{
+		Use:   "copy --confirm OLD",
+		Short: "Copy a project to the new name its compose.yml gives, with no downtime (--cancel before its handover, --undo after)",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			code = runCopy(file, projectFlag, copyConfirm, copyCancel, copyUndo, copyFollow, stdout, stderr)
+			return nil
+		},
+	}
+	copyCmd.Flags().StringVar(&projectFlag, "project", "", "the project (copy: the old one, default --confirm's; --cancel, --undo: the new one, default the compose file's)")
+	copyCmd.Flags().StringVar(&copyConfirm, "confirm", "", "the old project's name (with --undo: the new one's)")
+	copyCmd.Flags().BoolVar(&copyCancel, "cancel", false, "cancel the copy making this project, before its handover")
+	copyCmd.Flags().BoolVar(&copyUndo, "undo", false, "give the hosts back to the project this one was copied from, then delete this one")
+	copyCmd.Flags().BoolVar(&copyFollow, "follow", false, "follow the copy's deploy to its result; exit 0 on GO, 1 on NO-GO")
+	root.AddCommand(copyCmd)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

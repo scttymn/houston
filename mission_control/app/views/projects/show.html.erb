@@ -58,6 +58,46 @@
       <span class="notice__text">Deleting <%= @project.name %> was <%= @deletion.error %>. Nothing was removed. <%= link_to "The log", deletion_path(@deletion) %></span>
     </div>
   <% end %>
+  <% if @copy_active %>
+    <div class="notice notice--hold">
+      <span class="mono">COPYING</span>
+      <span class="notice__text">Copying <%= @project.name %> to <%= @copy_active.to %>; <%= @project.name %> keeps serving until it's GO. <%= link_to "Follow it", project_deploy_path(@copy_active.to, @copy_active.deploy.number) if @copy_active.deploy %></span>
+    </div>
+  <% end %>
+  <% if @copy_to %>
+    <div class="notice notice--go">
+      <span class="mono">COPIED</span>
+      <span class="notice__text">
+        <%= @project.name %> was copied to <%= link_to @copy_to.to, project_path(@copy_to.to) %><%= ", which serves #{@copy_to.handed_over.to_sentence} now" if @copy_to.handed_over.any? %>.
+        Delete <%= @project.name %> when you're happy with <%= @copy_to.to %>.
+      </span>
+      <%= link_to "Delete #{@project.name}", new_project_deletion_path(@project.name), class: "button button--small" unless @project.deleting? %>
+    </div>
+  <% end %>
+  <% if @copied_from %>
+    <div class="notice notice--go">
+      <span class="mono">COPIED</span>
+      <span class="notice__text"><%= @project.name %> was copied from <%= @copied_from.from %> (<%= l(@copied_from.created_at, format: :short) %>, by <%= @copied_from.by %>).</span>
+    </div>
+  <% end %>
+  <% if (proposal = @project.copy_proposal) %>
+    <% refusal = Project.name_refusal(proposal.proposed_name) %>
+    <div class="notice notice--hold">
+      <span class="mono">HOLD</span>
+      <span class="notice__text">
+        compose.yml on <%= @project.branch.presence || "the deploy branch" %> names <%= proposal.proposed_name %> (<%= proposal.short_sha %>), so deploy #<%= proposal.number %> held.
+        <%= @project.name %> keeps serving <%= @running&.short_sha || "what it served" %>.
+        <% if refusal %>
+          <%= refusal %>: change <span class="mono">name:</span> in compose.yml, then push.
+        <% else %>
+          A new name is a new app: copy <%= @project.name %> to it, or change <span class="mono">name:</span> back.
+        <% end %>
+      </span>
+      <% unless refusal %>
+        <%= link_to "Copy #{@project.name} to #{proposal.proposed_name}", new_project_copy_path(@project.name), class: "button button--small" %>
+      <% end %>
+    </div>
+  <% end %>
   <% if notice %>
     <div class="notice notice--go"><span class="mono">OK</span><span class="notice__text"><%= notice %></span></div>
   <% end %>
@@ -266,6 +306,17 @@
 
       <section class="panel danger" id="danger">
         <div class="panel__head"><h2 class="disp panel__title">Danger zone</h2></div>
+        <% if @copied_from&.from_project %>
+          <div class="panel__row">
+            <span>
+              <strong>Undo the copy from <%= @copied_from.from %>.</strong> The hosts go back to <%= @copied_from.from %> with no failed request, then <%= @project.name %> is deleted (its backups kept). Anything written to <%= @project.name %> since stays with it.
+            </span>
+            <%= form_with url: undo_project_copy_path(@project.name), class: "inline-form" do |f| %>
+              <%= text_field_tag :confirm, nil, class: "mono", placeholder: "Type #{@project.name}", autocomplete: "off", "aria-label": "Type #{@project.name} to confirm" %>
+              <%= f.submit "Undo the copy", class: "button button--danger button--small" %>
+            <% end %>
+          </div>
+        <% end %>
         <div class="panel__row">
           <span>
             <strong>Delete this project.</strong> Its containers, data, domains and settings go. A final snapshot is taken first and its backups are kept, unless you choose to delete them too.

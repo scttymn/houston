@@ -16,7 +16,7 @@ class BackupRun < ApplicationRecord
   KINDS = %w[auto deploy restore final].freeze
   # backup: a snapshot; restore: a restore deploy's data put back from one.
   OPERATIONS = %w[backup restore].freeze
-  REASONS = %w[schedule manual deploy restore delete].freeze
+  REASONS = %w[schedule manual deploy restore delete copy].freeze
   # BackupJob beats every 15 s; after this long without a word, the run is
   # abandoned and the project's next backup may start.
   STALE_AFTER = 2.minutes

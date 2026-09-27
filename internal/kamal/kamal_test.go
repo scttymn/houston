@@ -639,3 +639,26 @@ x-houston:
 		t.Error("adding a limit didn't change the accessory's label, so a running db wouldn't be rebooted onto it")
 	}
 }
+
+// A copy's deploy (docs/plans/copy-project.md): the hosts the old project
+// still serves are left for the handover, and a placeholder keeps the
+// service from being kamal-proxy's catch-all.
+func TestProxyHostsForACopy(t *testing.T) {
+	p := parse(t, `name: shop
+services:
+  app:
+    build: .
+    ports: ["80:80"]
+x-houston:
+  health: /up
+  domains: [shop.example.com, www.shop.example.com]
+`)
+	copyTarget := target
+	copyTarget.ExcludeHosts = []string{"shop.svnmns.com", "shop.example.com"}
+	copyTarget.ExtraHosts = []string{"shop.houston-copy.invalid"}
+	got := dig(config(t, p, copyTarget), "proxy", "hosts")
+	want := []any{"www.shop.example.com", "shop.houston-copy.invalid"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("proxy hosts = %v, want %v", got, want)
+	}
+}

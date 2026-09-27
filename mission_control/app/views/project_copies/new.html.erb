@@ -1,0 +1,59 @@
+<% content_for :title, "Copy #{@project.name}" %>
+<%# Copy a project to a new name (docs/plans/copy-project.md): the Restore dialog's layout, over the dimmed project page. %>
+<main class="restore">
+  <section class="restore__dialog" role="dialog" aria-labelledby="copy-title">
+    <div class="mono restore__banner"><span>COPY · NEW NAME</span><span>NO DOWNTIME</span></div>
+    <div class="restore__body">
+      <nav class="mono crumbs"><%= link_to "Projects", root_path %> <span>/</span> <%= link_to @project.name, project_path(@project.name) %> <span>/</span> <span class="crumbs__here">Copy</span></nav>
+      <% if @to && !@refusal %>
+        <h1 class="disp" id="copy-title">Copy <%= @project.name %> to <%= @to %>?</h1>
+
+        <% shared = @project.hostnames(@installation) & ([ "#{@to}.#{@installation.base_domain}" ] + @project.domains) %>
+        <dl class="plan delete-list">
+          <dt class="mono">FROM</dt>
+          <dd>compose.yml on <%= @project.branch %> at <span class="mono"><%= @proposal.short_sha %></span>, which names <%= @to %></dd>
+          <dt class="mono">GETS</dt>
+          <dd>
+            <%= @project.name %>'s secrets, its repo link and deploy key,
+            its volumes where they live (<%= @project.volume_rows.map { |v, row| "#{v["name"]} (#{row&.location&.name || "local disk"})" }.join(", ").presence || "none" %>),
+            and its backup target (<%= @storage&.name || "none" %>)
+          </dd>
+          <dt class="mono">DATA</dt>
+          <dd>A snapshot of <%= @project.name %>, taken once <%= @to %> is built, restored into <%= @to %></dd>
+          <dt class="mono">HOSTS</dt>
+          <dd class="mono"><%= shared.join(", ").presence || "none shared" %></dd>
+        </dl>
+
+        <div class="restore-note">
+          <span class="mono">NOTE</span>
+          <span>
+            <%= @project.name %> keeps serving until <%= @to %> passes its health check; then the hosts above move to <%= @to %> with no failed request.
+            <% if @project.maintenance? %>
+              <%= @project.name %>'s maintenance page is up, so nothing is written to it meanwhile; the hosts keep showing it until you turn it off or delete <%= @project.name %>.
+            <% else %>
+              <%= @project.name %>'s maintenance page is off: anything written to <%= @project.name %> after the snapshot stays in <%= @project.name %>. Put it up first if that matters.
+            <% end %>
+            Delete <%= @project.name %> when you're happy with <%= @to %>.
+          </span>
+        </div>
+
+        <%= form_with url: project_copy_path(@project.name), class: "restore__confirm" do |f| %>
+          <div class="field">
+            <label for="confirm">Type <span class="mono"><%= @project.name %></span> to confirm</label>
+            <%= text_field_tag :confirm, nil, id: "confirm", class: "mono", autocomplete: "off" %>
+            <% if @error %><span class="field__error"><%= @error %></span><% end %>
+          </div>
+          <div class="restore__actions">
+            <span class="mono muted">CLI: houston copy --confirm <%= @project.name %></span>
+            <%= link_to "Cancel", project_path(@project.name), class: "button button--medium button--quiet" %>
+            <%= f.submit "Copy to #{@to}", class: "button button--primary button--medium" %>
+          </div>
+        <% end %>
+      <% else %>
+        <h1 class="disp" id="copy-title">Nothing to copy</h1>
+        <p><%= @refusal %>. Change <span class="mono">name:</span> in compose.yml and push: <%= @project.name %>'s deploy holds with the new name, and the copy is offered here.</p>
+        <div class="restore__actions"><%= link_to "Back", project_path(@project.name), class: "button button--medium button--quiet" %></div>
+      <% end %>
+    </div>
+  </section>
+</main>

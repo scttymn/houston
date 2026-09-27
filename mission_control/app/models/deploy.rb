@@ -23,7 +23,9 @@ class Deploy < ApplicationRecord
     def initialize = super("Houston is cleaning its registry; try again in a minute")
   end
 
-  STATUSES = %w[queued in_flight go no_go].freeze
+  # hold: its compose.yml names another project (proposed_name), a copy
+  # Mission Control offers (docs/plans/copy-project.md); nothing was built.
+  STATUSES = %w[queued in_flight go no_go hold].freeze
   # houston deploy reports at least every 30 s; after this long without a
   # word, the next deploy may take over.
   STALE_AFTER = 2.minutes
@@ -32,10 +34,17 @@ class Deploy < ApplicationRecord
   TRUNCATED = "\n[log truncated: Houston keeps the first 4 MiB of a deploy's log]\n".freeze
 
   belongs_to :project
+  has_one :copy, class_name: "ProjectCopy"
+
+  # A copy's deploy settles its copy (docs/plans/copy-project.md): running
+  # once claimed; GO; or NO-GO, when the new project goes again unless it
+  # already took over hosts (then it's serving them).
+  after_commit :settle_copy, if: -> { copy? && saved_change_to_status? }
   # A restore reads its snapshot from here.
   belongs_to :source_location, class_name: "StorageLocation", optional: true
 
-  KINDS = %w[deploy restore].freeze
+  # copy: a copied project's first deploy (docs/plans/copy-project.md).
+  KINDS = %w[deploy restore copy].freeze
   validates :kind, inclusion: { in: KINDS }
 
   validates :sha, format: { with: /\A[0-9a-f]{40}\z/, message: "must be a full commit SHA (40 lowercase hex characters)" }
@@ -56,7 +65,10 @@ class Deploy < ApplicationRecord
   SWITCHED = "Clean up".freeze
   RESTORE_STEPS = [ "Prepare", "Image", "Accessories", "Restore data", "Safety snapshot", "Switch", SWITCHED ].freeze
   def short_sha = sha.first(7)
-  def steps = restore? ? RESTORE_STEPS : STEPS
+  # A copy's first deploy (docs/plans/copy-project.md): the old project's
+  # data once the accessories are up, the handover once the app is healthy.
+  COPY_STEPS = %w[Test Secrets Build Snapshot Accessories].freeze + [ "Copy data" ] + %w[Release Deploy Handover Post-deploy]
+  def steps = restore? ? RESTORE_STEPS : (copy? ? COPY_STEPS : STEPS)
 
   # The generation serving while a restore builds its own; nil for a deploy.
   # Generations go up one restore at a time.
@@ -185,7 +197,9 @@ class Deploy < ApplicationRecord
                                                                  heartbeat_at: Time.current, updated_at: Time.current)
     return unless claimed == 1
     FlightBoard.refresh! # update_all skips the callback
-    [ deploy.reload, token ]
+    deploy.reload
+    deploy.settle_copy if deploy.copy?
+    [ deploy, token ]
   end
 
   # Finishes a silent in-flight deploy; returns its number.
@@ -228,12 +242,29 @@ class Deploy < ApplicationRecord
   end
   def restore? = kind == "restore"
 
+  def settle_copy
+    copy = self.copy or return
+    case status
+    when "in_flight" then copy.update!(status: "running")
+    when "go" then copy.update!(status: "go")
+    when "no_go"
+      if copy.handed_over_at
+        copy.update!(status: "no_go", error: "#{error.presence || "the copy's deploy failed"}; it serves the hosts it took, so #{copy.to} is kept")
+      else
+        copy.update!(status: "no_go", error:)
+        CopyCleanupJob.perform_later(copy)
+      end
+    end
+  end
+  def copy? = kind == "copy"
+
   # Applies one progress report. The caller has checked ownership inside the
   # same transaction. The log is appended in SQL, so a 4 MiB log isn't read
   # back on every chunk. Returns what was appended to the log, or nil.
-  def report!(step: nil, log: nil, status: nil, error: nil)
+  def report!(step: nil, log: nil, status: nil, error: nil, proposed_name: nil)
     self.step = step if step
     self.error = error if error
+    self.proposed_name = proposed_name if proposed_name
     if status
       self.status = status
       self.finished_at = Time.current

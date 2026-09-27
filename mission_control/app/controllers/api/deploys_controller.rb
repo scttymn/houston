@@ -21,7 +21,7 @@ class Api::DeploysController < Api::BaseController
   # Ownership and "still in flight" are checked in the transaction that writes.
   def update
     body = json_body(limit: Deploy::CHUNK_CAP + 4.kilobytes) or return
-    progress = body.slice("step", "log", "status", "error")
+    progress = body.slice("step", "log", "status", "error", "proposed_name")
     return render json: { error: "a log chunk can be at most #{Deploy::CHUNK_CAP / 1.kilobyte} KiB" }, status: :content_too_large if progress["log"].is_a?(String) && progress["log"].bytesize > Deploy::CHUNK_CAP
     invalid = invalid_progress(progress)
     return render json: { error: invalid }, status: :unprocessable_entity if invalid
@@ -69,7 +69,11 @@ class Api::DeploysController < Api::BaseController
     end
 
     def invalid_progress(progress)
-      return "status must be go or no_go" if progress.key?("status") && !progress["status"].in?(%w[go no_go])
+      return "status must be go, no_go or hold" if progress.key?("status") && !progress["status"].in?(%w[go no_go hold])
+      if progress["status"] == "hold" || progress.key?("proposed_name")
+        return "hold comes with proposed_name, and proposed_name only with hold" unless progress["status"] == "hold" && progress["proposed_name"].is_a?(String)
+        return "proposed_name must be a project name (a DNS label)" unless progress["proposed_name"].match?(ProjectSync::NAME)
+      end
       return "step must be at most 100 characters" if progress.key?("step") && !(progress["step"].is_a?(String) && progress["step"].length <= 100)
       return "error must be at most 1000 characters" if progress.key?("error") && !(progress["error"].is_a?(String) && progress["error"].length <= 1000)
       "log must be text" if progress.key?("log") && !progress["log"].is_a?(String)

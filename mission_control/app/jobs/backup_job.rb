@@ -8,7 +8,7 @@ class BackupJob < ApplicationJob
 
   # A deploy or restore waits for these (its snapshot, its data): they
   # never queue behind another project's long backup.
-  queue_as { arguments.first.reason.in?(%w[deploy restore]) ? :snapshots : :backups }
+  queue_as { arguments.first.reason.in?(%w[deploy restore copy]) ? :snapshots : :backups }
   retry_on Busy, wait: WAIT, attempts: ((Backup::DEADLINE + BackupRun::STALE_AFTER) / WAIT).ceil + 1 do |job, _error|
     job.arguments.first.give_up!("waited #{(Backup::DEADLINE + BackupRun::STALE_AFTER).inspect} for the project's running backup")
   end

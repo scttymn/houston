@@ -219,6 +219,8 @@ type Project struct {
 	Stats      *Stats                 `json:"stats"`
 	// A deletion under way, or one stopped partway (docs/plans/delete-project.md).
 	Deleting *Deletion `json:"deleting"`
+	// The copy the latest deploy proposes (docs/plans/copy-project.md).
+	CopyProposal *CopyProposal `json:"copy_proposal"`
 	// Only for a single project:
 	DeployRule struct {
 		On     string `json:"on"`
@@ -539,6 +541,56 @@ func (cl *Client) Delete(ctx context.Context, project, confirm string, deleteBac
 	}
 	err = json.Unmarshal(raw, &body)
 	return body.Deletion, err
+}
+
+// Copy is a copy of a project to a new name (docs/plans/copy-project.md).
+type Copy struct {
+	ID     int    `json:"id"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Status string `json:"status"`
+	Deploy int    `json:"deploy"`
+	SHA    string `json:"sha"`
+	Error  string `json:"error"`
+}
+
+// CopyProposal is what a held deploy proposes: a copy to the name its
+// compose.yml gives (Refusal: why it can't be, or empty).
+type CopyProposal struct {
+	Name    string `json:"name"`
+	SHA     string `json:"sha"`
+	Deploy  int    `json:"deploy"`
+	Refusal string `json:"refusal"`
+}
+
+// StartCopy copies project to the name its held deploy proposes; confirm
+// must be project's name.
+func (cl *Client) StartCopy(ctx context.Context, project, confirm string) (Copy, error) {
+	var body struct {
+		Copy Copy `json:"copy"`
+	}
+	err := cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/copy", map[string]string{"confirm": confirm}, &body)
+	return body.Copy, err
+}
+
+// CancelCopy cancels the copy that's making project, before its handover.
+func (cl *Client) CancelCopy(ctx context.Context, project string) (Copy, error) {
+	var body struct {
+		Copy Copy `json:"copy"`
+	}
+	err := cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/copy/cancel", nil, &body)
+	return body.Copy, err
+}
+
+// UndoCopy gives the hosts back to the project project was copied from,
+// then deletes project; confirm must be project's name.
+func (cl *Client) UndoCopy(ctx context.Context, project, confirm string) (Copy, Deletion, error) {
+	var body struct {
+		Copy     Copy     `json:"copy"`
+		Deletion Deletion `json:"deletion"`
+	}
+	err := cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/copy/undo", map[string]string{"confirm": confirm}, &body)
+	return body.Copy, body.Deletion, err
 }
 
 // Deletion reads a deletion by its id.

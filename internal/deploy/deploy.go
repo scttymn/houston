@@ -66,6 +66,9 @@ type Mission interface {
 	SnapshotStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
 	RestoreData(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
 	RestoreDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	CopyData(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	CopyDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error)
+	Handover(ctx context.Context, d mission.Deploy) ([]string, error)
 }
 
 type Options struct {
@@ -121,8 +124,17 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		return early(exitUsage, err.Error(), strings.TrimSpace(err.Error()))
 	}
 	if o.Project != "" && p.Name != o.Project {
-		msg := fmt.Sprintf("compose.yml names project %q, but this deploy is for %q; nothing was synced or built", p.Name, o.Project)
-		return early(exitUsage, "houston deploy: "+msg+"\n", msg)
+		// A new name is a new app (docs/plans/copy-project.md): the claimed
+		// deploy holds, offering the copy; the old version keeps serving.
+		msg := fmt.Sprintf("compose.yml names %q, not %q: copy %s to it in Mission Control (houston copy --confirm %s), or change name: back; nothing was synced or built",
+			p.Name, o.Project, o.Project, o.Project)
+		fmt.Fprint(o.Stderr, "houston deploy: "+msg+"\n")
+		if o.Claimed != nil {
+			r := &reporter{ctx: ctx, mission: d.Mission, deploy: *o.Claimed, out: o.Stdout, cancel: func(error) {}, lastOK: time.Now(), fenceAfter: FenceAfter}
+			r.logf("HOLD: %s\n", msg)
+			r.send(mission.Progress{Status: "hold", Error: msg, ProposedName: p.Name})
+		}
+		return exitUsage
 	}
 	abs, err := filepath.Abs(o.File)
 	if err != nil {
@@ -164,6 +176,9 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	if restore {
 		// A restore builds the next generation; sync reports the serving one.
 		target.Generation = o.Claimed.Generation
+	}
+	if o.Claimed != nil && o.Claimed.IsCopy() {
+		target.ExcludeHosts, target.ExtraHosts = o.Claimed.Copy.ExcludeHosts, []string{o.Claimed.Copy.Placeholder}
 	}
 	config, err := kamal.Config(p, target)
 	if err != nil {
@@ -397,6 +412,23 @@ func (r *run) deploy(tookOver bool) int {
 		}
 	}
 
+	if copy := r.report.deploy.Copy; r.report.deploy.IsCopy() {
+		r.report.step("Copy data")
+		s, err := r.await(r.d.Mission.CopyData, r.d.Mission.CopyDataStatus, "the copy's data")
+		switch {
+		case errors.Is(err, errDeadline):
+			return r.noGo(fmt.Sprintf("the copy of %s's data didn't finish before the deploy's deadline; %s keeps serving", copy.From, copy.From))
+		case errors.Is(err, errStopped):
+			return r.stop()
+		case err != nil:
+			return r.fail(fmt.Sprintf("the copy of %s's data failed: %v; %s keeps serving", copy.From, err, copy.From))
+		case s.Status == "skipped":
+			r.report.logf("no data to copy: %s\n", s.Error)
+		default:
+			r.report.logf("ok  data copied from %s\n", copy.From)
+		}
+	}
+
 	if hook := r.p.Houston.Hooks.Release; hook != "" {
 		r.report.step("Release")
 		if msg := r.release(hook); msg != "" {
@@ -407,6 +439,25 @@ func (r *run) deploy(tookOver bool) int {
 	r.report.step("Deploy")
 	if code, err := r.kamalDeploy(); err != nil || code != 0 {
 		return r.fail(fmt.Sprintf("kamal deploy failed (exit %d%s); the old version keeps serving", code, errText(err)))
+	}
+
+	// A copy's app passed its health check: the hosts it shares with the old
+	// project move to it, with no failed request (Mission Control does it).
+	if copy := r.report.deploy.Copy; r.report.deploy.IsCopy() {
+		r.report.step("Handover")
+		moved, err := r.d.Mission.Handover(r.ctx, r.report.deploy)
+		if errors.Is(err, mission.ErrTakenOver) {
+			r.report.cancel(errTakenOver)
+			return r.stop()
+		}
+		if err != nil {
+			return r.fail(fmt.Sprintf("the handover failed: %v; %s keeps serving its hosts", err, copy.From))
+		}
+		if len(moved) > 0 {
+			r.report.logf("ok  handed over: %s\n", strings.Join(moved, ", "))
+		} else {
+			r.report.logf("ok  no hosts to hand over\n")
+		}
 	}
 
 	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" {

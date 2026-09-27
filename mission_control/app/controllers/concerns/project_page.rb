@@ -19,6 +19,10 @@ module ProjectPage
       @backup = project.backup_runs.order(:id).last
       @last_good_backup = project.backup_runs.where(status: "go").order(:id).last
       @live_locations = StorageLocation.where.not(acknowledged_at: nil).order(:name).select(&:live?)
+      # Copies to and from a new name (docs/plans/copy-project.md).
+      @copy_active = project.copies_from.active.order(:id).last
+      @copy_to = project.copies_from.where(status: "go", undone_at: nil).where.not(project_id: nil).order(:id).last
+      @copied_from = project.copies.where(status: "go", undone_at: nil).order(:id).last
       @deletion = project.deletions.order(:id).last
       @deletion = nil if @deletion&.cancelled? && @deletion.finished_at < 1.day.ago
     end

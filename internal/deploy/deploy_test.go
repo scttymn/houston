@@ -265,15 +265,19 @@ type fakeMission struct {
 	restoreData     mission.Snapshot
 	restoreDataErr  error
 	restoreDataPoll []mission.Snapshot
-	generation      int // what sync reports
-	syncs           []mission.SyncRequest
-	syncErr         error
-	secrets         map[string]string
-	startErr        error
-	deploy          mission.Deploy
-	reports         []mission.Progress
-	reportErr       func(p mission.Progress) error
-	domains         map[string]mission.DomainState
+	// A copy's data and handover (docs/plans/copy-project.md).
+	copyData     mission.Snapshot
+	copyDataPoll []mission.Snapshot
+	handoverErr  error
+	generation   int // what sync reports
+	syncs        []mission.SyncRequest
+	syncErr      error
+	secrets      map[string]string
+	startErr     error
+	deploy       mission.Deploy
+	reports      []mission.Progress
+	reportErr    func(p mission.Progress) error
+	domains      map[string]mission.DomainState
 }
 
 func (m *fakeMission) Sync(ctx context.Context, req mission.SyncRequest) (mission.SyncResult, error) {
@@ -314,6 +318,31 @@ func (m *fakeMission) RestoreData(ctx context.Context, d mission.Deploy) (missio
 		return mission.Snapshot{}, m.restoreDataErr
 	}
 	return m.restoreData, nil
+}
+
+func (m *fakeMission) CopyData(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "copy data")
+	return m.copyData, nil
+}
+
+func (m *fakeMission) CopyDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "copy data?")
+	s := m.copyDataPoll[0]
+	if len(m.copyDataPoll) > 1 {
+		m.copyDataPoll = m.copyDataPoll[1:]
+	}
+	return s, nil
+}
+
+func (m *fakeMission) Handover(ctx context.Context, d mission.Deploy) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "handover")
+	return []string{"shop.svnmns.com"}, m.handoverErr
 }
 
 func (m *fakeMission) RestoreDataStatus(ctx context.Context, d mission.Deploy) (mission.Snapshot, error) {
@@ -578,7 +607,8 @@ func TestDeployRefusesAComposeForAnotherProject(t *testing.T) {
 	if slices.Contains(h.mission.calls, "sync") || len(h.docker.whats()) > 0 {
 		t.Errorf("synced or built anyway: %v %v", h.mission.calls, h.docker.whats())
 	}
-	if f := h.mission.final(); f.Status != "no_go" || !strings.Contains(f.Error, `names project "shop"`) || !strings.Contains(f.Error, "equip") {
+	// Since docs/plans/copy-project.md it holds, offering a copy, instead of NO-GO.
+	if f := h.mission.final(); f.Status != "hold" || !strings.Contains(f.Error, `names "shop"`) || !strings.Contains(f.Error, "equip") {
 		t.Errorf("final = %+v", f)
 	}
 }
@@ -1271,4 +1301,113 @@ func TestKamalSeesOnlyWhatHoustonGenerated(t *testing.T) {
 	if want := []string{".kamal/secrets", "config/deploy.yml"}; !reflect.DeepEqual(seen, want) {
 		t.Errorf("Kamal's working directory held %v, want only %v", seen, want)
 	}
+}
+
+// docs/plans/copy-project.md, Batch 2: a claimed deploy whose compose.yml
+// names another project is a proposal, not a failure: HOLD, with the name it
+// found, and nothing synced or built.
+func TestClaimedDeployNamingAnotherProjectHolds(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.claimed = &mission.Deploy{ID: 9, Number: 4, Token: "t"}
+	h.project = "shop-go"
+	code := h.run()
+	if code == 0 {
+		t.Errorf("exit 0")
+	}
+	f := h.mission.final()
+	if f.Status != "hold" || f.ProposedName != "shop" || !strings.Contains(f.Error, `compose.yml names "shop"`) || !strings.Contains(f.Error, "copy shop-go to it in Mission Control") {
+		t.Errorf("final = %+v", f)
+	}
+	if len(h.mission.syncs) != 0 || slices.Contains(h.docker.whats(), "build") {
+		t.Errorf("synced %d, docker %v", len(h.mission.syncs), h.docker.whats())
+	}
+	if !strings.Contains(h.mission.log(), "HOLD: compose.yml names") {
+		t.Errorf("log: %q", h.mission.log())
+	}
+}
+
+// A copy's deploy (docs/plans/copy-project.md, Batch 4): a first deploy of
+// the new project that copies the old one's data once its accessories are
+// up, leaves the shared hosts for the handover, and asks for the handover
+// once its app passes the health check.
+func copyHarness(t *testing.T) *harness {
+	h := newHarness(t, shopCompose)
+	h.claimed = &mission.Deploy{ID: 9, Number: 1, Token: "t", Kind: "copy", Generation: 1,
+		Copy: &mission.CopyJob{From: "shop-go", Placeholder: "shop.houston-copy.invalid", ExcludeHosts: []string{"shop.svnmns.com"}}}
+	h.project = "shop"
+	h.snapshotEvery = time.Millisecond
+	h.mission.copyData = mission.Snapshot{ID: 3, Status: "queued"}
+	h.mission.copyDataPoll = []mission.Snapshot{{ID: 3, Status: "running"}, {ID: 4, Status: "go"}}
+	return h
+}
+
+func TestCopyDeploy(t *testing.T) {
+	h := copyHarness(t)
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if f := h.mission.final(); f.Status != "go" {
+		t.Fatalf("final = %+v", f)
+	}
+	calls := strings.Join(h.mission.calls, ",")
+	if !strings.Contains(calls, "copy data,copy data?,copy data?") || !strings.HasSuffix(calls, "handover") {
+		t.Errorf("mission calls = %s", calls)
+	}
+	steps := h.mission.steps()
+	if i, j, k := slices.Index(steps, "Accessories"), slices.Index(steps, "Copy data"), slices.Index(steps, "Release"); !(i >= 0 && i < j && j < k) {
+		t.Errorf("steps = %v: Copy data belongs after Accessories, before Release", steps)
+	}
+	if i, j := slices.Index(steps, "Deploy"), slices.Index(steps, "Handover"); !(i >= 0 && i < j) {
+		t.Errorf("steps = %v: Handover belongs after Deploy", steps)
+	}
+	config, _ := os.ReadFile(filepath.Join(h.dir, ".houston", "kamal", "config", "deploy.yml"))
+	if strings.Contains(string(config), "- shop.svnmns.com") || !strings.Contains(string(config), "- shop.houston-copy.invalid") {
+		t.Errorf("proxy hosts in deploy.yml:\n%s", config)
+	}
+	if !strings.Contains(h.mission.log(), "ok  data copied from shop-go") || !strings.Contains(h.mission.log(), "ok  handed over: shop.svnmns.com") {
+		t.Errorf("log:\n%s", h.mission.log())
+	}
+}
+
+func TestCopyDeployFailures(t *testing.T) {
+	h := copyHarness(t)
+	h.mission.copyDataPoll = []mission.Snapshot{{ID: 3, Status: "no_go", Error: "the snapshot of shop-go failed: pg_dump failed"}}
+	if code := h.run(); code == 0 {
+		t.Fatal("a failed copy of the data exited 0")
+	}
+	if f := h.mission.final(); f.Status != "no_go" || !strings.Contains(f.Error, "the copy of shop-go's data failed: the snapshot of shop-go failed: pg_dump failed") {
+		t.Errorf("final = %+v", f)
+	}
+	if slices.Contains(h.mission.steps(), "Deploy") {
+		t.Error("deployed without the data")
+	}
+
+	h = copyHarness(t)
+	h.mission.handoverErr = errors.New("kamal-proxy didn't move the hosts: conflict")
+	h.run()
+	if f := h.mission.final(); f.Status != "no_go" || !strings.Contains(f.Error, "the handover failed: kamal-proxy didn't move the hosts: conflict; shop-go keeps serving its hosts") {
+		t.Errorf("final = %+v", f)
+	}
+
+	h = copyHarness(t)
+	h.mission.copyData = mission.Snapshot{Status: "skipped", Error: "shop-go has no data to copy"}
+	if code := h.run(); code != 0 {
+		t.Fatalf("nothing to copy: exit %d", code)
+	}
+	if !strings.Contains(h.mission.log(), "no data to copy: shop-go has no data to copy") {
+		t.Errorf("log:\n%s", h.mission.log())
+	}
+}
+
+// steps is every step reported, in order.
+func (m *fakeMission) steps() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var steps []string
+	for _, r := range m.reports {
+		if r.Step != "" {
+			steps = append(steps, r.Step)
+		}
+	}
+	return steps
 }
