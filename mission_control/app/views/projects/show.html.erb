@@ -158,7 +158,14 @@
           <dt class="mono">SECRET</dt>
           <dd class="mono"><%= @project.webhook_verified_at ? "•••••••• (shown until the first push arrived)" : @project.webhook_secret %></dd>
           <dt class="mono">SEND</dt><dd>Push events, as <span class="mono">application/json</span></dd>
-          <dt class="mono">REPO</dt><dd class="mono"><%= @project.repo_url %> · <%= @project.branch %></dd>
+          <dt class="mono">REPO</dt>
+          <dd>
+            <%= form_with url: project_repo_path(@project.name), method: :patch, class: "inline-form repo-form" do |f| %>
+              <%= text_field_tag :repo_url, @project.repo_url, class: "mono", autocomplete: "off", "aria-label": "Repo URL" %>
+              <%= f.submit "Change", class: "button button--small" %>
+            <% end %>
+            <small class="muted">Branch <%= @project.branch %>. Moved or renamed on the git host? The same deploy key keeps working.</small>
+          </dd>
         </dl>
         <p class="panel__row panel__row--muted">
           <span>

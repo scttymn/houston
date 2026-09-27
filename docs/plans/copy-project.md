@@ -237,4 +237,9 @@ Your question: "So basically if I push a duplicate named app, it goes on hold. T
   - "the copied database is still 65532's, mode 640"
   - every request 200 through the copy (301), the undo (95) and the delete (75)
 - **Then: the new project's page was a 500** (`undefined method 'first' for nil` in `_backup_run`). The page, the board and the API took a project's latest backup run as its last backup, and a copied project's only run is its data's restore: GO, with no snapshot of its own. Only runs that make a snapshot count now (`BackupRun.backups`). Test: `"a copied project whose only run is its data's restore"`, which reproduced the 500 first. Suites: 501 runs, 0 failures; no offenses.
+- **Then: the repo URL.** The copy kept `git@github.com:scttymn/valleybuiltcrossfit-go.git`, but the repo was renamed. GitHub forwards the old URL, but Houston had no way to change it (linking refuses another URL).
+  - Now `RepoMove` changes it once the project's own deploy key can read the new URL (`ls-remote`, with the branch there) and the `compose.yml` there names the project. The key, the webhook secret and the refs already seen stay, so nothing redeploys.
+  - Where: the Connect pushes panel's REPO field, `PUT /api/v1/projects/:name/repo {repo_url}`, and `houston repo [URL]`.
+  - Tests: `models/repo_move_test.rb`, `controllers/project_repos_test.rb`, `internal/cli/repo_test.go`. Mutation: the compose-name check removed → caught.
+- **Found by its visual check:** a long project name ("VALLEYBUILTCROSSFIT") made the project page 454 px wide at 375, because the title didn't wrap. It wraps now (`overflow-wrap: anywhere`).
 

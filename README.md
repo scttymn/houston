@@ -272,6 +272,13 @@ A project's name is `compose.yml`'s `name:`, so a new name is a new app. Houston
    - **Its image** is built, and **its data** is copied from a snapshot of the old project taken just before it boots.
    - **Once its health check passes,** the hosts the two share move to it with no failed request (kamal-proxy's routes, and the DNS records' owner).
 3. When you're happy, **Delete** the old project. Its webhook URL keeps answering for the new one, so nothing changes on the git host.
+4. If the repo was renamed on the git host too, update the URL. The project copies the old one's; GitHub forwards it, but only until that name is used again. Use the **REPO** field in the project's Connect pushes panel, or:
+
+   ```sh
+   houston repo git@github.com:you/new-name.git --project new-name
+   ```
+
+   Houston checks it can read the new URL with the project's deploy key, and that its `compose.yml` names the project. Nothing else changes, and nothing redeploys.
 
 **Writes after the snapshot:** anything written to the old app after its snapshot stays in the old app. If that matters, put its maintenance page up before copying. Houston never does it for you.
 

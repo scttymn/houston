@@ -287,6 +287,8 @@ a.button--danger { color: #fff; }
 .danger .panel__row { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
 .delete-list dd { overflow-wrap: anywhere; }
 .copy-log { margin-top: 8px; }
+.repo-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.repo-form input[type=text] { flex: 1 1 16em; min-width: 0; }
 .copy-log pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 @media (max-width: 640px) { .danger .panel__row { flex-direction: column; align-items: flex-start; } }
 .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--ink); }
@@ -317,7 +319,7 @@ a.button--danger { color: #fff; }
 .project-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; flex-wrap: wrap; }
 .project-head__main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .project-head__title { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-.project-head__title h1.disp { font-size: 72px; line-height: 0.9; }
+.project-head__title h1.disp { font-size: 72px; line-height: 0.9; min-width: 0; overflow-wrap: anywhere; }
 .project-head__actions { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .host-chips { display: flex; gap: 10px; flex-wrap: wrap; }
 .host-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); text-decoration: none; font-size: 14px; max-width: 100%; overflow-wrap: anywhere; }

@@ -409,6 +409,22 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	copyCmd.Flags().BoolVar(&copyUndo, "undo", false, "give the hosts back to the project this one was copied from, then delete this one")
 	copyCmd.Flags().BoolVar(&copyFollow, "follow", false, "follow the copy's deploy to its result; exit 0 on GO, 1 on NO-GO")
 	root.AddCommand(copyCmd)
+
+	repoCmd := &cobra.Command{
+		Use:   "repo [URL]",
+		Short: "A project's repo URL; with URL, change it (the repo moved or was renamed on its git host)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			url := ""
+			if len(args) > 0 {
+				url = args[0]
+			}
+			code = runRepo(file, projectFlag, url, stdout, stderr)
+			return nil
+		},
+	}
+	repoCmd.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	root.AddCommand(repoCmd)
 	var runnerName, workspace string
 	runnerCmd := command("runner", "Claim and run queued deploys (in a houston-runner-N container)", func() int {
 		return runRunner(runnerName, workspace, stderr, d)

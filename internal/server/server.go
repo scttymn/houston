@@ -593,6 +593,22 @@ func (cl *Client) UndoCopy(ctx context.Context, project, confirm string) (Copy, 
 	return body.Copy, body.Deletion, err
 }
 
+// SetRepo changes project's repo URL (it moved or was renamed on the git
+// host); Mission Control checks it can read it first. It returns the URL.
+func (cl *Client) SetRepo(ctx context.Context, project, repoURL string) (string, error) {
+	status, body, err := cl.do(ctx, http.MethodPut, "/api/v1/projects/"+url.PathEscape(project)+"/repo", map[string]string{"repo_url": repoURL})
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("%s", message(body))
+	}
+	var set struct {
+		RepoURL string `json:"repo_url"`
+	}
+	return set.RepoURL, json.Unmarshal(body, &set)
+}
+
 // Deletion reads a deletion by its id.
 func (cl *Client) Deletion(ctx context.Context, id int) (Deletion, error) {
 	var d Deletion

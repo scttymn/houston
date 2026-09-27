@@ -75,6 +75,7 @@ Rails.application.routes.draw do
         resource :backup_target, only: :update
         resource :maintenance, only: :update
         resources :restores, only: :create
+        resource :repo, only: :update
         resource :copy, only: :create do
           post :cancel
           post :undo
@@ -112,6 +113,7 @@ Rails.application.routes.draw do
     resource :backup_target, only: :update, controller: "project_backup_targets"
     resources :restores, only: %i[ new create ], controller: "project_restores"
     resource :deletion, only: %i[ new create ], controller: "project_deletions"
+    resource :repo, only: :update, controller: "project_repos"
     resource :copy, only: %i[ new create ], controller: "project_copies" do
       post :cancel
       post :undo
