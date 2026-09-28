@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -727,6 +728,49 @@ func (cl *Client) Logs(ctx context.Context, project string, follow bool, tail in
 	}
 	_, err = io.Copy(w, res.Body)
 	return err
+}
+
+// SnapshotDownload is a snapshot's zip as it arrives: Filename is the
+// server's name for it (a base name only), Body the bytes. Closing Body
+// early stops the download on the server.
+type SnapshotDownload struct {
+	Filename string
+	Body     io.ReadCloser
+}
+
+// DownloadSnapshot starts downloading everything in a project's snapshot, as
+// a zip (docs/plans/download-snapshot.md). location "" is the project's
+// backup location. There's no timeout: a big snapshot takes as long as it takes.
+func (cl *Client) DownloadSnapshot(ctx context.Context, project, snapshot, location string) (SnapshotDownload, error) {
+	path := cl.c.URL + "/api/v1/projects/" + url.PathEscape(project) + "/snapshots/" + url.PathEscape(snapshot) + "/download"
+	if location != "" {
+		path += "?" + url.Values{"location": {location}}.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return SnapshotDownload{}, err
+	}
+	cl.headers(req)
+	res, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return SnapshotDownload{}, fmt.Errorf("can't reach %s: %w", cl.c.URL, err)
+	}
+	if res.StatusCode != http.StatusOK {
+		defer res.Body.Close()
+		if res.StatusCode == http.StatusUnauthorized {
+			return SnapshotDownload{}, ErrRefused
+		}
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+		return SnapshotDownload{}, fmt.Errorf("%s", message(body))
+	}
+	name := project + "-" + snapshot + ".zip"
+	if _, params, err := mime.ParseMediaType(res.Header.Get("Content-Disposition")); err == nil {
+		// The server names the file, never where it goes.
+		if base := filepath.Base(filepath.FromSlash(params["filename"])); params["filename"] != "" && base != "." && base != ".." && base != string(filepath.Separator) {
+			name = base
+		}
+	}
+	return SnapshotDownload{Filename: name, Body: res.Body}, nil
 }
 
 func (cl *Client) headers(req *http.Request) {

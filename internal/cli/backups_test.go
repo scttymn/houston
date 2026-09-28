@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"archive/zip"
+	"bytes"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -336,5 +341,139 @@ func TestRestore(t *testing.T) {
 	code, _, errOut = run(&fakeDocker{}, "restore", "33333333", "--project", "equip")
 	if code != 2 || !strings.Contains(errOut, "--confirm equip") {
 		t.Errorf("no --confirm: exit %d, %q", code, errOut)
+	}
+}
+
+// zipBytes is a real zip holding one file.
+func zipBytes(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	f, _ := z.Create("out/houston.json")
+	io.WriteString(f, "{}")
+	must(t, z.Close())
+	return b.Bytes()
+}
+
+func downloadRoute(body []byte, query *string) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if query != nil {
+			*query = r.URL.RawQuery
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="equip-20260921-0300Z-5c5edd4c.zip"`)
+		w.Write(body)
+	}
+}
+
+func TestSnapshotsDownload(t *testing.T) {
+	zipped := zipBytes(t)
+	var query string
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/equip/snapshots/5c5edd4c/download": downloadRoute(zipped, &query),
+	})
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	code, out, errOut := run(&fakeDocker{}, "snapshots", "download", "5c5edd4c", "--project", "equip", "--location", "unas-nfs")
+	got, _ := os.ReadFile(filepath.Join(dir, "equip-20260921-0300Z-5c5edd4c.zip"))
+	if code != 0 || !bytes.Equal(got, zipped) || query != "location=unas-nfs" {
+		t.Fatalf("exit %d, %d bytes, query %q\n%s%s", code, len(got), query, out, errOut)
+	}
+	if !strings.Contains(out, "Downloaded snapshot 5c5edd4c of equip to equip-20260921-0300Z-5c5edd4c.zip") {
+		t.Errorf("out = %q", out)
+	}
+
+	code, out, errOut = run(&fakeDocker{}, "snapshots", "download", "5c5edd4c", "--project", "equip", "-o", "backups/equip.zip")
+	got, _ = os.ReadFile(filepath.Join(dir, "backups", "equip.zip"))
+	if code != 0 || !bytes.Equal(got, zipped) || query != "" {
+		t.Errorf("-o: exit %d, %d bytes, query %q\n%s%s", code, len(got), query, out, errOut)
+	}
+	if parts, _ := filepath.Glob(filepath.Join(dir, "*", "*.part")); len(parts) > 0 {
+		t.Errorf("left behind: %v", parts)
+	}
+}
+
+func TestSnapshotsDownloadRefused(t *testing.T) {
+	zipped := zipBytes(t)
+	dir := t.TempDir()
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		// Someone saves a file of that name while the download runs.
+		"/api/v1/projects/equip/snapshots/appears0/download": func(w http.ResponseWriter, r *http.Request) {
+			w.Write(zipped[:10])
+			w.(http.Flusher).Flush()
+			time.Sleep(100 * time.Millisecond) // the CLI has checked the name is free, and is saving
+			os.WriteFile(filepath.Join(dir, "appears.zip"), []byte("theirs"), 0o644)
+			w.Write(zipped[10:])
+		},
+		"/api/v1/projects/equip/snapshots/5c5edd4c/download": downloadRoute(zipped, nil),
+		"/api/v1/projects/equip/snapshots/cutoff00/download": downloadRoute(zipped[:len(zipped)-30], nil),
+		"/api/v1/projects/equip/snapshots/busy0000/download": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			io.WriteString(w, `{"error":"another download started at 14:02 UTC is still running; try again when it's done"}`)
+		},
+	})
+	t.Chdir(dir)
+
+	// An existing file is never overwritten.
+	existing := filepath.Join(dir, "equip-20260921-0300Z-5c5edd4c.zip")
+	must(t, os.WriteFile(existing, []byte("mine"), 0o644))
+	code, _, errOut := run(&fakeDocker{}, "snapshots", "download", "5c5edd4c", "--project", "equip")
+	if got, _ := os.ReadFile(existing); code != 1 || string(got) != "mine" || !strings.Contains(errOut, "already exists") {
+		t.Errorf("existing: exit %d, file %q, %q", code, got, errOut)
+	}
+
+	code, _, errOut = run(&fakeDocker{}, "snapshots", "download", "busy0000", "--project", "equip", "-o", "busy.zip")
+	if _, err := os.Stat(filepath.Join(dir, "busy.zip")); code != 1 || err == nil || !strings.Contains(errOut, "another download started at 14:02") {
+		t.Errorf("refused: exit %d, %q (file: %v)", code, errOut, err)
+	}
+
+	code, _, errOut = run(&fakeDocker{}, "snapshots", "download", "appears0", "--project", "equip", "-o", "appears.zip")
+	if got, _ := os.ReadFile(filepath.Join(dir, "appears.zip")); code != 1 || string(got) != "theirs" || !strings.Contains(errOut, "kept as appears.zip.part") {
+		t.Errorf("appeared meanwhile: exit %d, file %q, %q", code, got, errOut)
+	}
+	if kept, _ := os.ReadFile(filepath.Join(dir, "appears.zip.part")); !bytes.Equal(kept, zipped) {
+		t.Errorf("a whole download is kept, not thrown away: %d bytes", len(kept))
+	}
+
+	code, _, errOut = run(&fakeDocker{}, "snapshots", "download", "cutoff00", "--project", "equip", "-o", "cut.zip")
+	if code != 1 || !strings.Contains(errOut, "incomplete") {
+		t.Errorf("cut off: exit %d, %q", code, errOut)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "cut.zip*")); len(left) > 0 {
+		t.Errorf("cut off left %v", left)
+	}
+}
+
+// A drive without hard links (exFAT, some network shares): the name is
+// checked, then the download renamed into place.
+func TestSnapshotsDownloadWithoutHardLinks(t *testing.T) {
+	zipped := zipBytes(t)
+	dir := t.TempDir()
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/equip/snapshots/5c5edd4c/download": downloadRoute(zipped, nil),
+		"/api/v1/projects/equip/snapshots/appears0/download": func(w http.ResponseWriter, r *http.Request) {
+			w.Write(zipped[:10])
+			w.(http.Flusher).Flush()
+			time.Sleep(100 * time.Millisecond)
+			os.WriteFile(filepath.Join(dir, "appears.zip"), []byte("theirs"), 0o644)
+			w.Write(zipped[10:])
+		},
+	})
+	t.Chdir(dir)
+	linkFile = func(string, string) error { return &os.LinkError{Op: "link", Err: syscall.EPERM} }
+	t.Cleanup(func() { linkFile = os.Link })
+
+	code, out, errOut := run(&fakeDocker{}, "snapshots", "download", "5c5edd4c", "--project", "equip", "-o", "e.zip")
+	got, _ := os.ReadFile(filepath.Join(dir, "e.zip"))
+	if code != 0 || !bytes.Equal(got, zipped) {
+		t.Errorf("exit %d, %d bytes\n%s%s", code, len(got), out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "e.zip.part")); err == nil {
+		t.Error(".part left behind")
+	}
+
+	code, _, errOut = run(&fakeDocker{}, "snapshots", "download", "appears0", "--project", "equip", "-o", "appears.zip")
+	if got, _ := os.ReadFile(filepath.Join(dir, "appears.zip")); code != 1 || string(got) != "theirs" || !strings.Contains(errOut, "kept as") {
+		t.Errorf("appeared meanwhile, no hard links: exit %d, file %q, %q", code, got, errOut)
 	}
 }

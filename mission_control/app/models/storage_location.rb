@@ -79,14 +79,15 @@ class StorageLocation < ApplicationRecord
   end
 
   # docker run arguments for a restic command against this location. name:
-  # the container's; mounts: more -v values (what to back up).
-  def restic_args(*command, name: nil, mounts: [])
+  # the container's; mounts: more -v values (what to back up); labels: the
+  # container's.
+  def restic_args(*command, name: nil, mounts: [], labels: {})
     repo = case kind
     when "nfs" then [ "#{volume_name}:/repo" ]
     when "local" then [ "#{settings["path"]}:/repo" ]
     else []
     end
-    [ "run", "--rm", *(name ? [ "--name", name ] : []), *restic_env.keys.flat_map { |k| [ "-e", k ] },
+    [ "run", "--rm", *(name ? [ "--name", name ] : []), *labels.flat_map { |k, v| [ "--label", "#{k}=#{v}" ] }, *restic_env.keys.flat_map { |k| [ "-e", k ] },
       *([ RESTIC_CACHE ] + repo + mounts).flat_map { |m| [ "-v", m ] }, RESTIC_IMAGE, *command ]
   end
 

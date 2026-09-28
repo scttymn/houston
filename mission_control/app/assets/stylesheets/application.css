@@ -376,11 +376,12 @@ a.button--danger { color: #fff; }
 .tabs__label { display: inline-flex; flex-direction: column; }
 .tabs__label::after { content: attr(data-label); font-weight: 600; height: 0; overflow: hidden; visibility: hidden; }
 .snapshots__rule { margin: 0; padding: 12px 20px; font-size: 13px; line-height: 1.5; color: var(--muted); border-bottom: 1px solid var(--rule); background: #F1ECDF; }
-.snapshots__row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 70px 60px; gap: 12px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+.snapshots__row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 70px auto; gap: 12px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--rule); font-size: 14px; }
 .snapshots__row .mono { font-size: 13px; }
 .snapshots__row a { font-size: 13px; }
 .snapshots__when { display: flex; flex-direction: column; gap: 2px; }
 .snapshots__when small { font-size: 12px; color: var(--muted); }
+.snapshots__actions { display: flex; gap: 12px; }
 
 .project .secrets { width: auto; }
 .project .secrets .notice { padding: 12px 20px; }

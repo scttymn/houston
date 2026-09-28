@@ -16,6 +16,11 @@ class DockerCommandTest < ActiveSupport::TestCase
         sleep) sleep 5 ;;
         emit) printf 'dump-bytes' ;;
         sink) cat > "$2"; echo "sink says hi" >&2 ;;
+        zip) printf 'PKzip-'; echo "noise" >&2; sleep 0.1; printf '%s' "$SECRET" ;;
+        nothing) echo "Fatal: wrong password" >&2; exit 12 ;;
+        breaks) printf 'PKpart'; echo "Fatal: pack gone" >&2; exit 1 ;;
+        forever) printf 'PKstart'; exec sleep 30 ;;
+        stubborn) trap '' TERM; sleep 30 & printf 'PKstubborn'; wait ;;
       esac
     SH
     File.chmod(0o755, File.join(@bin, "docker"))
@@ -54,5 +59,37 @@ class DockerCommandTest < ActiveSupport::TestCase
     failed = @runner.pipe(%w[fail], [ "sink", out ], {})
     assert_equal [ false, 7 ], [ failed.success, failed.code ]
     assert_includes failed.output, "boom"
+  end
+
+  test "download keeps stderr out and breaks on failure" do
+    download = @runner.download(%w[zip], { "SECRET" => "-rest" })
+    assert_equal "PK", download.first.first(2)
+    chunks = []
+    download.each { |chunk| chunks << chunk }
+    download.close
+    assert_equal "PKzip--rest", chunks.join, "stdout's bytes only: stderr's noise stays out"
+
+    failed = @runner.download(%w[nothing], {})
+    assert_kind_of DockerCommand::Result, failed, "it ended before any bytes: nothing to send"
+    assert_equal [ false, 12, "Fatal: wrong password\n" ], [ failed.success, failed.code, failed.output ]
+
+    broken = @runner.download(%w[breaks], {})
+    error = assert_raises(DockerCommand::Broken) { broken.each { } }
+    assert_includes error.message, "Fatal: pack gone"
+    broken.close
+
+    endless = @runner.download(%w[forever], {})
+    assert_equal "PKstart", endless.first
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    endless.close
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5, "close stops the command"
+
+    # One that ignores TERM, with a child holding its output open: close
+    # still returns, after STOP_WAIT, by killing the whole group.
+    stubborn = @runner.download(%w[stubborn], {})
+    assert_equal "PKstubborn", stubborn.first
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    stubborn.close
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, DockerCommand::Download::STOP_WAIT + 3
   end
 end

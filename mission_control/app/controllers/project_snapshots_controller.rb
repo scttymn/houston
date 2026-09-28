@@ -19,4 +19,19 @@ class ProjectSnapshotsController < ApplicationController
   rescue Snapshots::Unavailable => e
     @error = e.message
   end
+
+  # Everything in one snapshot as a zip, streamed from restic
+  # (docs/plans/download-snapshot.md). A refusal comes before any byte, so
+  # it can still be a redirect; a failure after them breaks the connection,
+  # and the browser marks the download failed.
+  def download
+    project = Project.find_by!(name: params[:project_name])
+    export = SnapshotExport.open(project, location_name: params[:location].to_s, snapshot: params[:id].to_s, by: Current.user.email_address)
+    response.headers.merge!(export.headers)
+    self.response_body = export
+  rescue SnapshotExport::NotFound => e
+    raise ActiveRecord::RecordNotFound, e.message
+  rescue SnapshotExport::Busy, SnapshotExport::Failed => e
+    redirect_to project_path(project.name), alert: "Can't download snapshot #{params[:id].to_s.truncate(64)}: #{e.message}"
+  end
 end

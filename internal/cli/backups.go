@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -48,6 +53,95 @@ func snapshotNote(s server.Snapshot) string {
 		return "before deploy #" + strconv.Itoa(s.Deploy)
 	}
 	return s.Reason
+}
+
+// runSnapshotsDownload saves everything in a snapshot as a zip: to the
+// server's name for it in this directory, or to output. It's written to
+// <file>.part, checked to open as a zip (a cut-off one doesn't), then linked
+// into place, so an existing file is never overwritten and a failed
+// download leaves nothing behind.
+func runSnapshotsDownload(file, projectFlag, snapshot, location, output string, stdout, stderr io.Writer) int {
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	d, err := client.DownloadSnapshot(context.Background(), name, snapshot, location)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	defer d.Body.Close()
+	target := output
+	if target == "" {
+		target = d.Filename
+	}
+	if _, err := os.Lstat(target); err == nil {
+		fmt.Fprintf(stderr, "houston: %s already exists; pass -o to save it somewhere else\n", target)
+		return exitFailure
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return remoteFailed(err, stderr)
+	}
+	part := target + ".part"
+	n, err := save(part, d.Body)
+	if err == nil {
+		err = checkZip(part)
+	}
+	if err != nil {
+		os.Remove(part)
+		return remoteFailed(fmt.Errorf("the download of snapshot %s is incomplete: %w", snapshot, err), stderr)
+	}
+	if err := place(part, target); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			fmt.Fprintf(stderr, "houston: %s appeared while downloading; the download is kept as %s\n", target, part)
+			return exitFailure
+		}
+		os.Remove(part)
+		return remoteFailed(err, stderr)
+	}
+	fmt.Fprintf(stdout, "Downloaded snapshot %s of %s to %s (%s).\n", snapshot, name, target, humanize.Bytes(n))
+	return 0
+}
+
+// linkFile is os.Link; tests stand in a drive without hard links.
+var linkFile = os.Link
+
+// place moves a finished download to target, never over a file there. A
+// hard link fails if target exists; where there are no hard links (exFAT,
+// some network shares), target is checked, then part renamed.
+func place(part, target string) error {
+	err := linkFile(part, target)
+	if err == nil {
+		return os.Remove(part)
+	}
+	if errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if _, serr := os.Lstat(target); serr == nil {
+		return fs.ErrExist
+	}
+	return os.Rename(part, target)
+}
+
+func save(path string, r io.Reader) (int64, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(f, r)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return n, err
+}
+
+// checkZip opens the zip's central directory, which is written last: a
+// download cut off anywhere has none.
+func checkZip(path string) error {
+	z, err := zip.OpenReader(path)
+	if err != nil {
+		return fmt.Errorf("it isn't a whole zip (%w)", err)
+	}
+	return z.Close()
 }
 
 // runBackup queues a backup (Create, on the Snapshots panel); with follow, waits for its

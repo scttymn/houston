@@ -167,3 +167,56 @@ func TestBackupsClient(t *testing.T) {
 		t.Errorf("unknown project: %v", err)
 	}
 }
+
+func TestDownloadSnapshot(t *testing.T) {
+	var query string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.RawQuery
+		switch r.URL.Path {
+		case "/api/v1/projects/equip/snapshots/5c5edd4c/download":
+			w.Header().Set("Content-Disposition", `attachment; filename="equip-20260921-0300Z-5c5edd4c.zip"; filename*=UTF-8''equip-20260921-0300Z-5c5edd4c.zip`)
+			io.WriteString(w, "PK\x03\x04zip")
+		case "/api/v1/projects/equip/snapshots/climbs/download":
+			w.Header().Set("Content-Disposition", `attachment; filename="../../etc/x.zip"`)
+			io.WriteString(w, "PK")
+		case "/api/v1/projects/equip/snapshots/unnamed/download":
+			io.WriteString(w, "PK")
+		case "/api/v1/projects/equip/snapshots/busy/download":
+			w.WriteHeader(http.StatusConflict)
+			io.WriteString(w, `{"error":"another download started at 14:02 UTC is still running; try again when it's done"}`)
+		}
+	}))
+	defer s.Close()
+	c := New(Config{URL: s.URL, Token: "hou_x"})
+	ctx := context.Background()
+
+	d, err := c.DownloadSnapshot(ctx, "equip", "5c5edd4c", "unas-nfs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(d.Body)
+	d.Body.Close()
+	if d.Filename != "equip-20260921-0300Z-5c5edd4c.zip" || string(body) != "PK\x03\x04zip" || query != "location=unas-nfs" {
+		t.Errorf("download = %q, %q, query %q", d.Filename, body, query)
+	}
+	if d, _ = c.DownloadSnapshot(ctx, "equip", "5c5edd4c", ""); query != "" {
+		t.Errorf("no location: query %q, want none (the server's default)", query)
+	}
+	d.Body.Close()
+
+	// The server names the file, but never where it goes.
+	d, err = c.DownloadSnapshot(ctx, "equip", "climbs", "")
+	if err != nil || d.Filename != "x.zip" {
+		t.Errorf("climbing name: %q, %v", d.Filename, err)
+	}
+	d.Body.Close()
+	d, err = c.DownloadSnapshot(ctx, "equip", "unnamed", "")
+	if err != nil || d.Filename != "equip-unnamed.zip" {
+		t.Errorf("no name: %q, %v", d.Filename, err)
+	}
+	d.Body.Close()
+
+	if _, err := c.DownloadSnapshot(ctx, "equip", "busy", ""); err == nil || !strings.Contains(err.Error(), "another download started at 14:02") {
+		t.Errorf("refused: %v", err)
+	}
+}

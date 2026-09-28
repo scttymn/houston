@@ -287,6 +287,20 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	snapshots.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
 	snapshots.Flags().BoolVar(&snapshotsJSON, "json", false, "print the API's JSON")
+	var downloadLocation, downloadOutput string
+	download := &cobra.Command{
+		Use:   "download SNAPSHOT",
+		Short: "Save everything in a snapshot (its files and databases) as a zip",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runSnapshotsDownload(file, projectFlag, args[0], downloadLocation, downloadOutput, stdout, stderr)
+			return nil
+		},
+	}
+	download.Flags().StringVar(&projectFlag, "project", "", "the project (default: the compose file's name)")
+	download.Flags().StringVar(&downloadLocation, "location", "", "where the snapshot is (default: the project's backup location)")
+	download.Flags().StringVarP(&downloadOutput, "output", "o", "", "the file to save to (default: the server's name for it, here); never overwritten")
+	snapshots.AddCommand(download)
 	backup := command("backup", "Back a project up now, on the server", func() int {
 		return runBackup(file, projectFlag, backupFollow, stdout, stderr)
 	})
