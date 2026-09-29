@@ -5,6 +5,7 @@ For agents working **on Houston's code**. To *use* Houston (set up an app, deplo
 ## What's where
 - `cmd/houston`, `internal/`: the Go CLI. It runs locally (`houston dev`, `houston test`) and against a server (`--server`, via Mission Control's API).
 - `mission_control/`: Mission Control, the web admin (Rails 8.1, SQLite, Solid Queue, Solid Cable, Turbo, Stimulus).
+- `mission-control-go/`: Mission Control's Go rewrite, a [gantry](https://github.com/scttymn/gantry) app in this module (so it imports `internal/`), made by `gantry new mission-control-go --in-module`. It runs beside the Rails one (`gantry dev` in its folder: `http://mission-control-go.localhost`) until it replaces it. gantry's plan for it: gantry's `docs/plans/mission-control.md`.
 - `install/`: `install.sh` (the server installer), `runner.Dockerfile`, and `install/test/`, real runs on throwaway OrbStack machines.
 - `docs/plans/`: one plan per feature, each with an acceptance-criteria-to-test map and what was found while building it. Read the relevant plan before changing a feature.
 - `.github/workflows/release.yml`: a `v*` tag tests, then publishes the images and a GitHub Release.
