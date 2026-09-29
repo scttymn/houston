@@ -801,3 +801,56 @@ func TestAppPorts(t *testing.T) {
 	d := doc{appBase: "    build: .\n    expose: [\"3000\", \"3001\"]\n"}
 	assertProblem(t, loadProblems(t, writeCompose(t, d.String())), "services.app.expose", "one port")
 }
+
+// docs/plans/build-in-a-monorepo.md: in a git checkout, the boundary is the
+// checkout, so an app in a folder of it can build from its root.
+func TestBuildPathsInAMonorepo(t *testing.T) {
+	outside := t.TempDir()
+	os.WriteFile(filepath.Join(outside, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
+	app := func(git bool, build string) (*Project, string, string) {
+		repo := t.TempDir()
+		if git {
+			os.Mkdir(filepath.Join(repo, ".git"), 0o755)
+		}
+		dir := filepath.Join(repo, "app")
+		os.Mkdir(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644)
+		os.Symlink(outside, filepath.Join(repo, "out"))
+		path := filepath.Join(dir, "compose.yml")
+		os.WriteFile(path, []byte("name: shop\nservices:\n  app:\n    build: "+build+"\n    expose: [\"3000\"]\nx-houston:\n  health: /up\n"), 0o644)
+		p, _ := Load(path)
+		return p, dir, repo
+	}
+	// Refused when the file is read, or else when the build is set up.
+	refused := func(p *Project, dir string) bool {
+		if p == nil {
+			return true
+		}
+		_, _, err := p.BuildPaths(dir)
+		return err != nil
+	}
+
+	p, dir, repo := app(true, `{ context: .., dockerfile: app/Dockerfile }`)
+	context, dockerfile, err := p.BuildPaths(dir)
+	root, _ := filepath.EvalSymlinks(repo)
+	if err != nil || context != root || dockerfile != filepath.Join(root, "app", "Dockerfile") {
+		t.Errorf("the checkout's root: %q %q %v", context, dockerfile, err)
+	}
+	for name, build := range map[string]string{
+		"above the checkout":      `{ context: ../.. }`,
+		"symlinked out of it":     `{ context: ../out }`,
+		"a Dockerfile outside it": `{ context: .., dockerfile: ` + filepath.Join(outside, "Dockerfile") + ` }`,
+	} {
+		if p, dir, _ := app(true, build); !refused(p, dir) {
+			t.Errorf("%s: built anyway", name)
+		}
+	}
+	// Above the checkout is refused when the file is read, before any build.
+	if p, _, _ := app(true, `{ context: ../.. }`); p != nil {
+		t.Error("read a context above the checkout")
+	}
+	// Outside git, the compose file's folder is the boundary, as before.
+	if p, dir, _ := app(false, `{ context: .., dockerfile: app/Dockerfile }`); !refused(p, dir) {
+		t.Error("no git: built from above the compose file anyway")
+	}
+}

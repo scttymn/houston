@@ -540,7 +540,7 @@ func TestInit_CompletesTheDockerfileComposeBuilds(t *testing.T) {
 		{"a variable", "${CTX:-.}", "builds from ${CTX:-.}, which Houston can't resolve here"},
 		{"a bare GitHub remote", "github.com/example/app.git", "builds from github.com/example/app.git; houston init only completes a Dockerfile in this folder"},
 		// Refused when the compose file loads: a build stays inside the repo.
-		{"outside the folder", "..", `services.app.build.context: must be a path inside the repo (relative, without ..), not ".."`},
+		{"outside the folder", "..", `services.app.build.context: must be a path inside the repo (relative, without .. above its root), not ".."`},
 		{"a variable Dockerfile", "{ context: ., dockerfile: \"${DF:-Dockerfile}\" }", "can't resolve here"},
 	} {
 		t.Run(tc.name+" is refused", func(t *testing.T) {
@@ -559,7 +559,7 @@ func TestInit_CompletesTheDockerfileComposeBuilds(t *testing.T) {
 		write(t, dir, "compose.yml", "name: demo\nservices:\n  app:\n    build: https://github.com/example/app.git\n    ports: [\"80:80\"]\nx-houston:\n  health: /\n")
 		before := snapshot(t, dir)
 		code, _, stderr := initIn(t, dir, "")
-		if code != 1 || !strings.Contains(stderr, `must be a path inside the repo (relative, without ..), not "https://github.com/example/app.git"`) {
+		if code != 1 || !strings.Contains(stderr, `must be a path inside the repo (relative, without .. above its root), not "https://github.com/example/app.git"`) {
 			t.Errorf("exit %d, stderr %s", code, stderr)
 		}
 		sameFiles(t, before, snapshot(t, dir))

@@ -73,6 +73,9 @@ func Load(path string) (*Project, error) {
 // checking a file before writing it (houston init).
 func Parse(path string, data []byte) (*Project, error) {
 	var ps problems
+	// How far a build may reach above the compose file: to the root of the
+	// git checkout it's in (docs/plans/build-in-a-monorepo.md).
+	up := levelsToCheckout(filepath.Dir(path))
 	raw, ok := parseRaw(data, &ps)
 	if !ok {
 		return nil, ps.errors(path)
@@ -87,7 +90,7 @@ func Parse(path string, data []byte) (*Project, error) {
 		// which compose-go is told not to follow): that's what to fix.
 		var keys problems
 		checkTopLevel(raw, &keys)
-		checkServiceKeys(raw, &keys)
+		checkServiceKeys(raw, up, &keys)
 		if len(keys) > 0 {
 			return nil, keys.errors(path)
 		}
@@ -95,7 +98,7 @@ func Parse(path string, data []byte) (*Project, error) {
 	}
 
 	checkTopLevel(raw, &ps)
-	checkServiceKeys(raw, &ps)
+	checkServiceKeys(raw, up, &ps)
 	checkTopLevelVolumes(raw, &ps)
 	app := checkApp(model, &ps)
 	checkVolumeMounts(model, app, &ps)
@@ -370,7 +373,7 @@ var allowedServiceKeys = map[string]bool{
 // generationName is a data generation's accessory name: <service>-g<n>.
 var generationName = regexp.MustCompile(`-g[0-9]+$`)
 
-func checkServiceKeys(raw map[string]any, ps *problems) {
+func checkServiceKeys(raw map[string]any, up int, ps *problems) {
 	services, _ := raw["services"].(map[string]any)
 	for _, svc := range sortedKeys(services) {
 		keys, _ := services[svc].(map[string]any)
@@ -385,7 +388,7 @@ func checkServiceKeys(raw map[string]any, ps *problems) {
 			case k == "deploy":
 				checkDeployKeys(base+".deploy", keys[k], ps)
 			case k == "build":
-				checkBuild(base+".build", keys[k], ps)
+				checkBuild(base+".build", keys[k], up, ps)
 			case !allowedServiceKeys[k]:
 				ps.add(base+"."+k, "Houston can't run `%s` on the server", k)
 			}
@@ -398,10 +401,10 @@ func checkServiceKeys(raw map[string]any, ps *problems) {
 // dockerfile_inline, and every build arg has its value in the file.
 var allowedBuildKeys = map[string]bool{"context": true, "dockerfile": true, "target": true, "args": true}
 
-func checkBuild(path string, v any, ps *problems) {
+func checkBuild(path string, v any, up int, ps *problems) {
 	switch build := v.(type) {
 	case string:
-		checkInsideRepo(path+".context", build, ps)
+		checkInsideRepo(path+".context", build, up, ps)
 	case map[string]any:
 		for _, k := range sortedKeys(build) {
 			switch {
@@ -409,7 +412,7 @@ func checkBuild(path string, v any, ps *problems) {
 				ps.add(path+"."+k, "Houston can't use `build.%s`: a build reaches only the repo's own files (context, dockerfile, target and args)", k)
 			case k == "context" || k == "dockerfile":
 				s, _ := build[k].(string)
-				checkInsideRepo(path+"."+k, s, ps)
+				checkInsideRepo(path+"."+k, s, up, ps)
 			case k == "args":
 				checkBuildArgs(path+".args", build[k], ps)
 			}
@@ -417,14 +420,47 @@ func checkBuild(path string, v any, ps *problems) {
 	}
 }
 
-// checkInsideRepo: a relative path that stays in the repo (no .., no ~, no
-// URL). Symlinks are checked when the build runs (BuildPaths).
-func checkInsideRepo(path, value string, ps *problems) {
-	clean := filepath.Clean(value)
-	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") || strings.Contains(value, "://") || strings.Contains(value, "@") ||
-		clean == ".." || strings.HasPrefix(clean, "../") {
-		ps.add(path, "must be a path inside the repo (relative, without ..), not %q", value)
+// checkInsideRepo: a relative path that stays in the repo (no ~, no URL,
+// and no .. above the checkout's root, up levels above the compose file).
+// Symlinks are checked when the build runs (BuildPaths).
+func checkInsideRepo(path, value string, up int, ps *problems) {
+	clean := filepath.ToSlash(filepath.Clean(value))
+	above := 0
+	for clean == ".." || strings.HasPrefix(clean, "../") {
+		above++
+		clean = strings.TrimPrefix(strings.TrimPrefix(clean, ".."), "/")
 	}
+	if value == "" || filepath.IsAbs(value) || strings.HasPrefix(value, "~") || strings.Contains(value, "://") || strings.Contains(value, "@") ||
+		above > up {
+		ps.add(path, "must be a path inside the repo (relative, without .. above its root), not %q", value)
+	}
+}
+
+// levelsToCheckout is how many folders dir is below the root of the git
+// checkout it's in (the nearest folder with a .git, a worktree's file
+// included): 0 at the root, and outside git.
+func levelsToCheckout(dir string) int {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return 0
+	}
+	for d, n := abs, 0; ; d, n = filepath.Dir(d), n+1 {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return n
+		}
+		if filepath.Dir(d) == d {
+			return 0
+		}
+	}
+}
+
+// checkoutRoot is the root of the git checkout dir is in, else dir.
+func checkoutRoot(dir string) string {
+	d := dir
+	for range levelsToCheckout(dir) {
+		d = filepath.Dir(d)
+	}
+	return d
 }
 
 // checkBuildArgs: NAME=value or NAME: value. A bare NAME is filled in from
@@ -486,7 +522,9 @@ func (p *Project) BuildPaths(dir string) (context, dockerfile string, err error)
 	if build != nil && build.Dockerfile != "" {
 		file = build.Dockerfile
 	}
-	root, err := filepath.EvalSymlinks(dir)
+	// The boundary is the git checkout, else the compose file's folder
+	// (docs/plans/build-in-a-monorepo.md).
+	root, err := filepath.EvalSymlinks(checkoutRoot(dir))
 	if err != nil {
 		return "", "", err
 	}
