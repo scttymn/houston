@@ -767,3 +767,59 @@ func TestInit_NameFlagConflicts(t *testing.T) {
 	}
 	sameFiles(t, before, snapshot(t, dir))
 }
+
+// docs/plans/build-in-a-monorepo.md: an app in a folder of a git checkout,
+// built from the checkout's root. init completes its Dockerfile, which is in
+// its folder, and writes the ignore file BuildKit reads beside it
+// (Dockerfile.dockerignore), never the root's .dockerignore.
+func TestInit_AnAppInAFolderOfTheRepo(t *testing.T) {
+	terminal(t, false)
+	repo := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+	must(t, os.WriteFile(filepath.Join(repo, ".dockerignore"), []byte("/dist\n"), 0o644))
+	dir := filepath.Join(repo, "shop")
+	must(t, os.Mkdir(dir, 0o755))
+	write(t, dir, "Dockerfile", "FROM busybox AS production\nCMD [\"true\"]\n")
+	write(t, dir, "compose.yml", "name: shop\nservices:\n  app:\n    build: { context: .., dockerfile: shop/Dockerfile }\n    expose: [\"8080\"]\nx-houston:\n  health: /up\n")
+
+	code, stdout, stderr := initIn(t, dir, "")
+
+	if code != 0 {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	df := read(t, filepath.Join(dir, "Dockerfile"))
+	for _, stage := range []string{"AS dev", "AS test", "AS production"} {
+		if !strings.Contains(df, stage) {
+			t.Errorf("Dockerfile has no %s:\n%s", stage, df)
+		}
+	}
+	if got := read(t, filepath.Join(repo, ".dockerignore")); got != "/dist\n" {
+		t.Errorf("init changed the root's .dockerignore: %q", got)
+	}
+	if got := read(t, filepath.Join(dir, "Dockerfile.dockerignore")); !strings.Contains(got, ".git\n") || !strings.Contains(got, ".env\n") {
+		t.Errorf("Dockerfile.dockerignore = %q", got)
+	}
+	mustSay(t, stdout, "Dockerfile.dockerignore")
+}
+
+// A Dockerfile elsewhere in the checkout is still refused: init edits only
+// its own folder.
+func TestInit_DockerfileElsewhereInTheRepo(t *testing.T) {
+	terminal(t, false)
+	repo := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(repo, ".git"), 0o755))
+	for _, d := range []string{"shop", "other"} {
+		must(t, os.Mkdir(filepath.Join(repo, d), 0o755))
+		write(t, filepath.Join(repo, d), "Dockerfile", "FROM busybox AS production\n")
+	}
+	dir := filepath.Join(repo, "shop")
+	write(t, dir, "compose.yml", "name: shop\nservices:\n  app:\n    build: { context: .., dockerfile: other/Dockerfile }\n    expose: [\"8080\"]\nx-houston:\n  health: /up\n")
+	before := snapshot(t, repo)
+
+	code, _, stderr := initIn(t, dir, "")
+
+	if code != 1 || !strings.Contains(stderr, "the app's Dockerfile is ../other/Dockerfile, outside this folder") {
+		t.Errorf("exit %d: %s", code, stderr)
+	}
+	sameFiles(t, before, snapshot(t, repo))
+}

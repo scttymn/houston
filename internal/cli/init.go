@@ -64,7 +64,9 @@ func runInit(file, name string, stdin io.Reader, stdout, stderr io.Writer) int {
 	// BuildKit reads <Dockerfile>.dockerignore instead of .dockerignore
 	// when there is one.
 	ignorePath := filepath.Join(contextDir, ".dockerignore")
-	if _, err := os.Stat(dockerfilePath + ".dockerignore"); err == nil {
+	if _, err := os.Stat(dockerfilePath + ".dockerignore"); err == nil || outside(dir, contextDir) {
+		// Beside the Dockerfile when there's one there, and when the context
+		// is above this folder: init writes only in this folder.
 		ignorePath = dockerfilePath + ".dockerignore"
 	}
 	ignoreDocker, err := planDockerignore(ignorePath, dir, defaultDockerignore(contextDir, composePath, dockerfilePath))
@@ -132,9 +134,12 @@ func buildFiles(p *project.Project, dir string) (contextDir, dockerfile string, 
 	if !filepath.IsAbs(file) {
 		file = filepath.Join(context, file)
 	}
-	for _, p := range []string{context, file} {
+	// The Dockerfile is what init edits, so it's in this folder. The context
+	// may be above it, in the same checkout, which reading the compose file
+	// has already checked (docs/plans/build-in-a-monorepo.md).
+	for _, p := range []string{file} {
 		if rel, err := filepath.Rel(dir, p); err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-			return "", "", fmt.Errorf("the app builds from %s, outside this folder; houston init only completes a Dockerfile in this folder", relName(p, dir))
+			return "", "", fmt.Errorf("the app's Dockerfile is %s, outside this folder; houston init only completes a Dockerfile in this folder", relName(p, dir))
 		}
 	}
 	return context, file, nil
@@ -159,6 +164,12 @@ func planDockerfile(path, dir string) (*change, error) {
 		return nil, nil
 	}
 	return &change{path, content, name + ": " + summary}, nil
+}
+
+// outside reports whether path is above dir.
+func outside(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err != nil || rel == ".." || strings.HasPrefix(rel, "../")
 }
 
 func relName(path, dir string) string {
