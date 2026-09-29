@@ -712,3 +712,58 @@ func TestInit_Dockerignore(t *testing.T) {
 		})
 	}
 }
+
+// docs/plans/exec-and-init-name.md, row 10: --name, for a tool running init
+// whose app isn't named after its folder.
+func TestInit_NameFlag(t *testing.T) {
+	terminal(t, true)
+	dir := app(t, "static", "demo")
+
+	code, stdout, stderr := initIn(t, dir, "", "--name", "mission-control")
+
+	if code != 0 {
+		t.Fatalf("exit = %d (stderr: %s)", code, stderr)
+	}
+	if !strings.HasPrefix(read(t, filepath.Join(dir, "compose.yml")), "name: mission-control\n") {
+		t.Errorf("compose.yml:\n%s", read(t, filepath.Join(dir, "compose.yml")))
+	}
+	if strings.Contains(stdout, "Project name") {
+		t.Errorf("asked for the name although --name gave it:\n%s", stdout)
+	}
+
+	// Run again: compose.yml already names it, so nothing changes.
+	before := snapshot(t, dir)
+	if code, stdout, stderr := initIn(t, dir, "", "--name", "mission-control"); code != 0 || !strings.Contains(stdout, "already set up") {
+		t.Errorf("again: exit %d\n%s%s", code, stdout, stderr)
+	}
+	sameFiles(t, before, snapshot(t, dir))
+}
+
+func TestInit_NameFlagInvalid(t *testing.T) {
+	terminal(t, false)
+	dir := app(t, "static", "demo")
+	before := snapshot(t, dir)
+
+	code, _, stderr := initIn(t, dir, "", "--name", "Bad_Name")
+
+	if code != 2 || !strings.Contains(stderr, `project name "Bad_Name"`) {
+		t.Errorf("exit = %d, stderr %q; want 2 naming it", code, stderr)
+	}
+	sameFiles(t, before, snapshot(t, dir))
+}
+
+func TestInit_NameFlagConflicts(t *testing.T) {
+	terminal(t, false)
+	dir := app(t, "static", "demo")
+	if code, _, stderr := initIn(t, dir, ""); code != 0 {
+		t.Fatalf("first init: exit %d (%s)", code, stderr)
+	}
+	before := snapshot(t, dir)
+
+	code, _, stderr := initIn(t, dir, "", "--name", "other")
+
+	if code != 2 || !strings.Contains(stderr, "compose.yml names this project demo") {
+		t.Errorf("exit = %d, stderr %q; want 2", code, stderr)
+	}
+	sameFiles(t, before, snapshot(t, dir))
+}

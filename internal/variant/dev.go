@@ -34,6 +34,27 @@ func DevOverride(p *project.Project, r Route) []byte {
 	return render(routed(p, r, app))
 }
 
+// ExecOverride is the compose file Houston layers on top of compose.yml for
+// a `houston exec` one-off (docs/plans/exec-and-init-name.md): the dev
+// target and dev's limits, as DevOverride, with every service's published
+// ports reset, but no route: the one-off isn't served, and houston-dev
+// exists only while the dev proxy is set up.
+func ExecOverride(p *project.Project) []byte {
+	var services []any
+	for _, name := range sortedServices(p) {
+		svc := []any{}
+		if name == p.AppService {
+			svc = append(svc, "build", mapping("target", scalar("dev")))
+		}
+		svc = append(svc, "ports", tagged("!reset"))
+		if name == p.AppService {
+			svc = append(svc, unlimited(p)...)
+		}
+		services = append(services, name, mapping(svc...))
+	}
+	return render(mapping("services", mapping(services...)))
+}
+
 // unlimited resets the app's deploy.resources.limits, when compose.yml sets
 // them (docs/plans/dev-test-limits.md). They size the production image; in dev
 // and test the app's container also compiles and runs the tests, which needs

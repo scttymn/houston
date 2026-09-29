@@ -92,9 +92,24 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		}),
 		consoleCmd,
 	)
-	root.AddCommand(command("init", "Set up this folder for Houston: adds what's missing (Dockerfile stages, compose.yml, x-houston, .env) with defaults to edit", func() int {
-		return runInit(file, stdin, stdout, stderr)
-	}))
+	var initName string
+	initCmd := command("init", "Set up this folder for Houston: adds what's missing (Dockerfile stages, compose.yml, x-houston, .env) with defaults to edit", func() int {
+		return runInit(file, initName, stdin, stdout, stderr)
+	})
+	initCmd.Flags().StringVar(&initName, "name", "", "the project's name, without asking (when init writes compose.yml)")
+	root.AddCommand(initCmd)
+	execCmd := &cobra.Command{
+		Use:   "exec CMD [ARGS...]",
+		Short: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			code = runExec(file, args, stderr, d)
+			return nil
+		},
+	}
+	// Flags after the command are the command's: houston exec ls -la.
+	execCmd.Flags().SetInterspersed(false)
+	root.AddCommand(execCmd)
 	var asJSON bool
 	inspect := command("inspect", "Show what Houston reads from the compose file (what Mission Control is told)", func() int {
 		return runInspect(file, asJSON, stdout, stderr)

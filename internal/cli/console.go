@@ -69,13 +69,18 @@ func runLogs(file string, follow bool, stderr io.Writer, d docker.Runner) int {
 // containers count only when all is set. One-off `run` containers and
 // `houston test` projects never match.
 func appContainer(d docker.Runner, p *project.Project, all bool, stderr io.Writer) (string, bool) {
+	return serviceContainer(d, p.Name, p.AppService, all, stderr)
+}
+
+// serviceContainer is appContainer for any Compose project and service.
+func serviceContainer(d docker.Runner, project, service string, all bool, stderr io.Writer) (string, bool) {
 	args := []string{"ps"}
 	if all {
 		args = append(args, "-a")
 	}
 	args = append(args, "-q",
-		"--filter", "label=com.docker.compose.project="+p.Name,
-		"--filter", "label=com.docker.compose.service="+p.AppService,
+		"--filter", "label=com.docker.compose.project="+project,
+		"--filter", "label=com.docker.compose.service="+service,
 		"--filter", "label=com.docker.compose.oneoff=False")
 	out, err := d.Output(args...)
 	if err != nil {

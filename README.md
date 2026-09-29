@@ -102,7 +102,7 @@ In the project's folder:
 houston init
 ```
 
-`init` adds what Houston needs and changes nothing that's already there:
+`init` adds what Houston needs and changes nothing that's already there. It asks for the project's name (the folder's, by default); `houston init --name <name>` gives it without asking, for a tool running `init`.
 
 | File | When it's missing | When it's there |
 |---|---|---|
@@ -134,6 +134,7 @@ Then check it the way the server will run it:
 ```sh
 houston dev                  # the dev stage, code mounted, at http://<name>.localhost
 houston test                 # commands.test in a throwaway copy
+houston exec <command> [args]  # any command in the app: in its dev container, or a one-off one with the same code and data
 houston dev --production     # the production image, locally, at http://<name>-production.localhost
 houston init                 # again: "already set up" when nothing's missing
 ```

@@ -29,7 +29,7 @@ type change struct {
 // exists is never replaced, only completed. Every change is planned and
 // checked before anything is written, and a rerun finishes what an
 // interrupted run started (docs/plans/init-generic.md).
-func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runInit(file, name string, stdin io.Reader, stdout, stderr io.Writer) int {
 	composePath, err := filepath.Abs(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
@@ -43,7 +43,7 @@ func runInit(file string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	// The compose file first: it says which Dockerfile the app builds.
 	var changes []change
-	compose, composeChange, code := planCompose(composePath, dir, stdin, stdout, stderr)
+	compose, composeChange, code := planCompose(composePath, dir, name, stdin, stdout, stderr)
 	if code != 0 {
 		return code
 	}
@@ -226,7 +226,15 @@ func planDockerignore(path, dir, fresh string) (*change, error) {
 // planCompose returns the project the compose file will describe, and the
 // change to make (nil when nothing's missing). The result is checked with
 // project.Parse before anything is written.
-func planCompose(path, dir string, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
+// name is --name: the project's name, used without asking when compose.yml is
+// written, and required to match when it already exists ("" for neither).
+func planCompose(path, dir, name string, stdin io.Reader, stdout, stderr io.Writer) (*project.Project, *change, int) {
+	if name != "" {
+		if err := project.CheckName(name); err != nil {
+			fmt.Fprintf(stderr, "houston: project name %q %v\n", name, err)
+			return nil, nil, exitUsage
+		}
+	}
 	existing, err := os.ReadFile(path)
 	var content, message string
 	switch {
@@ -240,9 +248,12 @@ func planCompose(path, dir string, stdin io.Reader, stdout, stderr io.Writer) (*
 				}
 			}
 		}
-		name, ok := askName(dir, stdin, stdout, stderr)
-		if !ok {
-			return nil, nil, exitUsage
+		if name == "" {
+			asked, ok := askName(dir, stdin, stdout, stderr)
+			if !ok {
+				return nil, nil, exitUsage
+			}
+			name = asked
 		}
 		content, message = defaultCompose(name), "created "+filepath.Base(path)
 	case err != nil:
@@ -267,6 +278,10 @@ func planCompose(path, dir string, stdin io.Reader, stdout, stderr io.Writer) (*
 	if err != nil {
 		fmt.Fprint(stderr, err)
 		return nil, nil, exitFailure
+	}
+	if name != "" && p.Name != name {
+		fmt.Fprintf(stderr, "houston: %s names this project %s; --name says %s\n", filepath.Base(path), p.Name, name)
+		return nil, nil, exitUsage
 	}
 	if message == "" {
 		return p, nil, 0

@@ -74,6 +74,7 @@ Then check it the way the server will run it:
 ```sh
 houston inspect                # what Houston reads; exit 2 names any problem in compose.yml
 houston test                   # exits with the test command's code
+houston exec <command>         # in the app as houston dev runs it (a one-off when it isn't running); exits with the command's code
 houston dev --production       # the real production image, at http://<name>-production.localhost
 curl -s -o /dev/null -w "%{http_code}\n" http://<name>-production.localhost<health path>   # must be 200
 ```

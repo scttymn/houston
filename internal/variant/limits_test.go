@@ -27,6 +27,7 @@ func TestOverridesLeaveOtherLimits(t *testing.T) {
 		"DevOverride":        DevOverride(p, Route{Alias: "demo.localhost"}),
 		"DevOverride, ports": DevOverride(p, Route{KeepPorts: true}),
 		"TestOverride":       TestOverride(p),
+		"ExecOverride":       ExecOverride(p),
 	} {
 		if strings.Contains(string(got), "deploy") {
 			t.Errorf("%s touches limits it should leave:\n%s", name, got)

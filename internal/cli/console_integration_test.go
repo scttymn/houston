@@ -59,6 +59,13 @@ func TestConsoleLogsIntegration(t *testing.T) {
 	if out, code := houston("exit 3\n", "console"); code != 3 {
 		t.Errorf("console: exit %d, want 3:\n%s", code, out)
 	}
+	// houston exec in the running app (docs/plans/exec-and-init-name.md, row 12).
+	if out, code := houston("", "exec", "cat", "/stage"); code != 0 || strings.TrimSpace(out) != "dev" {
+		t.Errorf("exec: exit %d, output %q; want 0 and dev", code, out)
+	}
+	if out, code := houston("", "exec", "sh", "-c", "echo from-exec > /data/exec-was-here"); code != 0 {
+		t.Errorf("exec writing /data: exit %d:\n%s", code, out)
+	}
 
 	var followOut bytes.Buffer
 	follow := exec.Command(bin, "-f", composeFile, "logs", "-f")
@@ -92,6 +99,17 @@ func TestConsoleLogsIntegration(t *testing.T) {
 
 	if out, code := houston("cat /stage\n", "console"); code != 1 || !strings.Contains(out, "isn't running") {
 		t.Errorf("console after dev stopped: exit %d, output:\n%s", code, out)
+	}
+	// Not running: a one-off in the same project, with the same data, which
+	// stops the database it started.
+	if out, code := houston("", "exec", "cat", "/stage", "/data/exec-was-here"); code != 0 || !strings.Contains(out, "dev\nfrom-exec") {
+		t.Errorf("exec after dev stopped: exit %d, output %q; want dev and the file written before", code, out)
+	}
+	if out, code := houston("", "exec", "sh", "-c", "exit 5"); code != 5 {
+		t.Errorf("exec's exit code: %d, want 5:\n%s", code, out)
+	}
+	if serviceRunning(name, "db") || serviceRunning(name, "app") {
+		t.Errorf("exec left the project running")
 	}
 	if out, code := houston("", "logs"); code != 0 || !strings.Contains(out, "houston-dev-started") {
 		t.Errorf("logs after dev stopped: exit %d, output:\n%s", code, out)
