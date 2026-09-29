@@ -1,6 +1,6 @@
 // mission-control-go: it serves by default, and its other commands are `mission-control-go db
-// ...` and `mission-control-go task NAME` (in development, `gantry db migrate` runs
-// them in the app's container).
+// ...`, `mission-control-go jobs` and `mission-control-go task NAME` (in development, `gantry db
+// migrate` runs them in the app's container).
 package main
 
 import (
@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/jobs"
+	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 
 	"github.com/scttymn/houston/mission-control-go/app"
@@ -33,7 +35,8 @@ func main() {
 }
 
 const usage = `usage:
-  mission-control-go                        serve (the default)
+  mission-control-go                        serve (the default), and run the jobs unless JOBS_IN_SERVER=false
+  mission-control-go jobs                   run the background jobs alone
   mission-control-go db migrate|rollback [N]|status|seed|reset|console
   mission-control-go tasks                  the app's own tasks (app/tasks.go)
   mission-control-go task NAME [ARGS...]    run one
@@ -49,6 +52,8 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 	switch name {
 	case "serve":
 		err = serve(ctx, cfg, logger, nil)
+	case "jobs":
+		err = runJobs(ctx, cfg, logger)
 	case "db":
 		return dbCommand(ctx, cfg, args, in, out, errOut)
 	case "tasks":
@@ -69,28 +74,52 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 	return 0
 }
 
-// serve opens the database, brings it up to date, then serves until ctx
-// ends. Anything that fails before listening is returned, so the process
-// exits non-zero and its health check never passes. listening, when set,
-// gets the address.
-func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, listening chan<- string) error {
+// build opens the database, brings it up to date, and is the app on it,
+// its jobs defined. close closes the database.
+func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.App, close func(), err error) {
 	database, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer database.Close()
+	defer func() {
+		if err != nil {
+			database.Close()
+		}
+	}()
 	if err := migrations.Up(ctx, database); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := seeds.Run(ctx, database); err != nil {
-		return err
+		return nil, nil, err
 	}
 	key, err := sign.Key(ctx, database, cfg.SecretKey)
 	if err != nil {
+		return nil, nil, err
+	}
+	queue, err := jobs.New(ctx, database, jobs.Options{Log: logger})
+	if err != nil {
+		return nil, nil, err
+	}
+	signer := sign.Signer{Key: key}
+	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger})}
+	if err := a.DefineJobs(); err != nil {
+		return nil, nil, err
+	}
+	return a, func() { database.Close() }, nil
+}
+
+// serve builds the app, then serves until ctx ends, running its jobs
+// alongside when cfg says to. Anything that fails before listening is
+// returned, so the process exits non-zero and its health check never
+// passes. listening, when set, gets the address.
+func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, listening chan<- string) error {
+	a, closeDB, err := build(ctx, cfg, logger)
+	if err != nil {
 		return err
 	}
-	a := &app.App{DB: database, Log: logger, Signer: sign.Signer{Key: key}}
+	defer closeDB()
 	server := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	server.RegisterOnShutdown(a.Live.Close) // live streams end, so shutting down doesn't wait on them
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
@@ -100,6 +129,16 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, listenin
 	if listening != nil {
 		listening <- ln.Addr().String()
 	}
+	// The jobs stop with the server: running ones get their grace, then go
+	// back to the queue.
+	jobsCtx, stopJobs := context.WithCancel(ctx)
+	jobsDone := make(chan error, 1)
+	if cfg.JobsInServer {
+		go func() { jobsDone <- a.Jobs.Run(jobsCtx) }()
+	} else {
+		jobsDone <- nil
+	}
+	defer func() { stopJobs(); <-jobsDone }()
 	errs := make(chan error, 1)
 	go func() { errs <- server.Serve(ln) }()
 	select {
@@ -113,6 +152,18 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, listenin
 		return err
 	}
 	return nil
+}
+
+// runJobs builds the app and runs its jobs until ctx ends: a process of
+// jobs alone, beside servers started with JOBS_IN_SERVER=false.
+func runJobs(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	a, closeDB, err := build(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	logger.Info("running jobs", "env", cfg.Env)
+	return a.Jobs.Run(ctx)
 }
 
 // task runs one of app.Tasks, on the migrated database.

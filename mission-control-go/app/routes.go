@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/jobs"
+	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/web"
 
@@ -19,6 +21,12 @@ type App struct {
 	DB     *db.DB
 	Log    *slog.Logger
 	Signer sign.Signer
+	Jobs   *jobs.Queue // the background jobs, defined in app/jobs.go
+	// Live sends pages their changes as they happen: a page draws
+	// @a.Live.Source("post:" + id) to listen, and a controller or job calls
+	// a.Live.Broadcast(ctx, "post:"+id, turbo.Replace(...)), or
+	// a.Live.Refresh("post:"+id, turbo.RequestID(r)).
+	Live *live.Hub
 }
 
 // Handler is every route, in gantry's middleware.
@@ -30,6 +38,10 @@ func (a *App) Handler() http.Handler {
 
 	homePage := home.Controller{DB: a.DB}
 	rt.Handle("GET /{$}", homePage.Show)
+
+	// The pages' live streams: put it behind the filters that decide who
+	// may listen, as the pages it serves are.
+	rt.Handle("GET /live", a.Live.Serve)
 
 	assets.Routes(rt.Mount)
 	return rt.Handler()

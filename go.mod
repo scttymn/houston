@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/a-h/templ v0.3.1020
 	github.com/compose-spec/compose-go/v2 v2.15.0
-	github.com/scttymn/gantry v0.7.0
+	github.com/scttymn/gantry v0.8.0
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/term v0.46.0
@@ -13,6 +13,7 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0 // indirect
+	github.com/adhocore/gronx v1.20.5 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect

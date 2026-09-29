@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scttymn/gantry/jobs"
+	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/testkit"
 
@@ -15,10 +17,23 @@ import (
 	"github.com/scttymn/houston/mission-control-go/test"
 )
 
-func handler(t *testing.T) http.Handler {
-	a := &app.App{DB: test.DB(t), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: sign.Signer{Key: []byte("test-key")}}
-	return a.Handler()
+// newApp is the app on a test database, its jobs defined; they run when
+// the test calls a.Jobs.Drain.
+func newApp(t *testing.T) *app.App {
+	d := test.DB(t)
+	q, err := jobs.New(t.Context(), d, jobs.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := sign.Signer{Key: []byte("test-key")}
+	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q, Live: live.New(signer, live.Options{})}
+	if err := a.DefineJobs(); err != nil {
+		t.Fatal(err)
+	}
+	return a
 }
+
+func handler(t *testing.T) http.Handler { return newApp(t).Handler() }
 
 func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()

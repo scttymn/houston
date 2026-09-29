@@ -13,10 +13,12 @@ gantry console             # sqlite3 on the dev database
 - `app/routes.go`: every route, and the controllers behind them
 - `app/<name>/`: a controller and its views (`.templ`), one folder per resource
 - `app/models/`: each table's queries (`<table>.sql`, turned into Go by sqlc) and rules (`<table>.go`)
+- `app/jobs.go`: background jobs, run by the server (or `mission-control-go jobs`, with `JOBS_IN_SERVER=false`)
 - `app/tasks.go`: the app's own commands, run with `gantry task NAME`
 - `db/migrations/`: schema changes, written by `gantry g migration`; `db/schema.sql` is what they leave
 - `db/seeds/`: what a fresh database starts with
 - `assets/`: stylesheets, scripts, fonts and images; `assets/public/` is served at the root (robots.txt, the error pages)
+- `assets/js/`: JavaScript, through an import map with no build step: Turbo and Stimulus, the app's Stimulus controllers in `js/controllers/`, and packages from `gantry importmap pin NAME` in `js/vendor/`
 - `config/config.go`: settings, from the environment
 - `test/`: what the tests share
 
