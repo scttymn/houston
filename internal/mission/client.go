@@ -208,6 +208,8 @@ type Deploy struct {
 	Number   int    `json:"number"`
 	Token    string `json:"token"`
 	TookOver int    `json:"took_over"` // the silent deploy this one replaced, or 0
+	// Fresh: a rebuild, built without Docker's layer cache (docs/plans/rebuild.md).
+	Fresh bool `json:"fresh"`
 	// A claimed restore: kind "restore", the data generation it builds, and
 	// the one serving now (removed after the switch).
 	Kind               string `json:"kind"`

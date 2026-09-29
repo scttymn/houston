@@ -294,6 +294,9 @@ a.button--danger { color: #fff; }
 .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--ink); }
 .panel__head .panel__title { padding: 0; border: 0; font-size: 24px; }
 .panel__meta { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+/* Deploy history's head holds a count and two buttons (Rebuild, Deploy): on a
+   phone they wrap under the title, as the settings sections' do. */
+.history .panel__head, .history .panel__meta { flex-wrap: wrap; gap: 8px 12px; }
 .panel__row--actions { flex-direction: row; flex-wrap: wrap; gap: 8px; }
 .state-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; letter-spacing: 0.1em; background: #E6E0D0; }
 .state-pill__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }

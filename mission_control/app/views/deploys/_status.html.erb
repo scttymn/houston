@@ -1,5 +1,5 @@
 <%# The deploy's head (title, state, clock) and what's serving meanwhile, as the design's DeployLog. Replaced live by DeployBroadcast. %>
-<% word = deploy.restore? ? "Restore" : (deploy.copy? ? "Copy" : "Deploy") %>
+<% word = deploy.word %>
 <div id="deploy_status" class="deploy-status">
   <div class="deploy-head">
     <div class="deploy-head__main">

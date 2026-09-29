@@ -34,6 +34,33 @@ func TestDeployServer(t *testing.T) {
 	}
 }
 
+// houston rebuild --server asks for a fresh deploy (docs/plans/rebuild.md);
+// houston deploy --server doesn't.
+func TestRebuildServer(t *testing.T) {
+	var bodies []string
+	remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/garage/deploys": func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+			bodies = append(bodies, string(b))
+			var req struct{ Fresh bool }
+			json.Unmarshal(b, &req)
+			fresh := "false"
+			if req.Fresh {
+				fresh = "true"
+			}
+			io.WriteString(w, `{"number":9,"status":"queued","fresh":`+fresh+`,"sha":"`+strings.Repeat("d", 40)+`","ref":"refs/heads/main"}`)
+		},
+	})
+	code, out, errOut := run(&fakeDocker{}, "rebuild", "--server", "--project", "garage")
+	if code != 0 || !strings.Contains(out, "Queued garage #9") || !strings.Contains(out, "rebuild") {
+		t.Errorf("rebuild --server: exit %d\n%s%s", code, out, errOut)
+	}
+	run(&fakeDocker{}, "deploy", "--server", "--project", "garage")
+	if len(bodies) != 2 || !strings.Contains(bodies[0], `"fresh":true`) || strings.Contains(bodies[1], "fresh") {
+		t.Errorf("bodies: %q", bodies)
+	}
+}
+
 func TestLink(t *testing.T) {
 	var accessChecks atomic.Int32
 	accessOK := func() bool { return accessChecks.Add(1) >= 3 }

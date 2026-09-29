@@ -187,6 +187,8 @@
         <span class="panel__meta">
           <span class="mono eyebrow"><%= pluralize(@deploy_count, "deploy").upcase %></span>
           <% if @project.repo_url.present? %>
+            <%= button_to "Rebuild", project_deploys_path(@project.name, fresh: 1), class: "button button--small",
+                          title: "Deploy the head, building it from scratch: without Docker's layer cache (after a change to the server, say)" %>
             <%= button_to "Deploy", project_deploys_path(@project.name), class: "button button--primary button--small",
                           title: "Deploy the head of what the deploy rule matches (#{@project.deploy_rule_words.downcase})" %>
           <% end %>
@@ -206,7 +208,7 @@
           <span class="mono muted">#<%= deploy.number %></span>
           <span class="mono"><%= deploy.short_sha %></span>
           <span class="history__what">
-            <span><%= deploy.restore? ? "Restore" : deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %></span>
+            <span><%= deploy.restore? ? "Restore" : deploy.ref.delete_prefix("refs/heads/").delete_prefix("refs/tags/") %><%= " · Rebuild" if deploy.fresh? %></span>
             <small class="<%= "history__error" if deploy.error.present? %>"><%= deploy.error.presence || "#{time_ago_in_words(deploy.created_at)} ago · #{l(deploy.created_at, format: :short)}" %></small>
           </span>
           <%= state_chip(deploy.status) %>

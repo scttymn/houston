@@ -183,6 +183,7 @@ type DomainState struct {
 
 type Deploy struct {
 	Number     int     `json:"number"`
+	Fresh      bool    `json:"fresh"`  // a rebuild, without Docker's layer cache
 	Status     string  `json:"status"` // queued, in_flight, go, no_go
 	SHA        string  `json:"sha"`
 	Ref        string  `json:"ref"`
@@ -616,9 +617,15 @@ func (cl *Client) Deletion(ctx context.Context, id int) (Deletion, error) {
 	return d, cl.getJSON(ctx, "/api/v1/deletions/"+fmt.Sprint(id), &d)
 }
 
-func (cl *Client) DeployNow(ctx context.Context, project string) (Deploy, error) {
+// DeployNow queues the head of what the project's deploy rule matches; fresh
+// rebuilds it without Docker's layer cache (docs/plans/rebuild.md).
+func (cl *Client) DeployNow(ctx context.Context, project string, fresh bool) (Deploy, error) {
 	var d Deploy
-	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/deploys", nil, &d)
+	var body any
+	if fresh {
+		body = map[string]bool{"fresh": true}
+	}
+	return d, cl.postJSON(ctx, "/api/v1/projects/"+url.PathEscape(project)+"/deploys", body, &d)
 }
 
 type Access struct {

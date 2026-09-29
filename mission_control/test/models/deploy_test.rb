@@ -26,6 +26,25 @@ class DeployTest < ActiveSupport::TestCase
     Deploy.insert!(row.(other, 1))
   end
 
+  # A rebuild is a deploy built without Docker's layer cache
+  # (docs/plans/rebuild.md): asked for, the queued deploy becomes one, and a
+  # push moving it to a newer commit doesn't undo that.
+  test "a rebuild queues a fresh deploy" do
+    project = Project.create!(name: "equip", app_service: "app", services: %w[app], health: "/up", port: 80)
+    assert_not Deploy.queue!(project, sha: "a" * 40, ref: "refs/heads/main").fresh?, "a deploy isn't fresh"
+
+    rebuild = Deploy.queue!(project, sha: "a" * 40, ref: "refs/heads/main", fresh: true)
+    assert rebuild.fresh?
+    assert_equal 1, project.deploys.count, "the queued deploy became the rebuild"
+
+    pushed = Deploy.queue!(project, sha: "b" * 40, ref: "refs/heads/main")
+    assert_equal [ rebuild.id, "b" * 40, true ], [ pushed.id, pushed.sha, pushed.fresh? ]
+    assert_equal "Rebuild", pushed.word
+
+    other = Project.create!(name: "other", app_service: "app", services: %w[app], health: "/up", port: 80)
+    assert_equal "Deploy", Deploy.queue!(other, sha: "a" * 40, ref: "refs/heads/main").word
+  end
+
   # Two runners can pick the same queued deploy; the conditional flip lets
   # exactly one of them have it.
   test "a deploy is claimed once" do

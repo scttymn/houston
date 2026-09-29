@@ -17,17 +17,22 @@ var (
 )
 
 // runDeployServer implements houston deploy --server: queue the head of what
-// the deploy rule matches; with follow, wait for its result.
-func runDeployServer(file, projectFlag string, follow bool, stdout, stderr io.Writer) int {
+// the deploy rule matches; with follow, wait for its result. fresh is houston
+// rebuild --server: the deploy built without Docker's layer cache.
+func runDeployServer(file, projectFlag string, follow, fresh bool, stdout, stderr io.Writer) int {
 	client, name, code := remote(file, projectFlag, true, stderr)
 	if code != 0 {
 		return code
 	}
-	d, err := client.DeployNow(context.Background(), name)
+	d, err := client.DeployNow(context.Background(), name, fresh)
 	if err != nil {
 		return remoteFailed(err, stderr)
 	}
-	fmt.Fprintf(stdout, "Queued %s #%d: %s (%s)\n", name, d.Number, short(d.SHA), d.Ref)
+	what := ""
+	if d.Fresh {
+		what = ", a rebuild"
+	}
+	fmt.Fprintf(stdout, "Queued %s #%d: %s (%s)%s\n", name, d.Number, short(d.SHA), d.Ref, what)
 	if !follow {
 		return 0
 	}

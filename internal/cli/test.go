@@ -19,7 +19,9 @@ import (
 // project (its own name, volumes and random secrets), torn down every time.
 // Laptops and server runners get the same environment: .env and the shell's
 // values for the file's variables never reach it.
-func runTest(file string, stdout, stderr io.Writer, d docker.Runner) int {
+// runTest implements houston test; noCache builds the test service without
+// Docker's layer cache first (a rebuild's step 00: docs/plans/rebuild.md).
+func runTest(file string, noCache bool, stdout, stderr io.Writer, d docker.Runner) int {
 	abs, err := filepath.Abs(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "houston: %v\n", err)
@@ -52,7 +54,17 @@ func runTest(file string, stdout, stderr io.Writer, d docker.Runner) int {
 	env := testEnv(os.Environ(), p.Variables)
 	base := []string{"compose", "-p", name, "--project-directory", dir, "--env-file", "/dev/null", "-f", abs, "-f", override}
 
-	code, runErr := d.Run(dir, env, slices.Concat(base, []string{"run", "--rm", "--build", p.AppService, "sh", "-c", p.Houston.Commands.Test})...)
+	var code int
+	var runErr error
+	if noCache {
+		code, runErr = d.Run(dir, env, slices.Concat(base, []string{"build", "--no-cache", p.AppService})...)
+		if runErr == nil && code != 0 {
+			fmt.Fprintf(stderr, "houston test: the test image didn't build (exit %d)\n", code)
+		}
+	}
+	if runErr == nil && code == 0 {
+		code, runErr = d.Run(dir, env, slices.Concat(base, []string{"run", "--rm", "--build", p.AppService, "sh", "-c", p.Houston.Commands.Test})...)
+	}
 	// Teardown always runs and never changes the result: leftovers are only
 	// resources, and the next run uses a new project name anyway.
 	if downCode, downErr := d.Run(dir, env, slices.Concat(base, []string{"down", "-v", "--rmi", "local", "--remove-orphans"})...); downErr != nil || downCode != 0 {

@@ -432,6 +432,7 @@ type harness struct {
 	exec    *fakeExec
 	claimed *mission.Deploy
 	tests   bool
+	fresh   bool   // houston rebuild on the server: Options.Fresh
 	project string // the claimed job's project, as a runner passes it
 	// snapshotEvery: how often the pre-deploy snapshot is polled.
 	snapshotEvery time.Duration
@@ -509,6 +510,7 @@ func (h *harness) run() int {
 		Claimed:        h.claimed,
 		Project:        h.project,
 		RunTests:       h.tests,
+		Fresh:          h.fresh,
 		Houston:        "/usr/local/bin/houston",
 		SnapshotEvery:  h.snapshotEvery,
 	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission, Exec: h.exec})
@@ -1076,6 +1078,34 @@ func TestDeployContinuesAClaimedDeploy(t *testing.T) {
 				t.Errorf("docker ran: %v", h.docker.whats())
 			}
 		})
+	}
+}
+
+// A rebuild (docs/plans/rebuild.md) builds without Docker's layer cache: its
+// tests (houston test --no-cache) and its image (--no-cache).
+func TestFreshBuild(t *testing.T) {
+	withTests := strings.Replace(shopCompose, "  hooks:\n", "  commands: { test: bin/rails test }\n  hooks:\n", 1)
+	claimed := mission.Deploy{ID: 21, Number: 6, Token: "claimed", Fresh: true}
+	h := newHarness(t, withTests)
+	h.claimed, h.tests = &claimed, true
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if want := [][]string{{"/usr/local/bin/houston", "-f", filepath.Join(h.dir, "compose.yml"), "test", "--no-cache"}}; !reflect.DeepEqual(h.exec.calls, want) {
+		t.Errorf("exec calls = %v, want %v", h.exec.calls, want)
+	}
+	if got := h.docker.call("build").args; len(got) < 2 || got[1] != "--no-cache" {
+		t.Errorf("build = %v", got)
+	}
+
+	// houston rebuild on the server: Options.Fresh, nothing claimed.
+	h = newHarness(t, shopCompose)
+	h.fresh = true
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if got := h.docker.call("build").args; len(got) < 2 || got[1] != "--no-cache" {
+		t.Errorf("build = %v", got)
 	}
 }
 

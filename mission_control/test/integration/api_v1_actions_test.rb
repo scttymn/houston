@@ -43,6 +43,16 @@ class ApiV1ActionsTest < ActionDispatch::IntegrationTest
     assert_match(/Could not read/, json["error"])
   end
 
+  test "rebuild queues the head, fresh" do
+    make_linked_project("garage")
+    use_fake_git(refs("refs/heads/main" => A)) { api :post, "/projects/garage/deploys" }
+    assert_equal [ 1, false ], json.values_at("number", "fresh")
+
+    use_fake_git(refs("refs/heads/main" => A)) { api :post, "/projects/garage/deploys", { fresh: true } }
+    assert_response :success
+    assert_equal [ 1, true ], json.values_at("number", "fresh"), "the queued deploy became a rebuild"
+  end
+
   test "linking over the API" do
     ls = "4be21c0aa11b2c3d4e5f60718293a4b5c6d7e8f9\trefs/heads/main\n"
     responder = lambda do |args, _|

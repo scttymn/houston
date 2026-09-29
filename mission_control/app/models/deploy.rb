@@ -118,17 +118,30 @@ class Deploy < ApplicationRecord
   # Queues a deploy of sha for a runner (build step 4). One queued deploy per
   # project: a newer push switches it, so a burst of pushes deploys once,
   # the newest. Runs in the caller's transaction when there is one.
-  def self.queue!(project, sha:, ref:)
+  # fresh: a rebuild, built without Docker's layer cache (docs/plans/rebuild.md).
+  # A deploy already queued moves to the commit, and becomes a rebuild when one
+  # is asked for; a push never undoes that.
+  def self.queue!(project, sha:, ref:, fresh: false)
     transaction do
       project.refuse_while_deleting!
       if (queued = project.deploys.find_by(status: "queued"))
-        queued.update!(sha:, ref:, log: queued.log + "A newer push switched to #{sha.first(7)} (#{ref}).\n")
+        log = queued.log
+        log += "A newer push switched to #{sha.first(7)} (#{ref}).\n" unless fresh && queued.sha == sha && queued.ref == ref
+        log += "Rebuild asked for: it builds without Docker's layer cache.\n" if fresh && !queued.fresh?
+        queued.update!(sha:, ref:, fresh: queued.fresh? || fresh, log:)
         queued
       else
         number = (project.deploys.maximum(:number) || 0) + 1
-        project.deploys.create!(number:, sha:, ref:, status: "queued", token_digest: "", heartbeat_at: Time.current)
+        project.deploys.create!(number:, sha:, ref:, fresh:, status: "queued", token_digest: "", heartbeat_at: Time.current)
       end
     end
+  end
+
+  # What it's called: Restore, Copy, Rebuild or Deploy.
+  def word
+    return "Restore" if restore?
+    return "Copy" if copy?
+    fresh? ? "Rebuild" : "Deploy"
   end
 
   # Queues a restore of project to a snapshot, code and data together, into

@@ -18,9 +18,13 @@ import (
 	"github.com/scttymn/houston/internal/runner"
 )
 
+// deployRun is deploy.Run; tests set it.
+var deployRun = deploy.Run
+
 // runDeploy implements `houston deploy` on a Houston server, as the houston
-// user, in a clean checkout of the project.
-func runDeploy(file, ref string, stdout, stderr io.Writer, d docker.Runner) int {
+// user, in a clean checkout of the project; fresh is houston rebuild, built
+// without Docker's layer cache (docs/plans/rebuild.md).
+func runDeploy(file, ref string, fresh bool, stdout, stderr io.Writer, d docker.Runner) int {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Fprintf(stderr, "houston deploy: %v\n", err)
@@ -36,9 +40,10 @@ func runDeploy(file, ref string, stdout, stderr io.Writer, d docker.Runner) int 
 		fmt.Fprintln(stderr, "houston deploy: run it as the houston user (sudo -iu houston): Kamal deploys over SSH with its key, ~houston/.ssh/id_ed25519")
 		return exitFailure
 	}
-	return deploy.Run(context.Background(), deploy.Options{
+	return deployRun(context.Background(), deploy.Options{
 		File:    file,
 		Ref:     ref,
+		Fresh:   fresh,
 		Arch:    runtime.GOARCH,
 		SSHDir:  filepath.Join(home, ".ssh"),
 		Environ: os.Environ(),

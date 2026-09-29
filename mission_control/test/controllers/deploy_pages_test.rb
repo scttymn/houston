@@ -28,6 +28,22 @@ class DeployPagesTest < ActionDispatch::IntegrationTest
     assert_equal [ "b" * 40 ], garage.deploys.pluck(:sha), "the queued deploy moves to the newest head"
   end
 
+  # Rebuild, beside Deploy: the same, without Docker's layer cache
+  # (houston rebuild --server).
+  test "Rebuild queues a fresh deploy, named Rebuild" do
+    garage = make_linked_project("garage")
+    get project_path("garage")
+    assert_select ".history .panel__head form[action=?] button", "/projects/garage/deploys?fresh=1", text: "Rebuild"
+
+    use_fake_git(refs("refs/heads/main" => "a" * 40)) { post project_deploys_path("garage", fresh: 1) }
+    assert_redirected_to project_deploy_path("garage", 1)
+    assert garage.deploys.sole.fresh?
+    follow_redirect!
+    assert_select "h1", /Rebuild/
+    get project_path("garage")
+    assert_select ".history__row[data-deploy='1']", /Rebuild/
+  end
+
   test "Deploy refuses without a repo or when the repo can't be read" do
     git = FakeGit.new { |_, _| git_ok }
     use_fake_git(git) { post project_deploys_path("equip") }

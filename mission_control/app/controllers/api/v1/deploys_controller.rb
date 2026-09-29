@@ -15,10 +15,11 @@ class Api::V1::DeploysController < Api::V1::BaseController
     render json: RemoteView.deploy_with_log(deploy, params[:log_from])
   end
 
-  # POST: deploy now (the head of what the deploy rule matches).
+  # POST: deploy now (the head of what the deploy rule matches); {fresh: true}
+  # rebuilds, without Docker's layer cache (docs/plans/rebuild.md).
   def create
     return render json: { error: "link the repo first (houston link)" }, status: :unprocessable_entity if @project.repo_url.blank?
-    deploy = ChangeCheck.new(@project).queue_head!
+    deploy = ChangeCheck.new(@project).queue_head!(fresh: params[:fresh] == true)
     render json: RemoteView.deploy(deploy)
   rescue ChangeCheck::Failed => e
     render json: { error: e.message }, status: :bad_gateway

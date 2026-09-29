@@ -296,3 +296,35 @@ func TestTest_RefusesASymlinkedHoustonDir(t *testing.T) {
 		t.Errorf("written outside the checkout: %v", entries)
 	}
 }
+
+// --no-cache (a rebuild's step 00) builds the test service without Docker's
+// layer cache, then runs as ever.
+func TestTestNoCache(t *testing.T) {
+	dir, path := newProject(t, phoenixWithTest, nil)
+	d := &fakeDocker{runResult: byCommand(ok(0), ok(0))}
+	if code, _, stderr := run(d, "-f", path, "test", "--no-cache"); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(d.runs) != 3 {
+		t.Fatalf("want build, run and down, got %q", d.runs)
+	}
+	name := d.runs[0][2]
+	if want := testArgs(name, dir, path, "build", "--no-cache", "app"); !reflect.DeepEqual(d.runs[0], want) {
+		t.Errorf("build =\n%q\nwant\n%q", d.runs[0], want)
+	}
+	if want := testArgs(name, dir, path, "run", "--rm", "--build", "app", "sh", "-c", "mix test"); !reflect.DeepEqual(d.runs[1], want) {
+		t.Errorf("run =\n%q\nwant\n%q", d.runs[1], want)
+	}
+	// A failed build is the tests' failure, and still cleans up.
+	failing := &fakeDocker{runResult: func(args []string) (int, error) {
+		for _, a := range args {
+			if a == "build" {
+				return 1, nil
+			}
+		}
+		return 0, nil
+	}}
+	if code, _, _ := run(failing, "-f", path, "test", "--no-cache"); code == 0 || len(failing.runs) != 2 || failing.runs[1][len(testArgs("x", dir, path))] != "down" {
+		t.Errorf("a failed build: exit %d, runs %q", code, failing.runs)
+	}
+}

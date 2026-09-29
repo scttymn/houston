@@ -51,7 +51,7 @@ class Api::RunnerJobsController < Api::BaseController
     def job(deploy, token, took_over)
       project = deploy.project
       {
-        deploy: { id: deploy.id, number: deploy.number, token:, sha: deploy.sha, ref: deploy.ref, took_over:,
+        deploy: { id: deploy.id, number: deploy.number, token:, sha: deploy.sha, ref: deploy.ref, took_over:, fresh: deploy.fresh,
                   kind: deploy.kind, generation: deploy.generation, previous_generation: deploy.previous_generation,
                   **previous(deploy), **copy(deploy) },
         project: { name: project.name, repo_url: project.repo_url, branch: project.branch, compose_path: project.compose_path,

@@ -24,6 +24,18 @@ class ApiClaimsTest < ActionDispatch::IntegrationTest
     post "/api/runner/jobs/claim", params: { runner:, wait: }.to_json, headers:
   end
 
+  test "a rebuild's job says fresh" do
+    garage = make_linked_project("garage")
+    Deploy.queue!(garage, sha: "a" * 40, ref: "refs/heads/main", fresh: true)
+    claim
+    assert_equal true, json["deploy"]["fresh"]
+
+    rideclub = make_linked_project("rideclub")
+    Deploy.queue!(rideclub, sha: "b" * 40, ref: "refs/heads/main")
+    claim(runner: "houston-runner-2")
+    assert_equal false, json["deploy"]["fresh"]
+  end
+
   test "a runner claims the oldest queued deploy" do
     older = make_linked_project("garage")
     newer = make_linked_project("rideclub")

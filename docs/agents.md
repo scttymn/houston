@@ -105,6 +105,7 @@ houston status --project <name>                     # GO, the running commit, do
 houston logs --server --project <name>
 ```
 - After this, every push to the deploy branch deploys by itself.
+- `houston rebuild --server --follow --project <name>` deploys the head again without Docker's layer cache: for a change to the server the files don't show (an unchanged commit reuses every cached build step).
 - **A deploy:** a snapshot of the running version, the image built, the release hook, then the switch, only once the new version answers its health check. So a NO-GO leaves the old version serving.
 - **After a NO-GO:** `houston deploys show --project <name>` prints the steps and the log. Fix it, push, and it deploys again.
 - **Check:** `https://<name>.<domain><health path>` answers 200.

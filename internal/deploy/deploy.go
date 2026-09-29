@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,7 +93,10 @@ type Options struct {
 	Project string
 	// RunTests runs x-houston.commands.test first (step 00) with Houston.
 	RunTests bool
-	Houston  string // this binary, for houston test
+	// Fresh builds without Docker's layer cache (houston rebuild on the
+	// server; a claimed rebuild says so itself): docs/plans/rebuild.md.
+	Fresh   bool
+	Houston string // this binary, for houston test
 	// SnapshotEvery: how often a run in Mission Control (a snapshot, a
 	// restore's data) is checked, and a must-arrive report retried; zero: 2 s.
 	SnapshotEvery time.Duration
@@ -370,7 +374,11 @@ type run struct {
 func (r *run) deploy(tookOver bool) int {
 	if r.o.RunTests && r.p.Houston.Commands.Test != "" {
 		r.report.step("Test")
-		code, err := r.d.Exec.Stream(r.ctx, r.dir, nil, r.report, r.o.Houston, "-f", r.file, "test")
+		args := []string{"-f", r.file, "test"}
+		if r.fresh() {
+			args = append(args, "--no-cache")
+		}
+		code, err := r.d.Exec.Stream(r.ctx, r.dir, nil, r.report, r.o.Houston, args...)
 		if err != nil || code != 0 {
 			return r.fail(fmt.Sprintf("tests failed (exit %d%s); the old version keeps serving", code, errText(err)))
 		}
@@ -548,6 +556,9 @@ func first(s string, n int) string {
 	return s
 }
 
+// fresh: a rebuild, asked for here or by the claimed deploy.
+func (r *run) fresh() bool { return r.o.Fresh || (r.o.Claimed != nil && r.o.Claimed.Fresh) }
+
 // build builds the app's image at the commit and pushes it to Houston's
 // registry. Returns why it couldn't.
 func (r *run) build() string {
@@ -559,7 +570,13 @@ func (r *run) build() string {
 	}
 	// Kamal only deploys images labelled service=<name> (its own builder
 	// adds the label; Houston builds the image itself).
-	if msg := r.docker("the image didn't build", "build", "--target", "production", "--label", "service="+r.p.Name, "-t", r.image, "-f", dockerfile, context); msg != "" {
+	args := []string{"build", "--target", "production", "--label", "service=" + r.p.Name, "-t", r.image, "-f", dockerfile, context}
+	if r.fresh() {
+		// Every step again: Docker's layer cache doesn't know the machine
+		// changed (a VM's CPU, say). BuildKit's cache mounts are kept.
+		args = slices.Insert(args, 1, "--no-cache")
+	}
+	if msg := r.docker("the image didn't build", args...); msg != "" {
 		return msg
 	}
 	if msg := r.docker("couldn't push the image to Houston's registry", "push", r.image); msg != "" {

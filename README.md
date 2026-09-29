@@ -185,6 +185,7 @@ houston deploy --server --follow --project app
 
 ## Day to day
 
+- **Rebuild.** `houston rebuild --server` (or **Rebuild** beside Deploy) deploys the head again without Docker's layer cache, tests and image both. Use it after a change to the server that the files don't show, such as a VM given a new CPU type: an unchanged commit reuses every cached build step. Build caches an app mounts itself (`RUN --mount=type=cache`) are kept.
 - **Push to deploy.** A push rings the webhook. Mission Control reads the repo's refs itself, and a runner fetches the commit, runs `commands.test` (step 00), then deploys. Once a project's pushes arrive, Mission Control also checks its refs every 10 minutes, so a lost webhook only delays a deploy. Traffic moves only once the new version passes its health check, so a failed deploy leaves the old version serving.
 - **A deploy:**
   1. a snapshot of the running version (data and code)

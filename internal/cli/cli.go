@@ -85,13 +85,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		return runConsole(file, stderr, d)
 	})
 	consoleCmd.Flags().BoolVar(&consoleOnServer, "server", false, "in the app running on the server (SSH to houston@<LAN address>)")
-	root.AddCommand(
-		dev,
-		command("test", "Run x-houston.commands.test in a throwaway copy of the project", func() int {
-			return runTest(file, stdout, stderr, d)
-		}),
-		consoleCmd,
-	)
+	var testNoCache bool
+	testCmd := command("test", "Run x-houston.commands.test in a throwaway copy of the project", func() int {
+		return runTest(file, testNoCache, stdout, stderr, d)
+	})
+	testCmd.Flags().BoolVar(&testNoCache, "no-cache", false, "build the test image without Docker's layer cache (as a rebuild does)")
+	root.AddCommand(dev, testCmd, consoleCmd)
 	var initName string
 	initCmd := command("init", "Set up this folder for Houston: adds what's missing (Dockerfile stages, compose.yml, x-houston, .env) with defaults to edit", func() int {
 		return runInit(file, initName, stdin, stdout, stderr)
@@ -116,19 +115,29 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	inspect.Flags().BoolVar(&asJSON, "json", false, "print JSON, as Mission Control reads it")
 	root.AddCommand(inspect)
-	var ref, deployProject string
-	var onServer, deployFollow bool
-	deployCmd := command("deploy", "Deploy this checkout on a Houston server (there, as houston); --server: have the server deploy the repo's head", func() int {
-		if onServer {
-			return runDeployServer(file, deployProject, deployFollow, stdout, stderr)
-		}
-		return runDeploy(file, ref, stdout, stderr, d)
-	})
-	deployCmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
-	deployCmd.Flags().BoolVar(&onServer, "server", false, "from anywhere: queue a deploy of the head of what the deploy rule matches")
-	deployCmd.Flags().StringVar(&deployProject, "project", "", "with --server: the project (default: the compose file's name)")
-	deployCmd.Flags().BoolVar(&deployFollow, "follow", false, "with --server: follow it to its result; exit 0 on GO, 1 on NO-GO")
-	root.AddCommand(deployCmd)
+	// deploy and rebuild: the same, rebuild without Docker's layer cache
+	// (docs/plans/rebuild.md).
+	for _, c := range []struct {
+		name, short string
+		fresh       bool
+	}{
+		{"deploy", "Deploy this checkout on a Houston server (there, as houston); --server: have the server deploy the repo's head", false},
+		{"rebuild", "Deploy, building from scratch: without Docker's layer cache (after a change to the server, say); --server: the repo's head", true},
+	} {
+		var ref, deployProject string
+		var onServer, deployFollow bool
+		cmd := command(c.name, c.short, func() int {
+			if onServer {
+				return runDeployServer(file, deployProject, deployFollow, c.fresh, stdout, stderr)
+			}
+			return runDeploy(file, ref, c.fresh, stdout, stderr, d)
+		})
+		cmd.Flags().StringVar(&ref, "ref", "", "what's being deployed (refs/heads/<branch> or refs/tags/<tag>); default: the checked-out branch")
+		cmd.Flags().BoolVar(&onServer, "server", false, "from anywhere: queue a "+c.name+" of the head of what the deploy rule matches")
+		cmd.Flags().StringVar(&deployProject, "project", "", "with --server: the project (default: the compose file's name)")
+		cmd.Flags().BoolVar(&deployFollow, "follow", false, "with --server: follow it to its result; exit 0 on GO, 1 on NO-GO")
+		root.AddCommand(cmd)
+	}
 	var accessID, accessSecret, loginSSH string
 	login := &cobra.Command{
 		Use:   "login [url]",

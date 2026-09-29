@@ -1,4 +1,4 @@
-<% word = @deploy.restore? ? "Restore" : (@deploy.copy? ? "Copy" : "Deploy") %>
+<% word = @deploy.word %>
 <% content_for :title, "#{@project.name} · #{word} ##{@deploy.number}" %>
 <%= turbo_stream_from @deploy %>
 <main class="page deploy-page">
