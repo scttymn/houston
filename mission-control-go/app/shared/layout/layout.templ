@@ -17,6 +17,9 @@ templ Layout(p Page) {
 			<link rel="icon" href={ assets.Path("icon.svg") } type="image/svg+xml"/>
 			@assets.Styles.Tag()
 			@assets.ImportMap.Tag()
+			if p.Head != nil {
+				@p.Head
+			}
 		</head>
 		<body>
 			if !p.NoHeader {
@@ -164,4 +167,11 @@ templ header(c Chrome) {
 // toast is what just happened, in a corner, gone after a few seconds.
 templ toast(t Toast) {
 	<div class={ "toast", templ.KV("toast--nogo", t.NoGo), templ.KV("toast--go", !t.NoGo) } role="status" data-controller="toast" data-action="click->toast#dismiss">{ t.Text }</div>
+}
+
+// MorphRefreshes has a live refresh morph the page in place, keeping the
+// scroll (Rails' turbo_refreshes_with method: :morph, scroll: :preserve).
+templ MorphRefreshes() {
+	<meta name="turbo-refresh-method" content="morph"/>
+	<meta name="turbo-refresh-scroll" content="preserve"/>
 }

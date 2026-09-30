@@ -14,6 +14,7 @@ import (
 	"github.com/scttymn/gantry/crypt"
 
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/test/testapp"
 )
 
@@ -294,3 +295,16 @@ func TestSyncCatchesUpAGeneration(t *testing.T) {
 func stringsReader(s string) *strings.Reader { return strings.NewReader(s) }
 
 func testRunnerToken() string { return testapp.RunnerToken }
+
+// A sync saves the project the board shows: it's told.
+func TestSyncRefreshesTheBoard(t *testing.T) {
+	a, h := runnerAPI(t)
+	board, stop := a.Live.Listen(api.FlightBoard)
+	defer stop()
+	post(h, "POST", "/api/projects/sync", payload(nil), nil) // held: a secret's missing, but saved
+	select {
+	case <-board:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the board wasn't told")
+	}
+}

@@ -181,7 +181,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		Updater: serverupdate.Updater{DB: database, Docker: dockercmd.Docker, Own: own, Version: version, Repo: cfg.Repo, RunnerImage: cfg.RunnerImage,
 			Runners: cfg.Runners, Log: logger},
 		Port: &port.Port{DB: database, Own: own, RunnerImage: cfg.RunnerImage}, Stats: &appstats.Stats{Docker: dockercmd.Docker, Log: logger},
-		SystemStatus: &systemstatus.Status{Registry: cfg.RegistryURL}, Runners: runners,
+		SystemStatus: &systemstatus.Status{Registry: cfg.RegistryURL, Identity: app.Identity(identity)}, Runners: runners,
 		CloudflareSettings: &cfsettings.Settings{DB: database, Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}}}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err

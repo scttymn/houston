@@ -50,3 +50,21 @@ func TestSchedule(t *testing.T) {
 	}
 	_ = sql.ErrNoRows
 }
+
+// The next scheduled backup is today's, unless today's ran: then tomorrow's.
+func TestNextAt(t *testing.T) {
+	d := test.DB(t)
+	q := models.New(d.Read)
+	d.Write.Exec(`INSERT INTO storage_locations (id, name, kind) VALUES (1, 'nas', 'nfs')`)
+	d.Write.Exec(`INSERT INTO projects (id, name, app_service, services, health, port) VALUES (1, 'shop', 'web', '["web"]', '/', 80)`)
+	denver, _ := time.LoadLocation("America/Denver")
+	s, _ := models.ParseSchedule("daily 03:00", denver)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, denver)
+	if next, err := s.NextAt(context.Background(), q, 1, now); err != nil || !next.Equal(time.Date(2026, 9, 30, 3, 0, 0, 0, denver)) {
+		t.Errorf("= %v %v", next, err)
+	}
+	d.Write.Exec(`INSERT INTO backup_runs (project_id, location_id, kind, reason, scheduled_for, heartbeat_at) VALUES (1, 1, 'auto', 'schedule', '2026-09-30', CURRENT_TIMESTAMP)`)
+	if next, err := s.NextAt(context.Background(), q, 1, now); err != nil || !next.Equal(time.Date(2026, 10, 1, 3, 0, 0, 0, denver)) {
+		t.Errorf("after today's = %v %v", next, err)
+	}
+}

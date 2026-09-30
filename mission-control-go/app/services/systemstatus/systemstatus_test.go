@@ -2,6 +2,8 @@ package systemstatus_test
 
 import (
 	"context"
+	"database/sql"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -72,5 +74,56 @@ func TestRegistry(t *testing.T) {
 	s2 := &systemstatus.Status{Registry: "http://127.0.0.1:1"}
 	if s2.RegistryUp(context.Background(), now) {
 		t.Error("nothing listening is down")
+	}
+}
+
+// A route answers as this install through Cloudflare; a miss is HOLD for
+// the switch-over's 10 minutes, then NO-GO, and is probed again sooner.
+func TestRoute(t *testing.T) {
+	answer, code := "me", 200
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(code)
+		io.WriteString(w, answer+"\n")
+	}))
+	defer srv.Close()
+	probes := 0
+	s := &systemstatus.Status{Identity: "me", PingURL: func(host string) string {
+		probes++
+		if host != "admin.svnmns.com" {
+			t.Errorf("probed %s", host)
+		}
+		return srv.URL + "/ping"
+	}}
+	now := time.Now()
+	ctx := context.Background()
+	inst := models.Installation{BaseDomain: "svnmns.com"}
+	if r := s.Route(ctx, inst, "admin", false, now); r != nil {
+		t.Errorf("before Cloudflare = %+v", r)
+	}
+	inst.CloudflareConnectedAt = sql.NullTime{Time: now.Add(-time.Minute), Valid: true}
+	if r := s.Route(ctx, inst, "admin", true, now); r.State != "go" || probes != 0 {
+		t.Errorf("on the host = %+v, %d probes", r, probes)
+	}
+	if r := s.Route(ctx, inst, "admin", false, now); r.State != "go" || probes != 1 {
+		t.Errorf("= %+v", r)
+	}
+	answer = "someone else"
+	if r := s.Route(ctx, inst, "admin", false, now.Add(29*time.Second)); r.State != "go" || probes != 1 {
+		t.Errorf("a go is kept 30 s: %+v", r)
+	}
+	if r := s.Route(ctx, inst, "admin", false, now.Add(31*time.Second)); r.State != "hold" || r.Reason != "answered 200, not from this Mission Control" {
+		t.Errorf("switching over = %+v", r)
+	}
+	code = 530
+	if r := s.Route(ctx, inst, "admin", false, now.Add(37*time.Second)); probes != 3 || r.Reason != "530 from Cloudflare: its edge is still sending admin.svnmns.com to a tunnel that isn't this one" {
+		t.Errorf("a miss is probed again in 5 s: %d probes, %+v", probes, r)
+	}
+	inst.CloudflareConnectedAt.Time = now.Add(-11 * time.Minute)
+	if r := s.Route(ctx, inst, "admin", false, now.Add(38*time.Second)); r.State != "nogo" {
+		t.Errorf("after the switch-over = %+v", r)
+	}
+	s2 := &systemstatus.Status{PingURL: func(string) string { return "http://no-such-host.invalid/ping" }}
+	if r := s2.Route(ctx, inst, "hooks", false, now); r.Reason != "can't look up hooks.svnmns.com from this server" {
+		t.Errorf("= %+v", r)
 	}
 }

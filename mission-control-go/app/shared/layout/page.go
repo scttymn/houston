@@ -2,6 +2,8 @@ package layout
 
 import (
 	"net/http"
+
+	"github.com/a-h/templ"
 	"strconv"
 
 	"github.com/scttymn/gantry/web"
@@ -15,6 +17,8 @@ type Page struct {
 	NoHeader bool
 	Chrome   Chrome
 	Toast    *Toast
+	// Head is what the page adds to the head (Rails' content_for :head).
+	Head templ.Component
 }
 
 func (p Page) title() string {

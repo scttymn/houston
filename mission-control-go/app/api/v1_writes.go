@@ -211,6 +211,7 @@ func (c V1) Maintenance(w http.ResponseWriter, r *http.Request) error {
 	if p, err = q.ProjectByID(ctx, p.ID); err != nil {
 		return err
 	}
+	c.Live.Refresh(FlightBoard, "")
 	return web.JSON(w, http.StatusOK, viewMaintenance(p))
 }
 

@@ -6,8 +6,13 @@ package systemstatus
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
+	"io"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +23,12 @@ import (
 const (
 	keepFor = 30 * time.Second
 	timeout = 2 * time.Second
+	// SwitchOver is how long Cloudflare gets to move a name onto the
+	// tunnel after it's connected before a miss is NO-GO: its edge can
+	// keep sending a name to an older record for a while.
+	SwitchOver = 10 * time.Minute
+	// recheckMiss is how soon a miss is probed again.
+	recheckMiss = 5 * time.Second
 )
 
 // Tunnel is where the tunnel stands: "go" (connected), "hold" (no
@@ -44,9 +55,94 @@ type Status struct {
 	Cloudflare, Registry string
 	HTTP                 *http.Client
 
+	// Identity is what this Mission Control's /ping answers (app.Identity).
+	Identity string
+	// PingURL is where a host's /ping is ("https://<host>/ping", or a
+	// test's).
+	PingURL func(host string) string
+
 	mu       sync.Mutex
 	tunnel   kept[Tunnel]
 	registry kept[bool]
+	misses   map[string]kept[string]
+}
+
+// Route is whether <label>.<base> reaches this Mission Control through
+// Cloudflare: "go", "hold" (switching over), or "nogo", with what happened.
+type Route struct {
+	State  string
+	Reason string
+}
+
+// Route probes <label>.<base> (admin, hooks): out through Cloudflare's
+// edge and back in through the tunnel, where only this install's /ping
+// answers with its identity. Nil before Cloudflare is connected. onHost is
+// a request on that host already: it reaches here. The probe's result is
+// kept, not the state: HOLD turns into NO-GO with the clock.
+func (s *Status) Route(ctx context.Context, inst models.Installation, label string, onHost bool, now time.Time) *Route {
+	if !inst.CloudflareConnectedAt.Valid || inst.BaseDomain == "" {
+		return nil
+	}
+	if onHost {
+		return &Route{State: "go"}
+	}
+	host := label + "." + inst.BaseDomain
+	s.mu.Lock()
+	k, ok := s.misses[host]
+	s.mu.Unlock()
+	keep := keepFor
+	if ok && k.value != "" {
+		keep = recheckMiss
+	}
+	if !ok || now.Sub(k.at) >= keep {
+		k = kept[string]{value: s.probe(ctx, host), at: now}
+		s.mu.Lock()
+		if s.misses == nil {
+			s.misses = map[string]kept[string]{}
+		}
+		s.misses[host] = k
+		s.mu.Unlock()
+	}
+	switch {
+	case k.value == "":
+		return &Route{State: "go"}
+	case inst.CloudflareConnectedAt.Time.After(now.Add(-SwitchOver)):
+		return &Route{State: "hold", Reason: k.value}
+	}
+	return &Route{State: "nogo", Reason: k.value}
+}
+
+// probe is "" when host answered as this install, else what happened.
+func (s *Status) probe(ctx context.Context, host string) string {
+	u := "https://" + host + "/ping"
+	if s.PingURL != nil {
+		u = s.PingURL(host)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return err.Error()
+	}
+	resp, err := s.client().Do(req)
+	if err != nil {
+		var dns *net.DNSError
+		var timeout interface{ Timeout() bool }
+		switch {
+		case errors.As(err, &dns):
+			return "can't look up " + host + " from this server"
+		case errors.As(err, &timeout) && timeout.Timeout():
+			return "no answer in 2 s"
+		}
+		return "couldn't connect to " + host + " from this server (" + err.Error() + ")"
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+	switch {
+	case resp.StatusCode == 200 && subtle.ConstantTimeCompare([]byte(strings.TrimSpace(string(body))), []byte(s.Identity)) == 1:
+		return ""
+	case resp.StatusCode == 530:
+		return "530 from Cloudflare: its edge is still sending " + host + " to a tunnel that isn't this one"
+	}
+	return "answered " + strconv.Itoa(resp.StatusCode) + ", not from this Mission Control"
 }
 
 func (s *Status) client() *http.Client {

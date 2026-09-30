@@ -13,8 +13,8 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/api"
-	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/projects"
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
@@ -201,14 +201,16 @@ func (a *App) Router() *web.Router {
 		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)
 		return nil
 	})
-	homePage := home.Controller{DB: a.DB}
+	board := projects.Controller{DB: a.DB, Live: a.Live, Stats: a.Stats, Status: a.SystemStatus, Version: a.Version}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
-		s.Handle("GET /{$}", homePage.Show)
+		s.Handle("GET /{$}", board.Index)
+		s.Handle("GET /resources", board.Resources)
 	})
 
-	// The pages' live streams: put it behind the filters that decide who
-	// may listen, as the pages it serves are.
-	rt.Handle("GET /live", a.Live.Serve)
+	// The pages' live streams, for whoever may see the pages.
+	rt.Scope("", web.Pipeline{signIn.Required}, func(s *web.Scope) {
+		s.Handle("GET /live", a.Live.Serve)
+	})
 
 	assets.Routes(rt.Mount)
 	return rt

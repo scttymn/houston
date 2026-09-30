@@ -118,6 +118,7 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	c.pushMaintenanceRoutes(ctx, inst, project)
+	c.Live.Refresh(FlightBoard, "") // saved, held or not
 	if missing, err := c.missingSecrets(ctx, project.ID, s.Variables); err != nil || len(missing) > 0 {
 		return hold(w, missing, err)
 	}

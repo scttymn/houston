@@ -29,6 +29,7 @@ type browser struct {
 	jar    []*http.Cookie
 	addr   string
 	tunnel bool
+	host   string // "mc.local" when blank
 }
 
 // admin is the app with its admin, and a browser on the network.
@@ -48,7 +49,11 @@ func (b *browser) do(method, path string, form url.Values) *httptest.ResponseRec
 	if form != nil {
 		body = strings.NewReader(form.Encode())
 	}
-	r := httptest.NewRequest(method, "http://mc.local"+path, body)
+	host := b.host
+	if host == "" {
+		host = "mc.local"
+	}
+	r := httptest.NewRequest(method, "http://"+host+path, body)
 	if form != nil {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
