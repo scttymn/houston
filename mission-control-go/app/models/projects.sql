@@ -48,3 +48,6 @@ SELECT key, value FROM secrets WHERE project_id = ? ORDER BY key;
 
 -- name: CreateSecret :exec
 INSERT INTO secrets (project_id, key, value) VALUES (?, ?, ?);
+
+-- name: ProjectsInMaintenance :many
+SELECT * FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name;

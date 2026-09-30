@@ -95,3 +95,27 @@ func MissingSecrets(vars []Variable, values map[string]string) []string {
 	}
 	return missing
 }
+
+// Hostnames are every host its app answers on: <name>.<base> and its
+// custom domains, each once.
+func (p Project) Hostnames(base string) []string {
+	out := []string{p.Host(base)}
+	for _, d := range p.Domains.V {
+		if !contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// MarshalJSON writes an empty reason as null, as the Rails app does.
+func (s DomainState) MarshalJSON() ([]byte, error) {
+	var reason *string
+	if s.Reason != "" {
+		reason = &s.Reason
+	}
+	return json.Marshal(struct {
+		State  string  `json:"state"`
+		Reason *string `json:"reason"`
+	}{s.State, reason})
+}

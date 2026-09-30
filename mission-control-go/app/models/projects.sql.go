@@ -252,6 +252,69 @@ func (q *Queries) ProjectSecrets(ctx context.Context, projectID int64) ([]Projec
 	return items, nil
 }
 
+const projectsInMaintenance = `-- name: ProjectsInMaintenance :many
+SELECT id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name
+`
+
+func (q *Queries) ProjectsInMaintenance(ctx context.Context) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, projectsInMaintenance)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.AppService,
+			&i.Services,
+			&i.Domains,
+			&i.DomainStates,
+			&i.Variables,
+			&i.Volumes,
+			&i.Databases,
+			&i.Details,
+			&i.DeployRule,
+			&i.Health,
+			&i.Port,
+			&i.DataGeneration,
+			&i.KeepAuto,
+			&i.KeepDeploy,
+			&i.BackupSchedule,
+			&i.BackupLocationID,
+			&i.RepoUrl,
+			&i.Branch,
+			&i.ComposePath,
+			&i.DeployKeyPrivate,
+			&i.DeployKeyPublic,
+			&i.WebhookSecret,
+			&i.WebhookVerifiedAt,
+			&i.SeenRefs,
+			&i.LastCheckedAt,
+			&i.LastCheckError,
+			&i.MaintenanceSince,
+			&i.MaintenanceBy,
+			&i.MaintenanceMessage,
+			&i.MaintenancePage,
+			&i.SyncedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const releaseProjectHosts = `-- name: ReleaseProjectHosts :exec
 DELETE FROM project_hosts WHERE project_id = ?1 AND name NOT IN (/*SLICE:keep*/?)
 `
