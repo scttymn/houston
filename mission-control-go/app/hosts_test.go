@@ -51,8 +51,8 @@ func TestHosts(t *testing.T) {
 		{"GET", "HOOKS.svnmns.com:443", "/assets/x", 404, ""},
 		{"POST", "hooks.svnmns.com", "/a/b", 404, ""},
 		{"GET", "admin.svnmns.com", "/ping", 200, a.Identity},
-		{"GET", "admin.svnmns.com", "/", 302, `<a href="/sign-in">Found</a>`},
-		{"GET", "192.168.0.56", "/", 302, `<a href="/sign-in">Found</a>`},
+		{"GET", "admin.svnmns.com", "/", 302, `<a href="/setup">Found</a>`}, // no admin yet
+		{"GET", "192.168.0.56", "/", 302, `<a href="/setup">Found</a>`},
 	} {
 		w := request(h, c.method, c.host, c.path, "192.168.0.9", nil)
 		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) || c.body == "" && w.Body.Len() > 0 {

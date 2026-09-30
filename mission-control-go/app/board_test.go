@@ -39,10 +39,19 @@ func signedIn(t *testing.T) (*app.App, *browser) {
 	return a, b
 }
 
+// reachable has the route probes (admin. and hooks.) answered as this
+// install, from a local server.
+func reachable(t *testing.T, a *app.App) {
+	ping := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, a.Identity) }))
+	t.Cleanup(ping.Close)
+	a.SystemStatus.PingURL = func(string) string { return ping.URL }
+}
+
 // Before any project: the launch pad, and the pre-flight check.
 func TestFlightBoardEmpty(t *testing.T) {
 	a, b := signedIn(t)
-	must(t, a, `INSERT INTO installations (id, base_domain, dns_mode, time_zone) VALUES (1, 'svnmns.com', 'tunnel', 'America/Denver')`)
+	reachable(t, a)
+	must(t, a, `INSERT INTO installations (id, base_domain, dns_mode, time_zone, cloudflare_connected_at) VALUES (1, 'svnmns.com', 'tunnel', 'America/Denver', CURRENT_TIMESTAMP)`)
 	must(t, a, `INSERT INTO storage_locations (name, kind, is_default, acknowledged_at) VALUES ('nas', 'nfs', TRUE, CURRENT_TIMESTAMP)`)
 	page := b.do("GET", "/", nil).Body.String()
 	contains(t, page, "<title>Projects · Mission Control</title>", `<meta name="turbo-refresh-method" content="morph">`,
@@ -52,8 +61,8 @@ func TestFlightBoardEmpty(t *testing.T) {
 		`<span>*.svnmns.com</span><small>New apps get a subdomain automatically</small>`,
 		`<span>Backup storage nas</span><small>Default · password saved</small>`,
 		`<span class="disp stat__value stat__value--none">—</span>`)
-	if strings.Contains(page, "Route to admin.") || strings.Contains(page, `class="panel flight"`) {
-		t.Errorf("routes before Cloudflare, or a board:\n%s", page)
+	if strings.Contains(page, `class="panel flight"`) {
+		t.Errorf("a board:\n%s", page)
 	}
 }
 
@@ -66,7 +75,8 @@ func TestFlightBoard(t *testing.T) {
 	b.h = a.Handler()
 	now := time.Now()
 	denver, _ := time.LoadLocation("America/Denver")
-	must(t, a, `INSERT INTO installations (id, base_domain, time_zone, latest_release) VALUES (1, 'svnmns.com', 'America/Denver', 'v9.9.9')`)
+	reachable(t, a)
+	must(t, a, `INSERT INTO installations (id, base_domain, time_zone, latest_release, cloudflare_connected_at) VALUES (1, 'svnmns.com', 'America/Denver', 'v9.9.9', CURRENT_TIMESTAMP)`)
 	must(t, a, `INSERT INTO storage_locations (id, name, kind, is_default, acknowledged_at) VALUES (1, 'nas', 'nfs', TRUE, CURRENT_TIMESTAMP)`)
 	must(t, a, `INSERT INTO projects (id, name, app_service, services, domains, domain_states, volumes, health, port, backup_schedule, maintenance_since, details) VALUES
 		(1, 'shop', 'web', '["web","db"]', '["shop.example.com"]', '{"shop.example.com":{"state":"DNS PENDING","reason":"nameservers"}}',
@@ -143,6 +153,7 @@ func TestFlightBoard(t *testing.T) {
 func TestFlightBoardRoutes(t *testing.T) {
 	a, b := signedIn(t)
 	must(t, a, `INSERT INTO installations (id, base_domain, cloudflare_connected_at, cloudflare_api_token) VALUES (1, 'svnmns.com', ?, ?)`, time.Now().Add(-time.Minute), crypt.Of("x"))
+	firstRunDone(t, a)
 	answer := a.Identity
 	ping := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, answer) }))
 	defer ping.Close()

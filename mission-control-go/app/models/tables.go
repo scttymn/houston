@@ -243,6 +243,12 @@ type Session struct {
 	LastSeenAt  time.Time
 }
 
+type SetupCode struct {
+	ID         int64
+	CodeDigest string
+	CreatedAt  time.Time
+}
+
 type StorageLocation struct {
 	ID             int64
 	Name           string

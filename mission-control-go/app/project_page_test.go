@@ -41,6 +41,7 @@ func shop(t *testing.T) (*app.App, *browser) {
 	}
 	must(t, a, `INSERT INTO backup_runs (project_id, location_id, kind, reason, status, snapshot_id, bytes, heartbeat_at, finished_at, found) VALUES
 		(1, 1, 'auto', 'schedule', 'go', 'abcdef1234', 2048, CURRENT_TIMESTAMP, ?, '{"sqlite":[{"volume":"data","path":"app.db"}]}')`, time.Date(2026, 9, 30, 3, 0, 0, 0, time.UTC))
+	firstRunDone(t, a)
 	b.h = a.Handler()
 	return a, b
 }

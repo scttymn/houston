@@ -33,6 +33,18 @@ type browser struct {
 	frame  string // the <turbo-frame> asking, if one is
 }
 
+// firstRunDone finishes first run for a test's install, keeping what the
+// test made: Cloudflare connected, a default storage saved, and the route
+// probes answered as this install. Until then, pages lead to setup.
+func firstRunDone(t *testing.T, a *app.App) {
+	t.Helper()
+	must(t, a, `INSERT INTO installations (id, cloudflare_connected_at) VALUES (1, CURRENT_TIMESTAMP)
+		ON CONFLICT (id) DO UPDATE SET cloudflare_connected_at = COALESCE(cloudflare_connected_at, excluded.cloudflare_connected_at)`)
+	must(t, a, `INSERT INTO storage_locations (name, kind, is_default, acknowledged_at) SELECT 'setup', 'nfs', TRUE, CURRENT_TIMESTAMP
+		WHERE NOT EXISTS (SELECT 1 FROM storage_locations WHERE is_default AND acknowledged_at IS NOT NULL)`)
+	reachable(t, a)
+}
+
 // admin is the app with its admin, and a browser on the network.
 func admin(t *testing.T) (*app.App, *browser) {
 	t.Helper()
@@ -103,6 +115,7 @@ func count(t *testing.T, a *app.App, table string) int {
 // and signing out ends the session.
 func TestSignIn(t *testing.T) {
 	a, b := admin(t)
+	firstRunDone(t, a)
 	if w := b.do("GET", "/", nil); w.Code != 302 || location(w) != "/sign-in" {
 		t.Fatalf("a page signed out = %d %v", w.Code, w.Header())
 	}
@@ -146,7 +159,8 @@ func TestSignIn(t *testing.T) {
 // A session works only the way it was made: a cookie from plain HTTP on the
 // network can't be replayed through the tunnel.
 func TestSessionBound(t *testing.T) {
-	_, b := admin(t)
+	a, b := admin(t)
+	firstRunDone(t, a)
 	b.signIn("one@example.com", password)
 	b.tunnel = true
 	if w := b.do("GET", "/", nil); w.Code != 302 {
@@ -161,6 +175,7 @@ func TestSessionBound(t *testing.T) {
 // A session ends 30 days after signing in, or after 2 weeks unused.
 func TestSessionEnds(t *testing.T) {
 	a, b := admin(t)
+	firstRunDone(t, a)
 	b.signIn("one@example.com", password)
 	a.DB.Write.Exec(`UPDATE sessions SET created_at = ?, last_seen_at = ?`, time.Now().Add(-29*24*time.Hour), time.Now().Add(-13*24*time.Hour))
 	if w := b.do("GET", "/", nil); w.Code != 200 {

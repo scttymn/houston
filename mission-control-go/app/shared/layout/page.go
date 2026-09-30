@@ -16,6 +16,10 @@ type Page struct {
 	Title string
 	// NoHeader is a page with nothing to navigate to yet (sign-in).
 	NoHeader bool
+	// Setup is a first-run step's number (1 to 3): the bar shows the steps
+	// and Host, the address the admin reached, instead.
+	Setup int
+	Host  string
 	Chrome   Chrome
 	Toast    *Toast
 	// Head is what the page adds to the head (Rails' content_for :head).
@@ -67,4 +71,9 @@ var ChromeKey = web.NewKey[Chrome]("chrome")
 func For(r *http.Request, title string) Page {
 	c, _ := web.Get(r, ChromeKey)
 	return Page{Title: title, Chrome: c, Zone: web.Zone(r)}
+}
+
+// SetupStep is first run's step (1 to 3), titled title.
+func SetupStep(r *http.Request, title string, step int) Page {
+	return Page{Title: title, Setup: step, Host: web.RequestHost(r), Zone: web.Zone(r)}
 }

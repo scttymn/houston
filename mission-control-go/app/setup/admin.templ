@@ -1,0 +1,77 @@
+package setup
+
+import (
+	"net/http"
+
+	"github.com/scttymn/gantry/web"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
+)
+
+// AdminPage is step 1: the setup code, and the admin's email and password.
+templ AdminPage(page layout.Page, r *http.Request, form models.Admin, errs web.Invalid) {
+	@layout.Layout(page) {
+		<main class="setup">
+			<form class="setup__form" action="/setup" accept-charset="UTF-8" method="post">
+				<div class="setup__intro">
+					<span class="mono eyebrow eyebrow--signal">STEP 01 OF 03</span>
+					<h1 class="disp">Create the admin login</h1>
+					<p>This is the one account that signs in to Mission Control. You can change the email and password later in Settings.</p>
+				</div>
+				if len(errs["base"]) > 0 {
+					<div class="notice notice--nogo" role="alert">{ web.Sentence(errs["base"]) }</div>
+				}
+				<div class="field">
+					<label for="setup_code">Setup code</label>
+					<input class="mono field__code" autocomplete="off" autocapitalize="characters" spellcheck="false" required autofocus aria-describedby="code-hint" aria-invalid={ invalid(errs, "code") } type="text" value={ form.Code } name="setup[code]" id="setup_code"/>
+					if len(errs["code"]) > 0 {
+						<span class="field__error">{ "Setup code " + web.Sentence(errs["code"]) + "." }</span>
+					}
+					<span class="field__hint" id="code-hint">Printed by the install script, next to this LAN address.</span>
+				</div>
+				<div class="field">
+					<label for="setup_email_address">Email</label>
+					<input autocomplete="username" required aria-invalid={ invalid(errs, "email_address") } type="email" value={ form.EmailAddress } name="setup[email_address]" id="setup_email_address"/>
+					if len(errs["email_address"]) > 0 {
+						<span class="field__error">{ "Email " + web.Sentence(errs["email_address"]) + "." }</span>
+					}
+				</div>
+				<div class="field-pair">
+					<div class="field">
+						<label for="setup_password">Password</label>
+						<input autocomplete="new-password" required aria-invalid={ invalid(errs, "password") } type="password" name="setup[password]" id="setup_password"/>
+					</div>
+					<div class="field">
+						<label for="setup_password_confirmation">Confirm password</label>
+						<input autocomplete="new-password" required aria-invalid={ invalid(errs, "password_confirmation") } type="password" name="setup[password_confirmation]" id="setup_password_confirmation"/>
+					</div>
+				</div>
+				if problems := append(append([]string{}, errs["password"]...), errs["password_confirmation"]...); len(problems) > 0 {
+					<span class="field__error">{ "Password " + web.Sentence(problems) + "." }</span>
+				}
+				<span class="field__hint field__hint--tight">At least 12 characters. A password manager is the easy way.</span>
+				<div><input type="submit" name="commit" value="Create login and continue" class="button button--primary"/></div>
+			</form>
+			<aside class="panel setup__aside">
+				<h2 class="disp panel__title">Why a setup code</h2>
+				<p class="panel__row">Until this step is done, anyone on your network who finds this page could claim the server. The code proves you're the one who ran the installer.</p>
+				<div class="panel__row">
+					<span class="mono eyebrow">INSTALLER OUTPUT</span>
+					<pre class="mono terminal">
+						{ "Houston is running.\nFinish setup at  " + web.Scheme(r) + "://" + web.RequestHost(r) + "\nSetup code       " }<span class="terminal__code">XXXX-XXXX</span>
+					</pre>
+				</div>
+				<p class="panel__row panel__row--muted">The code stops working once the account exists. Lost it? Re-run the install script to print a new one.</p>
+			</aside>
+		</main>
+	}
+}
+
+// invalid is a field's aria-invalid: whether it has errors.
+func invalid(errs web.Invalid, field string) string {
+	if len(errs[field]) > 0 {
+		return "true"
+	}
+	return "false"
+}

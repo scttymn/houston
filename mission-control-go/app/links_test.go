@@ -55,6 +55,7 @@ func TestAddProject(t *testing.T) {
 	a, b := signedIn(t)
 	must(t, a, `INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
 	repo(t, a, shopCompose, false)
+	firstRunDone(t, a)
 	b.h = a.Handler()
 	page := b.do("GET", "/link", nil).Body.String()
 	contains(t, page, "<title>Add project · Mission Control</title>", `<input type="submit" name="commit" value="Check access" class="button button--medium">`,

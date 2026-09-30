@@ -10,6 +10,38 @@ import (
 	"time"
 )
 
+const addSetupCode = `-- name: AddSetupCode :exec
+INSERT INTO setup_codes (code_digest) VALUES (?)
+`
+
+func (q *Queries) AddSetupCode(ctx context.Context, codeDigest string) error {
+	_, err := q.db.ExecContext(ctx, addSetupCode, codeDigest)
+	return err
+}
+
+const addUser = `-- name: AddUser :one
+INSERT INTO users (email_address, password_digest, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id
+`
+
+type AddUserParams struct {
+	EmailAddress   string
+	PasswordDigest string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (q *Queries) AddUser(ctx context.Context, arg AddUserParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, addUser,
+		arg.EmailAddress,
+		arg.PasswordDigest,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const defaultStorageReady = `-- name: DefaultStorageReady :one
 SELECT EXISTS (SELECT 1 FROM storage_locations WHERE is_default AND acknowledged_at IS NOT NULL) AS ready
 `
@@ -19,6 +51,15 @@ func (q *Queries) DefaultStorageReady(ctx context.Context) (bool, error) {
 	var ready bool
 	err := row.Scan(&ready)
 	return ready, err
+}
+
+const forgetSetupCodes = `-- name: ForgetSetupCodes :exec
+DELETE FROM setup_codes
+`
+
+func (q *Queries) ForgetSetupCodes(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, forgetSetupCodes)
+	return err
 }
 
 const liveRunners = `-- name: LiveRunners :one
@@ -31,6 +72,51 @@ func (q *Queries) LiveRunners(ctx context.Context, lastSeenAt time.Time) (int64,
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const setupCodes = `-- name: SetupCodes :many
+SELECT id, code_digest FROM setup_codes
+`
+
+type SetupCodesRow struct {
+	ID         int64
+	CodeDigest string
+}
+
+func (q *Queries) SetupCodes(ctx context.Context) ([]SetupCodesRow, error) {
+	rows, err := q.db.QueryContext(ctx, setupCodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SetupCodesRow{}
+	for rows.Next() {
+		var i SetupCodesRow
+		if err := rows.Scan(&i.ID, &i.CodeDigest); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const useSetupCode = `-- name: UseSetupCode :execrows
+DELETE FROM setup_codes WHERE id = ?
+`
+
+// Exactly one request can use a code: the one whose delete removes it.
+func (q *Queries) UseSetupCode(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, useSetupCode, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const userExists = `-- name: UserExists :one

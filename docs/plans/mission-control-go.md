@@ -111,3 +111,15 @@ The same stylesheet, fonts, images and Stimulus controllers, served by gantry's 
 - Batch 5: the image needs the docker CLI for the server update's and the port switch's helpers too, and `HOUSTON_RUNNER_IMAGE`/`HOUSTON_RUNNERS` from the installer, as the Rails app has them.
 - Batch 5: the switch carries the Rails app's `storage/known_hosts` to the Go app's `HOUSTON_KNOWN_HOSTS` (default `DATA_DIR/known_hosts`).
 - The parity check compares answers as the Go clients decode them: the Go tables keep `''` where Rails kept NULL, so a field like a project's branch can be `""` where Rails answered `null`.
+
+### Batch 5: setup and the switch
+First run as the Rails app has it (`setup_controller.rb`, `setup/`, `Setup.next_step`), the image and the installer running the Go version, then the switch on a server that runs the Rails one, and its way back.
+
+| Slice | Criterion | Test |
+| --- | --- | --- |
+| 5a | First run: a one-time setup code (only its digest kept; `mission-control-go setup-code` prints a new one, as `bin/rails houston:setup_code`), the admin made with it (12+ characters, confirmed; the code used up in the same write, 10 tries in 3 minutes), every page leading to setup until then, and a signed-in admin to the next unfinished step after | `app.TestSetupCode`, `TestSetupAdmin`, `TestSetupOnce`, `TestSetupLimit`, `TestSetupNextStep` (done: `mission-control-go task setup-code`, the Rails app's rake task; sign-in's pages behind the first-run filter too, with gantry v0.11.2's `auth.Routes` in a scope. Page tests now start from a finished install, `firstRunDone`, as the Rails app would send them to setup otherwise. A password over bcrypt's 72 bytes is refused on the form, where Rails failed on save) |
+| 5b | Setup's Cloudflare step: the token's checks (one account, tunnels, the zone's DNS) with Cloudflare's reasons, the tunnel found or made, its routes, `*.<base>` or admin. and hooks. when another server owns the wildcard, the installation saved, the tunnel's token written for cloudflared (`HOUSTON_TUNNEL_TOKEN_PATH`); a rerun finishes what one before didn't | `cfsetup.Test*` (a fake Cloudflare), `app.TestSetupCloudflare` |
+| 5c | Setup's storage step: `services/storage`'s add, the restic password shown once and confirmed before it's the default, its download, pages not stored | `app.TestSetupStorage` |
+| 5d | The image: Mission Control with what it runs (docker CLI and compose, git and ssh, `sh`), its own tools image; the keys from the installer's `.env` (`ENCRYPTION_KEYS` added to an old one) | the image built and run: `/up`, a setup code, `backup-sqlite` |
+| 5e | The installer on the Go image: a fresh install to a first deploy, an update from a release | `install/test` on the VM |
+| 5f | The shadow and the switch: the Go version on a moved copy at a LAN address, jobs off and nothing changed outside it; the switch (Rails stopped, its database kept, moved, the Go version on the same names, `known_hosts` carried) and the way back (the kept database and the Rails image) | a rehearsal on the VM from a Rails install, and back |

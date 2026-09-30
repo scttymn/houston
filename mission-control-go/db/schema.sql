@@ -234,6 +234,11 @@ CREATE TABLE sessions (
   created_at DATETIME NOT NULL,
   last_seen_at DATETIME NOT NULL
 );
+CREATE TABLE setup_codes (
+  id INTEGER PRIMARY KEY,
+  code_digest TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE storage_locations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,

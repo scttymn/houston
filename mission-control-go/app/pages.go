@@ -12,6 +12,7 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/sessions"
+	"github.com/scttymn/houston/mission-control-go/app/setup"
 	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
 )
 
@@ -59,6 +60,27 @@ func (a *App) signIn() *auth.Auth {
 			}
 		},
 	}
+}
+
+// firstRun sends every page, sign-in's too, to first-run setup until the
+// admin exists (the Rails app's require_setup).
+func (a *App) firstRun(w http.ResponseWriter, r *http.Request) error {
+	set, err := models.New(a.DB.Read).UserExists(r.Context())
+	if err != nil || set {
+		return err
+	}
+	http.Redirect(w, r, "/setup", http.StatusFound)
+	return nil
+}
+
+// nextStep takes the signed-in admin to setup's next unfinished step.
+func (a *App) nextStep(w http.ResponseWriter, r *http.Request) error {
+	step, err := setup.NextStep(r, a.DB)
+	if err != nil || step == "" {
+		return err
+	}
+	http.Redirect(w, r, step, http.StatusFound)
+	return nil
 }
 
 // page is every page's filter after sign-in: times in the installation's

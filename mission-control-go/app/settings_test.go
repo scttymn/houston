@@ -31,6 +31,7 @@ func settingsFor(t *testing.T) (*app.App, *browser, *dockercmdtest.Fake) {
 	must(t, a, `INSERT INTO api_tokens (name, token_digest, last_used_at) VALUES ('laptop', 'x', ?)`, time.Now().Add(-3*time.Hour))
 	a.Version = "v0.4.2"
 	a.Updater.Version = "v0.4.2"
+	firstRunDone(t, a)
 	b.h = a.Handler()
 	return a, b, a.DockerCLI.(*dockercmdtest.Fake)
 }

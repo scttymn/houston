@@ -30,6 +30,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
 	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/app/settings"
+	"github.com/scttymn/houston/mission-control-go/app/setup"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -207,7 +208,10 @@ func (a *App) Router() *web.Router {
 
 	// Sign-in, then every page behind it.
 	signIn := a.signIn()
-	signIn.Routes(rt)
+	rt.Scope("", web.Pipeline{a.firstRun}, func(s *web.Scope) { signIn.Routes(s) })
+	firstRun := setup.Controller{DB: a.DB, SignIn: signIn, Limits: &a.Limits}
+	rt.Handle("GET /setup", firstRun.Show)
+	rt.Handle("POST /setup", firstRun.Create)
 	rt.Handle("GET /session/new", func(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)
 		return nil
@@ -221,7 +225,7 @@ func (a *App) Router() *web.Router {
 		MissionControl: a.Services.MissionControl}
 	addProject := links.Controller{DB: a.DB, Signer: a.Signer, Git: a.Git, Live: a.Live, Refs: a.Refs, Board: projects.FlightBoard}
 	deployPages := deploys.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer}
-	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
+	rt.Scope("", web.Pipeline{a.firstRun, signIn.Required, a.nextStep, a.page}, func(s *web.Scope) {
 		s.Handle("GET /{$}", pages.Index)
 		s.Handle("GET /resources", pages.Resources)
 		s.Handle("GET /projects/{name}", pages.ShowProject)

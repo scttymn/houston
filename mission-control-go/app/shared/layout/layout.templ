@@ -2,7 +2,12 @@
 // the top bar (Rails' layouts/application and shared/_header).
 package layout
 
-import "github.com/scttymn/houston/mission-control-go/assets"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/scttymn/houston/mission-control-go/assets"
+)
 
 templ Layout(p Page) {
 	<!DOCTYPE html>
@@ -22,7 +27,9 @@ templ Layout(p Page) {
 			}
 		</head>
 		<body>
-			if !p.NoHeader {
+			if p.Setup > 0 {
+				@setupHeader(p.Setup, p.Host)
+			} else if !p.NoHeader {
 				@header(p.Chrome)
 			}
 			{ children... }
@@ -39,6 +46,39 @@ templ brand() {
 		<img src={ assets.Path("lander.svg") } width="40" height="40" alt="" class="brand__mark"/>
 		<span class="brand__name"><span class="disp">HOUSTON</span><span class="mono">MISSION CONTROL</span></span>
 	</a>
+}
+
+var setupSteps = []string{"Admin account", "Cloudflare", "Storage"}
+
+// setupHeader is the bar during first run: where setup is, of three.
+templ setupHeader(step int, host string) {
+	<header class="topbar topbar--setup">
+		@brand()
+		<span class="mono topbar__label">FIRST-RUN SETUP</span>
+		<ol class="steps" aria-label="Setup progress">
+			for i, name := range setupSteps {
+				if i > 0 {
+					<li class="steps__line" aria-hidden="true"></li>
+				}
+				<li
+					class={ "steps__step", templ.KV("is-current", i+1 == step), templ.KV("is-done", i+1 < step) }
+					if i+1 == step {
+						aria-current="step"
+					}
+				>
+					<span class="mono steps__number">
+						if i+1 < step {
+							GO
+						} else {
+							{ fmt.Sprintf("%02d", i+1) }
+						}
+					</span>
+					<span class="mono steps__name">{ strings.ToUpper(name) }</span>
+				</li>
+			}
+		</ol>
+		<span class="mono topbar__meta">{ host }</span>
+	</header>
 }
 
 templ statusWord(ok bool) {

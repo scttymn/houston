@@ -62,9 +62,11 @@ func TestSnapshotsFrame(t *testing.T) {
 	contains(t, b2.do("GET", "/projects/shop/snapshots", nil).Body.String(), `<span class="field__error">Can&#39;t read snapshots: `)
 	contains(t, b2.do("GET", "/projects/shop/snapshots?kind=settings", nil).Body.String(), `<dt class="mono">KEEP</dt><dd>14 scheduled · 10 pre-deploy</dd>`)
 
-	// No storage yet.
+	// No default storage: setup's storage step first, as the Rails app.
 	must(t, a2, `UPDATE storage_locations SET is_default = FALSE`)
-	contains(t, b2.do("GET", "/projects/shop/snapshots", nil).Body.String(), "No backup storage yet. Set a default in Settings › Storage.")
+	if w := b2.do("GET", "/projects/shop/snapshots", nil); location(w) != "/setup/storage" {
+		t.Errorf("no default storage = %d %q", w.Code, location(w))
+	}
 }
 
 // Restore: the page for a snapshot, then asked once the name's typed.
