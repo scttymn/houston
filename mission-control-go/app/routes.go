@@ -14,6 +14,7 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/deploys"
+	"github.com/scttymn/houston/mission-control-go/app/links"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/projects"
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
@@ -207,6 +208,7 @@ func (a *App) Router() *web.Router {
 		Refs: a.Refs, Git: a.Git, Backup: a.Backup,
 		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare},
 		Snapshots:   a.Snapshots, Docker: a.DockerCLI, Cloudflare: a.Cloudflare, Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Log: a.Log}
+	addProject := links.Controller{DB: a.DB, Signer: a.Signer, Git: a.Git, Live: a.Live, Refs: a.Refs, Board: projects.FlightBoard}
 	deployPages := deploys.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
 		s.Handle("GET /{$}", pages.Index)
@@ -236,6 +238,11 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}/deletion/new", pages.NewDeletion)
 		s.Handle("POST /projects/{name}/deletion", pages.CreateDeletion)
 		s.Handle("GET /deletions/{id}", pages.ShowDeletion)
+		s.Handle("GET /link", addProject.New)
+		s.Handle("POST /link/access", addProject.Access)
+		s.Handle("POST /link/read", addProject.Read)
+		s.Handle("POST /link", addProject.Create)
+		s.Handle("DELETE /link", addProject.Cancel)
 	})
 
 	// The pages' live streams, for whoever may see the pages.

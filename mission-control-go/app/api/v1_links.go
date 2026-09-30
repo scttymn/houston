@@ -93,7 +93,7 @@ func (c V1) SaveLink(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ctx := r.Context()
-	p, err := linking.Save(ctx, c.DB, l, time.Now())
+	p, err := linking.Save(ctx, c.DB, l, nil, time.Now())
 	var refused models.Refused
 	if errors.As(err, &refused) {
 		return web.Status(http.StatusUnprocessableEntity, refused)

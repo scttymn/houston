@@ -16,6 +16,7 @@ import (
 
 	"github.com/scttymn/gantry/crypt"
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/internal/mission"
 	"github.com/scttymn/houston/mission-control-go/app/models"
@@ -100,9 +101,23 @@ func Read(ctx context.Context, d *db.DB, g gitremote.Git, l models.RepoLink, bra
 	return &Found{Name: in.Sync.Name, Sha: sha, Branch: l.Branch, Domains: in.Sync.Domains, Variables: in.Sync.Variables}, "", nil
 }
 
+// SecretsRefused are secrets typed on Add project the container can't
+// receive, by name: nothing is saved.
+type SecretsRefused struct{ Errors map[string]string }
+
+func (e SecretsRefused) Error() string {
+	names := make([]string, 0, len(e.Errors))
+	for name := range e.Errors {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return web.Sentence(names) + " can't be saved"
+}
+
 // Save saves the project from what the link read (a new one, or linking
-// one that sync made), and forgets the draft.
-func Save(ctx context.Context, d *db.DB, l models.RepoLink, now time.Time) (models.Project, error) {
+// one that sync made), with secrets typed on Add project (blank ones, and
+// names compose.yml doesn't list, left out), and forgets the draft.
+func Save(ctx context.Context, d *db.DB, l models.RepoLink, secrets map[string]string, now time.Time) (models.Project, error) {
 	refused := func(msg string) (models.Project, error) { return models.Project{}, models.Refused{Msg: msg} }
 	if !l.Preview.Valid {
 		return refused("Read the file first: Houston saves what it read from the repo.")
@@ -133,6 +148,22 @@ func Save(ctx context.Context, d *db.DB, l models.RepoLink, now time.Time) (mode
 	if found && existing.RepoUrl != "" && existing.RepoUrl != l.RepoUrl {
 		return refused(fmt.Sprintf("%s is already linked to %s", existing.Name, existing.RepoUrl))
 	}
+	wanted := map[string]string{}
+	problems := map[string]string{}
+	for _, v := range s.Variables {
+		value := secrets[v.Name]
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if err := models.ValidSecret(v.Name, value); err != nil {
+			problems[v.Name] = strings.TrimPrefix(err.Error(), v.Name+" ")
+			continue
+		}
+		wanted[v.Name] = value
+	}
+	if len(problems) > 0 {
+		return models.Project{}, SecretsRefused{Errors: problems}
+	}
 	secret := l.WebhookSecret.Reveal()
 	if found && existing.WebhookSecret.Reveal() != "" {
 		secret = existing.WebhookSecret.Reveal()
@@ -150,6 +181,11 @@ func Save(ctx context.Context, d *db.DB, l models.RepoLink, now time.Time) (mode
 		if err := q.SetRepo(ctx, models.SetRepoParams{RepoUrl: l.RepoUrl, Branch: l.Branch, ComposePath: l.ComposePath, DeployKeyPrivate: l.DeployKeyPrivate,
 			DeployKeyPublic: l.DeployKeyPublic, WebhookSecret: crypt.Of(secret), UpdatedAt: now, ID: saved.ID}); err != nil {
 			return err
+		}
+		for key, value := range wanted {
+			if err := q.SaveSecret(ctx, models.SaveSecretParams{ProjectID: saved.ID, Key: key, Value: crypt.Of(value), Now: now}); err != nil {
+				return err
+			}
 		}
 		if err := q.DeleteLink(ctx, l.ID); err != nil {
 			return err
