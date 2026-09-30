@@ -52,6 +52,9 @@ type Runner struct {
 	Refresh func()
 	// Snapshots is the snapshot lists' cache, which a GO backup clears.
 	Snapshots *Snapshots
+	// ReadyEvery is how long a restore waits between asks whether Postgres
+	// is up (60 asks): a second.
+	ReadyEvery time.Duration
 }
 
 // failed is a run that ends NO-GO, in words for the page.
@@ -69,6 +72,7 @@ type run struct {
 	project  models.Project
 	location models.StorageLocation
 	serving  models.Generation
+	stage    string // backup or restore: its staging volume's and containers' names
 	started  time.Time
 	warnings []string
 	mu       sync.Mutex
@@ -110,10 +114,14 @@ func (r Runner) Do(ctx context.Context, id int64) error {
 	if r.Deadline == 0 {
 		r.Deadline = Deadline
 	}
-	w := &run{Runner: r, run: current, token: token, project: project, location: location,
+	if r.ReadyEvery == 0 {
+		r.ReadyEvery = time.Second
+	}
+	w := &run{Runner: r, run: current, token: token, project: project, location: location, stage: "backup",
 		serving: models.Generation{Project: project.Name, Number: project.DataGeneration}}
 	if current.Operation == "restore" {
-		return fmt.Errorf("putting back a restore's data comes with restores (batch 3b)")
+		w.stage = "restore"
+		return w.restore(ctx)
 	}
 	return w.backUp(ctx)
 }
@@ -329,10 +337,18 @@ func (w *run) prepare(ctx context.Context) error {
 }
 
 // Project names have no dots, so no project's names match another's.
-func (w *run) staging() string              { return "houston-backup." + w.project.Name }
-func (w *run) container(role string) string { return "houston-backup." + w.project.Name + "." + role }
+func (w *run) staging() string              { return "houston-" + w.stage + "." + w.project.Name }
+func (w *run) container(role string) string { return w.staging() + "." + role }
 func (w *run) containers() []string {
-	return []string{w.container("sqlite"), w.container("restic"), w.container("write")}
+	roles := []string{"sqlite", "restic", "write"}
+	if w.stage == "restore" {
+		roles = []string{"restic", "read", "fill", "feed"}
+	}
+	var names []string
+	for _, r := range roles {
+		names = append(names, w.container(r))
+	}
+	return names
 }
 
 const (
