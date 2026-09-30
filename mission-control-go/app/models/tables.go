@@ -11,6 +11,31 @@ import (
 	"github.com/scttymn/gantry/crypt"
 )
 
+type BackupRun struct {
+	ID               int64
+	ProjectID        int64
+	LocationID       int64
+	Operation        string
+	Kind             string
+	Reason           string
+	Status           string
+	DeployNumber     sql.NullInt64
+	ScheduledFor     sql.NullString
+	Sha              string
+	SnapshotID       string
+	SourceSnapshotID string
+	Bytes            sql.NullInt64
+	Found            string
+	Error            string
+	Log              string
+	TokenDigest      string
+	HeartbeatAt      time.Time
+	StartedAt        sql.NullTime
+	FinishedAt       sql.NullTime
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Deploy struct {
 	ID               int64
 	ProjectID        int64

@@ -1,5 +1,14 @@
 package app
 
+import (
+	"context"
+	"errors"
+
+	"github.com/scttymn/gantry/jobs"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
+)
+
 // DefineJobs defines the app's background jobs on a.Jobs (gantry's jobs
 // package; Rails' Active Job): a name, an arguments struct and a function,
 // kept on App for the controllers to enqueue. Add one here:
@@ -12,5 +21,12 @@ package app
 // a.Sweep.Every(time.Hour, SweepArgs{}), or a.Report.Cron("0 3 * * *",
 // time.UTC, ReportArgs{}). In tests, a.Jobs.Drain(ctx) runs what's due.
 func (a *App) DefineJobs() error {
+	a.Backup = jobs.Define(a.Jobs, "backup", a.backup, jobs.Opts[models.BackupArgs]{Queue: "backups"})
 	return nil
+}
+
+// backup carries out a backup run: a snapshot, or a restore's data (batch
+// 3 of docs/plans/mission-control-go.md; until then it says so).
+func (a *App) backup(ctx context.Context, args models.BackupArgs) error {
+	return errors.New("backups don't run in the Go version yet")
 }

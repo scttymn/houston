@@ -15,6 +15,7 @@ import (
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
+	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
@@ -45,6 +46,8 @@ type App struct {
 	Tools  string
 	// KnownHosts is the file of git hosts' keys Mission Control recorded.
 	KnownHosts string
+	// Backup runs a backup or a restore's data (app/jobs.go).
+	Backup *jobs.Job[models.BackupArgs]
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
 	// trusted (proxies); "" trusts none.
 	TunnelHost string
@@ -72,13 +75,17 @@ func (a *App) Router() *web.Router {
 	rt.Handle("GET /ping", a.ping)
 
 	// The runner API: houston deploy on the server, and the runners.
-	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts}
+	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup}
 	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
 		s.Handle("POST /projects/sync", runner.Sync)
 		s.Handle("GET /projects/{name}/secrets/{key}", runner.Secret)
 		s.Handle("POST /projects/{name}/deploys", runner.StartDeploy)
 		s.Handle("PATCH /deploys/{id}", runner.Report)
 		s.Handle("POST /runner/jobs/claim", runner.Claim)
+		s.Handle("POST /deploys/{id}/snapshot", runner.RequestSnapshot)
+		s.Handle("GET /deploys/{id}/snapshot", runner.Snapshot)
+		s.Handle("POST /deploys/{id}/restore_data", runner.RequestRestoreData)
+		s.Handle("GET /deploys/{id}/restore_data", runner.RestoreData)
 	})
 
 	homePage := home.Controller{DB: a.DB}

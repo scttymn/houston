@@ -23,6 +23,7 @@ const (
 	encrypted             // Rails' encryption, into gantry's; NULL is ''
 	nullable              // text whose NULL stays NULL (a restore's kept sync)
 	one                   // the one row's id: 1, whatever Rails' was
+	day                   // a Rails date, as YYYY-MM-DD (the driver reads it as a time); NULL is NULL
 )
 
 // column is one of a table's: its Go name, the Rails one when it differs,
@@ -76,6 +77,10 @@ var tables = []table{
 		c("error", text), c("log", text), c("runner", text), c("proposed_name", text), c("token_digest", text), c("heartbeat_at", timestamp),
 		c("finished_at", timestamp), c("switched_at", timestamp), c("source_location_id", integer), c("source_snapshot_id", text),
 		c("sync_payload", nullable)}, stamps()...)},
+	{name: "backup_runs", words: "backup run", columns: append([]column{c("id", integer), c("project_id", integer), c("location_id", integer),
+		c("operation", text), c("kind", text), c("reason", text), c("status", text), c("deploy_number", integer), c("scheduled_for", day),
+		c("sha", text), c("snapshot_id", text), c("source_snapshot_id", text), c("bytes", integer), c("found", jsonText), c("error", text),
+		c("log", text), c("token_digest", text), c("heartbeat_at", timestamp), c("started_at", timestamp), c("finished_at", timestamp)}, stamps()...)},
 }
 
 // report is how many rows moved, in words: "2 projects".
@@ -141,6 +146,11 @@ func (r *rails) convert(col column, v sql.NullString) (any, error) {
 		return v.String, nil
 	case one:
 		return int64(1), nil
+	case day:
+		if !v.Valid || len(v.String) < 10 {
+			return nil, nil
+		}
+		return v.String[:10], nil
 	case nullable:
 		if !v.Valid {
 			return nil, nil

@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -270,5 +270,33 @@ func TestProjects(t *testing.T) {
 	to.Read.QueryRow(`SELECT name, last_seen_at FROM runners`).Scan(&runner, &seen)
 	if runner != "houston-runner-1" || !seen.Equal(time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)) {
 		t.Errorf("runner %s %v", runner, seen)
+	}
+}
+
+// Backup runs move with their day, size and what they found.
+func TestBackupRuns(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		kind, reason, status, day, found, snapshot, log string
+		bytes                                           int64
+		finished                                        time.Time
+	)
+	to.Read.QueryRow(`SELECT kind, reason, status, scheduled_for, found, snapshot_id, bytes, log, finished_at FROM backup_runs WHERE id = 1`).
+		Scan(&kind, &reason, &status, &day, &found, &snapshot, &bytes, &log, &finished)
+	if kind != "auto" || reason != "schedule" || status != "go" || day != "2026-09-30" || found != `{"volumes":["data"],"databases":["db"]}` ||
+		snapshot != strings.Repeat("5eed", 16) || bytes != 123456789 || log != "restic backup\n" || !finished.Equal(time.Date(2026, 9, 30, 3, 2, 0, 0, time.UTC)) {
+		t.Errorf("the scheduled one: %s %s %s %s %s %s %d %q %v", kind, reason, status, day, found, snapshot, bytes, log, finished)
+	}
+	var deployNumber int
+	var errText string
+	var noBytes sql.NullInt64
+	var noDay sql.NullString
+	to.Read.QueryRow(`SELECT deploy_number, error, bytes, scheduled_for FROM backup_runs WHERE id = 2`).Scan(&deployNumber, &errText, &noBytes, &noDay)
+	if deployNumber != 1 || errText != "restic: repository is locked" || noBytes.Valid || noDay.Valid {
+		t.Errorf("the deploy's: %d %q %v %v", deployNumber, errText, noBytes, noDay)
 	}
 }

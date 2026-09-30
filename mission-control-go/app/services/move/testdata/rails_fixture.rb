@@ -68,5 +68,13 @@ shop.deploys.create!(number: 2, sha: "b" * 40, ref: "refs/restore/abcd1234", kin
 blog.deploys.create!(number: 1, sha: "c" * 40, ref: "refs/heads/main", status: "queued", fresh: true, token_digest: "",
                      heartbeat_at: Time.utc(2026, 9, 30, 8))
 
+# Backups: a scheduled snapshot that went, and a deploy's that didn't.
+BackupRun.create!(project: shop, location: nas, kind: "auto", reason: "schedule", scheduled_for: Date.new(2026, 9, 30), status: "go",
+                  sha: "a" * 40, snapshot_id: "5eed" * 16, bytes: 123_456_789, found: { "volumes" => [ "data" ], "databases" => [ "db" ] },
+                  log: "restic backup\n", heartbeat_at: Time.utc(2026, 9, 30, 3, 1), started_at: Time.utc(2026, 9, 30, 3),
+                  finished_at: Time.utc(2026, 9, 30, 3, 2))
+BackupRun.create!(project: shop, location: nas, kind: "deploy", reason: "deploy", deploy_number: 1, status: "no_go",
+                  error: "restic: repository is locked", heartbeat_at: Time.utc(2026, 9, 1, 10, 1))
+
 puts "made #{ActiveRecord::Base.connection_db_config.database}: #{Installation.count} installation, #{Project.count} projects, " \
-     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations"
+     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs"
