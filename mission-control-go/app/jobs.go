@@ -58,7 +58,7 @@ var Queues = map[string]int{"default": 3, "backups": 1, "snapshots": 2, "deletio
 // busy project's run waits and tries again; any other failure is recorded
 // on the run, and the job doesn't retry it.
 func (a *App) backup(ctx context.Context, args models.BackupArgs) error {
-	err := backup.Runner{DB: a.DB, Docker: a.DockerCLI, Tools: a.Tools, ToolsBin: a.ToolsBin, Log: a.Log,
+	err := backup.Runner{DB: a.DB, Docker: a.DockerCLI, Tools: a.Tools, ToolsBin: a.ToolsBin, Log: a.Log, Snapshots: a.Snapshots,
 		Refresh: func() { a.Live.Refresh(api.FlightBoard, "") }}.Do(ctx, args.RunID)
 	if err == nil || errors.Is(err, models.ErrBusy) {
 		return err

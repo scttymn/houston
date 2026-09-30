@@ -16,6 +16,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/assets"
@@ -47,7 +48,9 @@ type App struct {
 	// environment, input and deadlines); Tools, Mission Control's own image
 	// for helper containers (HOUSTON_TOOLS_IMAGE), its binary at ToolsBin.
 	Docker    docker.Runner
-	DockerCLI dockercmd.Runner
+	DockerCLI dockercmd.Downloader
+	// Snapshots lists projects' snapshots from restic, cached a while.
+	Snapshots *backup.Snapshots
 	Tools     string
 	ToolsBin  string
 	// KnownHosts is the file of git hosts' keys Mission Control recorded.
@@ -78,7 +81,7 @@ func (a *App) Router() *web.Router {
 
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
-		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits}
+		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -127,6 +130,8 @@ func (a *App) Router() *web.Router {
 		s.Handle("DELETE /projects/{name}/secrets/{key}", remote.RemoveSecret)
 		s.Handle("POST /projects/{name}/webhook/rotate", remote.RotateWebhook)
 		s.Handle("POST /projects/{name}/backups", remote.BackupNow)
+		s.Handle("GET /projects/{name}/snapshots", remote.Snapshots)
+		s.Handle("GET /projects/{name}/snapshots/{id}/download", remote.DownloadSnapshot)
 	})
 
 	homePage := home.Controller{DB: a.DB}

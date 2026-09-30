@@ -387,6 +387,49 @@ func (q *Queries) LocationLastWrite(ctx context.Context, locationID int64) (sql.
 	return finished_at, err
 }
 
+const locationsUsedBy = `-- name: LocationsUsedBy :many
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE acknowledged_at IS NOT NULL
+  AND id IN (SELECT location_id FROM backup_runs WHERE project_id = ? AND operation = 'backup') ORDER BY name
+`
+
+// The set-up locations a project's backups went to.
+func (q *Queries) LocationsUsedBy(ctx context.Context, projectID int64) ([]StorageLocation, error) {
+	rows, err := q.db.QueryContext(ctx, locationsUsedBy, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StorageLocation{}
+	for rows.Next() {
+		var i StorageLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Settings,
+			&i.Credentials,
+			&i.ResticPassword,
+			&i.IsDefault,
+			&i.AcknowledgedAt,
+			&i.VerifiedAt,
+			&i.PrunedAt,
+			&i.PruneError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const otherRunning = `-- name: OtherRunning :one
 SELECT EXISTS (SELECT 1 FROM backup_runs WHERE project_id = ? AND status = 'running' AND id != ?) AS running
 `

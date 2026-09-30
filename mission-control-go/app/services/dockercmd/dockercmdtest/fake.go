@@ -38,9 +38,10 @@ type rule struct {
 
 // Fake is the docker CLI. A command no rule answers succeeds with no output.
 type Fake struct {
-	mu    sync.Mutex
-	rules []rule
-	calls []Call
+	mu        sync.Mutex
+	rules     []rule
+	downloads []download
+	calls     []Call
 }
 
 // On answers a command starting with args with result.
@@ -117,4 +118,49 @@ func (f *Fake) Run(ctx context.Context, args []string, o dockercmd.Opts) dockerc
 
 func (f *Fake) Pipe(ctx context.Context, from, to []string, o dockercmd.Opts) dockercmd.Result {
 	return f.answer(ctx, Call{Args: from, To: to, Env: o.Env}, o)
+}
+
+type download struct {
+	prefix      []string
+	first, rest string
+	fail        error
+	result      dockercmd.Result
+}
+
+// OnDownload answers a download starting with args: its first bytes and
+// the rest, ending with fail (nil: it ends well).
+func (f *Fake) OnDownload(first, rest string, fail error, args ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.downloads = append(f.downloads, download{prefix: args, first: first, rest: rest, fail: fail})
+}
+
+// RefuseDownload answers a download starting with args with result: it
+// ended before writing a byte.
+func (f *Fake) RefuseDownload(result dockercmd.Result, args ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.downloads = append(f.downloads, download{prefix: args, result: result})
+}
+
+// Download answers as the first download rule that fits, once each.
+func (f *Fake) Download(ctx context.Context, args []string, o dockercmd.Opts) (*dockercmd.Download, dockercmd.Result) {
+	f.mu.Lock()
+	f.calls = append(f.calls, Call{Args: args, Env: o.Env})
+	var found *download
+	for i, d := range f.downloads {
+		if len(args) >= len(d.prefix) && slices.Equal(args[:len(d.prefix)], d.prefix) {
+			found = &d
+			f.downloads = slices.Delete(f.downloads, i, i+1)
+			break
+		}
+	}
+	f.mu.Unlock()
+	if found == nil {
+		return nil, dockercmd.Result{Output: "no such download", Code: 1}
+	}
+	if found.first == "" {
+		return nil, found.result
+	}
+	return dockercmd.NewDownload([]byte(found.first), strings.NewReader(found.rest), found.fail), dockercmd.Result{OK: true}
 }

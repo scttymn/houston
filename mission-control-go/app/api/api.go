@@ -12,7 +12,9 @@ import (
 
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/volumes"
 )
 
@@ -40,6 +42,11 @@ type Controller struct {
 	}
 	// Limits counts requests for rate limits.
 	Limits *web.Limits
+	// DockerCLI runs docker for the work that needs its environment,
+	// input, deadlines and downloads; SnapshotList lists (and caches)
+	// projects' snapshots.
+	DockerCLI    dockercmd.Downloader
+	SnapshotList *backup.Snapshots
 }
 
 func (c Controller) placement() volumes.Placement {

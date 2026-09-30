@@ -9,9 +9,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -143,4 +145,86 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// Download is a running command whose stdout is a file being sent (a
+// snapshot's zip): First is its first bytes, Rest the others as they come.
+type Download struct {
+	First  []byte
+	Rest   io.Reader
+	cmd    *exec.Cmd
+	stderr *syncBuffer
+	cancel context.CancelFunc
+	done   chan error
+}
+
+// Wait is how the command ended, once Rest is read: nil, or its failure
+// with the end of its stderr.
+func (d *Download) Wait() error {
+	err := <-d.done
+	d.cancel()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(lastLines(d.stderr.String(), 5)))
+	}
+	return nil
+}
+
+// Close stops the command and everything it started, if it's still
+// running.
+func (d *Download) Close() {
+	d.cancel()
+	err := <-d.done
+	d.done <- err // for a Wait after
+}
+
+// Downloader is a Runner that can also run a download.
+type Downloader interface {
+	Runner
+	// Download starts a command whose stdout is a file: a Download once its
+	// first bytes are in, or the Result of a command that ended before
+	// writing any (its stderr as the output).
+	Download(ctx context.Context, args []string, o Opts) (*Download, Result)
+}
+
+// Download starts docker with args, stdout apart from stderr.
+func (c CLI) Download(ctx context.Context, args []string, o Opts) (*Download, Result) {
+	ctx, cancel := deadline(context.WithoutCancel(ctx), o)
+	cmd := c.command(ctx, args, o)
+	var stderr syncBuffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err == nil {
+		err = cmd.Start()
+	}
+	if err != nil {
+		cancel()
+		return nil, Result{Output: err.Error(), Code: -1}
+	}
+	done := make(chan error, 1)
+	first := make([]byte, 64<<10)
+	n, readErr := io.ReadAtLeast(stdout, first, 1)
+	if readErr != nil {
+		err := cmd.Wait()
+		cancel()
+		r := result(ctx, err, stderr.String())
+		if r.OK { // it ended well, having written nothing
+			r = Result{Output: stderr.String(), Code: 0}
+		}
+		return nil, r
+	}
+	go func() { done <- cmd.Wait() }()
+	return &Download{First: first[:n], Rest: stdout, cmd: cmd, stderr: &stderr, cancel: cancel, done: done}, Result{OK: true}
+}
+
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	return strings.Join(lines[max(0, len(lines)-n):], "\n")
+}
+
+// NewDownload is a download of first and rest that ends with fail: for a
+// fake runner.
+func NewDownload(first []byte, rest io.Reader, fail error) *Download {
+	done := make(chan error, 1)
+	done <- fail
+	return &Download{First: first, Rest: rest, stderr: &syncBuffer{}, cancel: func() {}, done: done}
 }

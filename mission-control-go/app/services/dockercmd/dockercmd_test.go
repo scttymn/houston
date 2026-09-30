@@ -2,6 +2,7 @@ package dockercmd
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,5 +58,38 @@ func TestPipe(t *testing.T) {
 	}
 	if r := sh.Pipe(ctx, []string{"-c", `sleep 30`}, []string{"-c", `cat`}, Opts{Timeout: 200 * time.Millisecond}); r.Code != 124 {
 		t.Errorf("timed out: %+v", r)
+	}
+}
+
+// A download: its first bytes before anything is answered, the rest as
+// they come; stderr kept apart; a command that ends before writing is its
+// result; Close stops it.
+func TestDownload(t *testing.T) {
+	ctx := context.Background()
+	d, r := sh.Download(ctx, []string{"-c", `printf "PK"; echo "a note" >&2; printf "rest"`}, Opts{})
+	if d == nil {
+		t.Fatalf("= %+v", r)
+	}
+	rest, _ := io.ReadAll(d.Rest)
+	if got := string(d.First) + string(rest); got != "PKrest" || d.Wait() != nil {
+		t.Errorf("got %q", got)
+	}
+
+	d, r = sh.Download(ctx, []string{"-c", `echo "no such snapshot" >&2; exit 1`}, Opts{})
+	if d != nil || r.OK || r.Code != 1 || r.Output != "no such snapshot\n" {
+		t.Errorf("failed first: %+v", r)
+	}
+
+	d, _ = sh.Download(ctx, []string{"-c", `printf "PK"; sleep 30`}, Opts{})
+	began := time.Now()
+	d.Close()
+	if time.Since(began) > 10*time.Second {
+		t.Errorf("Close took %v", time.Since(began))
+	}
+
+	d, _ = sh.Download(ctx, []string{"-c", `printf "PK"; echo "broke" >&2; exit 2`}, Opts{})
+	io.ReadAll(d.Rest)
+	if err := d.Wait(); err == nil || !strings.Contains(err.Error(), "broke") {
+		t.Errorf("broken: %v", err)
 	}
 }

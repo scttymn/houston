@@ -50,6 +50,8 @@ type Runner struct {
 	Deadline time.Duration
 	// Refresh is called when a run changes (the flight board's refresh).
 	Refresh func()
+	// Snapshots is the snapshot lists' cache, which a GO backup clears.
+	Snapshots *Snapshots
 }
 
 // failed is a run that ends NO-GO, in words for the page.
@@ -194,6 +196,7 @@ func (w *run) steps(ctx context.Context, what string, work func(context.Context)
 	var f failed
 	switch {
 	case err == nil:
+		defer w.Snapshots.Forget(w.project.Name, w.location.ID)
 		return w.finish(ctx, "go", strings.Join(w.warnings, "; "), res)
 	case errors.As(err, &f):
 		return w.finish(ctx, "no_go", string(f), nil)

@@ -240,3 +240,23 @@ func TestBackupCases(t *testing.T) {
 		t.Errorf("not a list: %q", run.Error)
 	}
 }
+
+// A GO backup forgets the project's cached snapshot list at its location:
+// the next look lists it again, with the new one.
+func TestBackupForgetsTheList(t *testing.T) {
+	ctx := context.Background()
+	d, docker, r, id := setUp(t, "manual")
+	r.Snapshots = &backup.Snapshots{Docker: docker}
+	nas, _ := models.New(d.Read).StorageLocationByID(ctx, 1)
+	docker.On(dockercmdtest.OK(`[]`), "run", "--rm", "-e")
+	r.Snapshots.For(ctx, "shop", nas)
+	d.Write.Exec(`UPDATE projects SET databases = '[]'`)
+	docker.On(dockercmdtest.OK(`{"sqlite":[],"warnings":[],"errors":[]}`), "run", "--rm", "--name", "houston-backup.shop.sqlite")
+	docker.On(dockercmdtest.OK(`{"message_type":"summary","snapshot_id":"5eed","total_bytes_processed":1}`), "run", "--rm", "--name", "houston-backup.shop.restic")
+	r.Do(ctx, id)
+	before := len(docker.Calls())
+	r.Snapshots.For(ctx, "shop", nas)
+	if len(docker.Calls()) != before+1 {
+		t.Error("the list wasn't read again after a GO backup")
+	}
+}

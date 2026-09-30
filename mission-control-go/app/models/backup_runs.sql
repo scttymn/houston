@@ -78,3 +78,8 @@ WHERE id = @id AND status = 'running' AND token_digest = @token_digest;
 -- name: GiveUpRun :execrows
 -- A queued run that will never start (its job gave up waiting).
 UPDATE backup_runs SET status = 'no_go', error = @error, finished_at = @now, updated_at = @now WHERE id = @id AND status = 'queued';
+
+-- name: LocationsUsedBy :many
+-- The set-up locations a project's backups went to.
+SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL
+  AND id IN (SELECT location_id FROM backup_runs WHERE project_id = ? AND operation = 'backup') ORDER BY name;
