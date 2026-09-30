@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/scttymn/gantry/jobs"
@@ -11,6 +12,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 )
 
 // DefineJobs defines the app's background jobs on a.Jobs (gantry's jobs
@@ -35,14 +37,47 @@ func (a *App) DefineJobs() error {
 	// A deploy or restore waits for these (its snapshot, its data): they
 	// never queue behind another project's long backup.
 	a.Snapshot = jobs.Define(a.Jobs, "snapshot", a.backup, jobs.Opts[models.BackupArgs]{Queue: "snapshots", Retry: busy, OnExhausted: gaveUp})
-	a.Check = jobs.Define(a.Jobs, "check_for_changes", a.checkForChanges, jobs.Opts[models.CheckArgs]{})
+	// One check at a time a project: a webhook's and the poll's can't
+	// interleave (the one holding older refs would queue an older commit).
+	a.Check = jobs.Define(a.Jobs, "check_for_changes", a.checkForChanges, jobs.Opts[models.CheckArgs]{
+		Limit: &jobs.Limit[models.CheckArgs]{To: 1, Key: func(c models.CheckArgs) string { return strconv.FormatInt(c.ProjectID, 10) }, Duration: 5 * time.Minute}})
+	// The webhook is a doorbell; this is the fallback when a ring is missed
+	// or refused: every ten minutes, the projects that deploy on push.
+	a.Poll = jobs.Define(a.Jobs, "poll_for_changes", a.pollForChanges, jobs.Opts[struct{}]{})
+	a.Poll.Every(10*time.Minute, struct{}{})
 	return nil
 }
 
-// checkForChanges looks at a project's repo for a push to deploy (batch 3
-// of docs/plans/mission-control-go.md; until then it says so).
+// Refs reads a project's repo's refs with its deploy key.
+func (a *App) Refs(ctx context.Context, p models.Project) (map[string]string, string) {
+	return a.Git.Refs(ctx, gitremote.Link{RepoURL: p.RepoUrl, DeployKey: p.DeployKeyPrivate.Reveal()})
+}
+
+// checkForChanges reads a linked project's refs and queues a deploy of
+// each the deploy rule matches that moved.
 func (a *App) checkForChanges(ctx context.Context, args models.CheckArgs) error {
-	return errors.New("change checks don't run in the Go version yet")
+	p, err := models.New(a.DB.Read).ProjectByID(ctx, args.ProjectID)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && p.RepoUrl == "" {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	queued, err := models.CheckForChanges(ctx, a.DB, a.Refs, p, time.Now())
+	if len(queued) > 0 {
+		a.Live.Refresh(api.FlightBoard, "")
+	}
+	return err
+}
+
+func (a *App) pollForChanges(ctx context.Context, _ struct{}) error {
+	ids, err := models.New(a.DB.Read).PolledProjects(ctx)
+	for _, id := range ids {
+		if _, err := a.Check.Enqueue(ctx, models.CheckArgs{ProjectID: id}); err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 // backupWait is how long a busy run waits before it tries again.

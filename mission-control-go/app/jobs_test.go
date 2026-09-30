@@ -1,13 +1,17 @@
 package app_test
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/scttymn/gantry/crypt"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 )
 
 // A deploy's snapshot goes on the snapshots queue and runs; a busy one
@@ -53,5 +57,27 @@ func TestBackupJobs(t *testing.T) {
 	failed, _ := a.Jobs.Failed(t.Context())
 	if len(pending) != 1 || pending[0].Queue != "backups" || pending[0].Attempts != 1 || len(failed) != 0 {
 		t.Errorf("busy: pending %+v, failed %+v", pending, failed)
+	}
+}
+
+// A verified push's check queues the head its rule wants; the poll checks
+// the projects that deploy on push.
+func TestCheckJobs(t *testing.T) {
+	a := newApp(t)
+	a.Git = gitremote.Git{KnownHosts: "/x", TempDir: t.TempDir(), Run: func(ctx context.Context, argv []string, env map[string]string) dockercmd.Result {
+		return dockercmd.Result{OK: true, Output: strings.Repeat("a", 40) + "\trefs/heads/main\n"}
+	}}
+	a.DB.Write.Exec(`INSERT INTO projects (id, name, app_service, services, health, port, repo_url, webhook_verified_at) VALUES
+		(1, 'shop', 'web', '["web"]', '/', 80, 'git@x:shop.git', CURRENT_TIMESTAMP), (2, 'blog', 'web', '["web"]', '/', 80, 'git@x:blog.git', NULL)`)
+	if _, err := a.Poll.Enqueue(t.Context(), struct{}{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Jobs.Drain(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var queued string
+	a.DB.Read.QueryRow(`SELECT group_concat(projects.name || ':' || deploys.ref) FROM deploys JOIN projects ON projects.id = project_id WHERE status = 'queued'`).Scan(&queued)
+	if queued != "shop:refs/heads/main" {
+		t.Errorf("queued %q", queued)
 	}
 }

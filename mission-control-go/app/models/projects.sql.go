@@ -105,6 +105,35 @@ func (q *Queries) MoveGenerationForward(ctx context.Context, arg MoveGenerationF
 	return result.RowsAffected()
 }
 
+const polledProjects = `-- name: PolledProjects :many
+SELECT id FROM projects WHERE webhook_verified_at IS NOT NULL AND repo_url != '' ORDER BY id
+`
+
+// The projects that deploy on push: one whose webhook never arrived
+// doesn't deploy on push yet, so it isn't polled.
+func (q *Queries) PolledProjects(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, polledProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const projectByID = `-- name: ProjectByID :one
 SELECT id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at FROM projects WHERE id = ?
 `
@@ -706,6 +735,50 @@ type SetBackupLocationParams struct {
 
 func (q *Queries) SetBackupLocation(ctx context.Context, arg SetBackupLocationParams) error {
 	_, err := q.db.ExecContext(ctx, setBackupLocation, arg.BackupLocationID, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const setCheckError = `-- name: SetCheckError :exec
+UPDATE projects SET last_check_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?
+`
+
+type SetCheckErrorParams struct {
+	LastCheckError string
+	LastCheckedAt  sql.NullTime
+	UpdatedAt      time.Time
+	ID             int64
+}
+
+func (q *Queries) SetCheckError(ctx context.Context, arg SetCheckErrorParams) error {
+	_, err := q.db.ExecContext(ctx, setCheckError,
+		arg.LastCheckError,
+		arg.LastCheckedAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
+const setChecked = `-- name: SetChecked :exec
+UPDATE projects SET seen_refs = ?, last_checked_at = ?, last_check_error = ?, updated_at = ? WHERE id = ?
+`
+
+type SetCheckedParams struct {
+	SeenRefs       Refs
+	LastCheckedAt  sql.NullTime
+	LastCheckError string
+	UpdatedAt      time.Time
+	ID             int64
+}
+
+func (q *Queries) SetChecked(ctx context.Context, arg SetCheckedParams) error {
+	_, err := q.db.ExecContext(ctx, setChecked,
+		arg.SeenRefs,
+		arg.LastCheckedAt,
+		arg.LastCheckError,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	return err
 }
 

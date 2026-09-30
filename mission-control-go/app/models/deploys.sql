@@ -92,3 +92,20 @@ SELECT * FROM deploys WHERE project_id = ? AND number = ?;
 
 -- name: LatestDeployByNumber :one
 SELECT * FROM deploys WHERE project_id = ? ORDER BY number DESC LIMIT 1;
+
+-- name: QueuedDeploy :one
+SELECT * FROM deploys WHERE project_id = ? AND status = 'queued';
+
+-- name: RequeueDeploy :one
+UPDATE deploys SET sha = ?, ref = ?, fresh = ?, log = ?, updated_at = ? WHERE id = ? RETURNING *;
+
+-- name: RestoreOrCopyUnderway :one
+-- A restore or a copy queued or in flight owns what's deployed next.
+SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND kind IN ('restore', 'copy') AND status IN ('queued', 'in_flight')) AS underway;
+
+-- name: BusyDeploy :one
+SELECT * FROM deploys WHERE project_id = ? AND status IN ('queued', 'in_flight') ORDER BY number LIMIT 1;
+
+-- name: CreateRestore :one
+INSERT INTO deploys (project_id, number, kind, status, sha, ref, generation, heartbeat_at, source_snapshot_id, source_location_id)
+VALUES (?, ?, 'restore', 'queued', ?, ?, ?, ?, ?, ?) RETURNING *;

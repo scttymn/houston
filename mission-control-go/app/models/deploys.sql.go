@@ -40,6 +40,41 @@ func (q *Queries) AppendLog(ctx context.Context, arg AppendLogParams) error {
 	return err
 }
 
+const busyDeploy = `-- name: BusyDeploy :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? AND status IN ('queued', 'in_flight') ORDER BY number LIMIT 1
+`
+
+func (q *Queries) BusyDeploy(ctx context.Context, projectID int64) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, busyDeploy, projectID)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const claimQueued = `-- name: ClaimQueued :execrows
 UPDATE deploys SET status = 'in_flight', runner = ?1, token_digest = ?2, generation = ?3,
   heartbeat_at = ?4, updated_at = ?4
@@ -99,6 +134,62 @@ func (q *Queries) CreateDeploy(ctx context.Context, arg CreateDeployParams) (Dep
 		arg.TokenDigest,
 		arg.HeartbeatAt,
 		arg.SyncPayload,
+	)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createRestore = `-- name: CreateRestore :one
+INSERT INTO deploys (project_id, number, kind, status, sha, ref, generation, heartbeat_at, source_snapshot_id, source_location_id)
+VALUES (?, ?, 'restore', 'queued', ?, ?, ?, ?, ?, ?) RETURNING id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+`
+
+type CreateRestoreParams struct {
+	ProjectID        int64
+	Number           int64
+	Sha              string
+	Ref              string
+	Generation       int64
+	HeartbeatAt      time.Time
+	SourceSnapshotID string
+	SourceLocationID sql.NullInt64
+}
+
+func (q *Queries) CreateRestore(ctx context.Context, arg CreateRestoreParams) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, createRestore,
+		arg.ProjectID,
+		arg.Number,
+		arg.Sha,
+		arg.Ref,
+		arg.Generation,
+		arg.HeartbeatAt,
+		arg.SourceSnapshotID,
+		arg.SourceLocationID,
 	)
 	var i Deploy
 	err := row.Scan(
@@ -485,6 +576,92 @@ func (q *Queries) ProjectHasServed(ctx context.Context, projectID int64) (bool, 
 	return served, err
 }
 
+const queuedDeploy = `-- name: QueuedDeploy :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? AND status = 'queued'
+`
+
+func (q *Queries) QueuedDeploy(ctx context.Context, projectID int64) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, queuedDeploy, projectID)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const requeueDeploy = `-- name: RequeueDeploy :one
+UPDATE deploys SET sha = ?, ref = ?, fresh = ?, log = ?, updated_at = ? WHERE id = ? RETURNING id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+`
+
+type RequeueDeployParams struct {
+	Sha       string
+	Ref       string
+	Fresh     bool
+	Log       string
+	UpdatedAt time.Time
+	ID        int64
+}
+
+func (q *Queries) RequeueDeploy(ctx context.Context, arg RequeueDeployParams) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, requeueDeploy,
+		arg.Sha,
+		arg.Ref,
+		arg.Fresh,
+		arg.Log,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const restoreHolding = `-- name: RestoreHolding :one
 SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ?1 AND kind = 'restore'
   AND (status = 'queued' OR (status = 'in_flight' AND heartbeat_at >= ?2)) ORDER BY id LIMIT 1
@@ -526,6 +703,18 @@ func (q *Queries) RestoreHolding(ctx context.Context, arg RestoreHoldingParams) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const restoreOrCopyUnderway = `-- name: RestoreOrCopyUnderway :one
+SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND kind IN ('restore', 'copy') AND status IN ('queued', 'in_flight')) AS underway
+`
+
+// A restore or a copy queued or in flight owns what's deployed next.
+func (q *Queries) RestoreOrCopyUnderway(ctx context.Context, projectID int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, restoreOrCopyUnderway, projectID)
+	var underway bool
+	err := row.Scan(&underway)
+	return underway, err
 }
 
 const restoreServing = `-- name: RestoreServing :one

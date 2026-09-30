@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,7 +16,9 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 )
 
 // v1Body is a small write's JSON (Rails' params): what's sent, each field
@@ -396,4 +399,71 @@ func (c V1) DefaultStorage(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return web.JSON(w, http.StatusOK, v)
+}
+
+// DeployNow is POST /api/v1/projects/{name}/deploys {fresh}: the head of
+// what the deploy rule matches, queued now; fresh: true rebuilds, without
+// Docker's layer cache.
+func (c V1) DeployNow(w http.ResponseWriter, r *http.Request) error {
+	body, err := readBody(r, v1Body)
+	if err != nil && r.ContentLength != 0 {
+		return err
+	}
+	p, err := c.project(r)
+	if err != nil {
+		return err
+	}
+	if p.RepoUrl == "" {
+		return web.Status(http.StatusUnprocessableEntity, errors.New("link the repo first (houston link)"))
+	}
+	now := time.Now()
+	d, err := models.QueueHead(r.Context(), c.DB, c.Refs, p, isTrue(body, "fresh"), now)
+	var refused models.Refused
+	if errors.As(err, &refused) {
+		return badGatewayAnswer(w, refused.Msg)
+	}
+	if err != nil {
+		return err
+	}
+	c.Live.Refresh(FlightBoard, "")
+	return web.JSON(w, http.StatusOK, viewDeploy(d, now))
+}
+
+// RequestRestore is POST /api/v1/projects/{name}/restores {snapshot,
+// location, confirm}: a restore of the project to a snapshot, code and
+// data together, queued for a runner (202).
+func (c V1) RequestRestore(w http.ResponseWriter, r *http.Request) error {
+	body, err := readBody(r, v1Body)
+	if err != nil {
+		return err
+	}
+	p, err := c.project(r)
+	if err != nil {
+		return err
+	}
+	ctx, now := r.Context(), time.Now()
+	q := models.New(c.DB.Read)
+	var location *models.StorageLocation
+	if name, _ := field(body, "location"); name != "" {
+		if l, err := q.StorageLocationByName(ctx, name); err == nil {
+			location = &l
+		}
+	} else if l, err := q.BackupLocationFor(ctx, p.BackupLocationID.Int64); err == nil {
+		location = &l
+	}
+	snapshot, _ := field(body, "snapshot")
+	confirm, _ := field(body, "confirm")
+	commit := func(ctx context.Context, p models.Project, sha string) string {
+		return c.Git.Commit(ctx, gitremote.Link{RepoURL: p.RepoUrl, DeployKey: p.DeployKeyPrivate.Reveal()}, sha)
+	}
+	restore, err := backup.RequestRestore(ctx, c.DB, c.SnapshotList, commit, p, snapshot, location, confirm, now)
+	var refused models.Refused
+	if errors.As(err, &refused) {
+		return web.Status(http.StatusUnprocessableEntity, refused)
+	}
+	if err != nil {
+		return err
+	}
+	c.Live.Refresh(FlightBoard, "")
+	return web.JSON(w, http.StatusAccepted, viewDeploy(restore, now))
 }

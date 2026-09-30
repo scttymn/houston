@@ -96,3 +96,14 @@ SELECT * FROM storage_locations WHERE name = ?;
 
 -- name: MakeDefaultLocation :exec
 UPDATE storage_locations SET is_default = (id = @id), updated_at = @now;
+
+-- name: SetChecked :exec
+UPDATE projects SET seen_refs = ?, last_checked_at = ?, last_check_error = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetCheckError :exec
+UPDATE projects SET last_check_error = ?, last_checked_at = ?, updated_at = ? WHERE id = ?;
+
+-- name: PolledProjects :many
+-- The projects that deploy on push: one whose webhook never arrived
+-- doesn't deploy on push yet, so it isn't polled.
+SELECT id FROM projects WHERE webhook_verified_at IS NOT NULL AND repo_url != '' ORDER BY id;

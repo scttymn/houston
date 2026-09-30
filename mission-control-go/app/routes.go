@@ -18,6 +18,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -57,6 +58,9 @@ type App struct {
 	Backup   *jobs.Job[models.BackupArgs]
 	Snapshot *jobs.Job[models.BackupArgs] // a backup a deploy waits on
 	Check    *jobs.Job[models.CheckArgs]
+	Poll     *jobs.Job[struct{}]
+	// Git reads projects' repos.
+	Git gitremote.Git
 	// Limits counts requests for rate limits, in this process.
 	Limits web.Limits
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
@@ -78,7 +82,7 @@ func (a *App) Router() *web.Router {
 
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
-		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots}
+		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -110,6 +114,8 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects", remote.Projects)
 		s.Handle("GET /projects/{name}", remote.Project)
 		s.Handle("GET /projects/{name}/deploys", remote.Deploys)
+		s.Handle("POST /projects/{name}/deploys", remote.DeployNow)
+		s.Handle("POST /projects/{name}/restores", remote.RequestRestore)
 		s.Handle("GET /projects/{name}/deploys/{number}", remote.Deploy)
 		s.Handle("GET /projects/{name}/backups/{id}", remote.ShowBackup)
 		s.Handle("GET /projects/{name}/volumes", remote.Volumes)

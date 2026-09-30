@@ -14,6 +14,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 	"github.com/scttymn/houston/mission-control-go/app/services/volumes"
 )
 
@@ -45,6 +46,9 @@ type Controller struct {
 	// projects' snapshots.
 	DockerCLI    dockercmd.Downloader
 	SnapshotList *backup.Snapshots
+	// Refs reads a project's repo's refs; Git, anything else of a repo.
+	Refs models.RefReader
+	Git  gitremote.Git
 }
 
 func (c Controller) placement() volumes.Placement {
