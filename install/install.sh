@@ -8,7 +8,11 @@
 # Until Mission Control's image is published, it's built from a Houston
 # checkout on the server: HOUSTON_SOURCE=/path/to/houston sh install.sh
 #
-# Rerunning repairs and updates. Generated secrets are kept.
+# Rerunning repairs and updates. Generated secrets are kept. A server that
+# runs the Rails Mission Control moves to the Go one on its first run of
+# this installer (move_from_rails); its Rails data is kept as it was, so
+# installing the release before brings it back. HOUSTON_SHADOW=1 only
+# previews the Go one first, read-only on a copy, at port 3001.
 set -eu
 
 HOUSTON_DIR="${HOUSTON_DIR:-/opt/houston}"
@@ -31,6 +35,9 @@ RUNNERS="${HOUSTON_RUNNERS:-2}"
 # Where Mission Control's port 3000 listens (an IPv4 address). Unset: the
 # choice saved in Settings › Security (open on a new install; choose_bind).
 HOUSTON_BIND="${HOUSTON_BIND:-}"
+# 1: preview the Go Mission Control beside the Rails one and change nothing
+# else; remove: take the preview away (shadow).
+HOUSTON_SHADOW="${HOUSTON_SHADOW:-}"
 
 say() { printf '%s\n' "$*"; }
 # compose: with the bind this run chose (choose_bind); compose.yml's default
@@ -76,7 +83,7 @@ check_bind() {
 check_release() {
   [ -n "$HOUSTON_VERSION" ] && [ -n "$HOUSTON_SOURCE" ] && fail "set HOUSTON_VERSION or HOUSTON_SOURCE, not both"
   if [ -n "$HOUSTON_SOURCE" ]; then
-    [ -f "$HOUSTON_SOURCE/mission_control/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission_control/Dockerfile"
+    [ -f "$HOUSTON_SOURCE/mission-control-go/Dockerfile" ] || fail "HOUSTON_SOURCE=$HOUSTON_SOURCE has no mission-control-go/Dockerfile"
     return 0
   fi
   has curl || fail "installing a release needs curl"
@@ -331,6 +338,11 @@ write_env() {
     } >"$HOUSTON_DIR/.env"
     umask 022
   fi
+  # The Go Mission Control's encryption key; the AR_ keys above are the
+  # Rails one's, which its data is read with once, when it moves.
+  if ! grep -q '^ENCRYPTION_KEYS=' "$HOUSTON_DIR/.env"; then
+    say "ENCRYPTION_KEYS=$(head -c 32 /dev/urandom | base64)" >>"$HOUSTON_DIR/.env"
+  fi
   # Installs from before build step 3 have no runner token yet.
   if ! grep -q '^HOUSTON_RUNNER_TOKEN=' "$HOUSTON_DIR/.env"; then
     say "HOUSTON_RUNNER_TOKEN=$(random)" >>"$HOUSTON_DIR/.env"
@@ -418,7 +430,7 @@ choose_bind() {
     bind=$HOUSTON_BIND
   elif [ ! -f "$HOUSTON_DIR/compose.yml" ]; then
     bind=0.0.0.0
-  else
+  elif runs_rails; then
     saved=0
     compose run --rm --no-deps -T mission-control bin/rails runner \
       'i = Installation.current; exit(i.has_attribute?(:port_open) && !i.port_open ? 4 : 0)' >/dev/null 2>&1 || saved=$?
@@ -427,7 +439,90 @@ choose_bind() {
       4) bind=127.0.0.1 ;;
       *) bind=127.0.0.1 bind_unknown=1 ;;
     esac
+  else
+    case "$(compose run --rm --no-deps -T mission-control task port 2>/dev/null)" in
+      open) bind=0.0.0.0 ;;
+      closed) bind=127.0.0.1 ;;
+      *) bind=127.0.0.1 bind_unknown=1 ;;
+    esac
   fi
+}
+
+# runs_rails: whether the installed Mission Control is the Rails one.
+runs_rails() { [ -f "$HOUSTON_DIR/compose.yml" ] && grep -q ':/rails/storage$' "$HOUSTON_DIR/compose.yml"; }
+
+# in_mission_control <volume:path...> -- <script>: script run in the image
+# being installed, as Mission Control (1000), with the secrets and the
+# volumes named. Its data volume is made as compose makes it.
+in_mission_control() {
+  mounts=""
+  while [ "$1" != -- ]; do mounts="$mounts -v $1"; shift; done
+  shift
+  docker volume create --label com.docker.compose.project=houston --label com.docker.compose.volume=mission-control-data \
+    houston_mission-control-data >/dev/null
+  # shellcheck disable=SC2086 # one word per mount
+  docker run --rm --user 1000:1000 --env-file "$HOUSTON_DIR/.env" $mounts --entrypoint sh "$IMAGE" -c "$1"
+}
+
+# move_from_rails: on a server running the Rails Mission Control, its data
+# moved into the Go one's, once (docs/plans/mission-control-go.md, decision
+# 1). The Rails one stops, its database is copied (its volume is left as
+# it was: installing the release before brings it back), the copy moved,
+# and the git hosts' keys it recorded carried. A Go database from before
+# (a move, then back to Rails) is set aside first. If the move fails, the
+# Rails one starts again and nothing else has changed.
+move_from_rails() {
+  runs_rails || return 0
+  step "Moving Mission Control's data from the Rails app to the Go one"
+  docker rm -f houston-shadow >/dev/null 2>&1 || true
+  compose stop mission-control >/dev/null 2>&1 || true
+  if ! in_mission_control houston_mission-control-storage:/rails/storage houston_mission-control-data:/data -- '
+    set -e
+    stamp=$(date -u +%Y%m%d%H%M%S)
+    for f in /data/mission-control-go.sqlite3*; do [ ! -e "$f" ] || mv "$f" "/data/before-$stamp-${f##*/}"; done
+    sqlite3 /rails/storage/production.sqlite3 ".backup /data/rails-$stamp.sqlite3"
+    sqlite3 "/data/rails-$stamp.sqlite3" "PRAGMA journal_mode=DELETE" >/dev/null
+    /app move "/data/rails-$stamp.sqlite3"
+    [ ! -f /rails/storage/known_hosts ] || cp /rails/storage/known_hosts /data/known_hosts'; then
+    compose start mission-control >/dev/null 2>&1 || true
+    fail "couldn't move Mission Control's data; the Rails one is running again, as it was"
+  fi
+}
+
+# shadow: HOUSTON_SHADOW=1 previews the Go Mission Control beside the Rails
+# one, on a copy of its data moved afresh, read-only (no jobs; it changes
+# nothing outside itself), at port 3001 where port 3000 listens. Nothing
+# else is changed. HOUSTON_SHADOW=remove takes it away.
+shadow() {
+  docker rm -f houston-shadow >/dev/null 2>&1 || true
+  docker volume rm houston_shadow-data >/dev/null 2>&1 || true
+  [ "$HOUSTON_SHADOW" = remove ] && { step "Removed the preview"; return 0; }
+  runs_rails || fail "HOUSTON_SHADOW previews the Go Mission Control on a server running the Rails one; this one doesn't"
+  step "Previewing the Go Mission Control, read-only"
+  docker volume create houston_shadow-data >/dev/null
+  docker run --rm --user 1000:1000 --env-file "$HOUSTON_DIR/.env" -v houston_mission-control-storage:/rails/storage \
+    -v houston_shadow-data:/data --entrypoint sh "$IMAGE" -c '
+    set -e
+    sqlite3 /rails/storage/production.sqlite3 ".backup /data/rails.sqlite3"
+    sqlite3 /data/rails.sqlite3 "PRAGMA journal_mode=DELETE" >/dev/null
+    /app move /data/rails.sqlite3 >/dev/null
+    [ ! -f /rails/storage/known_hosts ] || cp /rails/storage/known_hosts /data/known_hosts' ||
+    fail "couldn't move a copy of Mission Control's data for the preview; nothing was changed"
+  docker_gid=$(getent group docker | cut -d: -f3)
+  docker run -d --name houston-shadow --restart no --network houston_default --env-file "$HOUSTON_DIR/.env" \
+    -e MISSION_CONTROL_SHADOW=1 -e HOUSTON_RUNNERS="$RUNNERS" -e HOUSTON_TOOLS_IMAGE="$IMAGE" \
+    -p "$bind:3001:80" --group-add "$docker_gid" -v houston_shadow-data:/data \
+    -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE" >/dev/null
+  tries=0
+  until curl -fs -o /dev/null "http://$(probe_address):3001/up"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 60 ] || fail "the preview didn't come up; see: docker logs houston-shadow"
+    sleep 2
+  done
+  address=$(host_address || true)
+  say ""
+  say "The Go Mission Control is at http://${address:-<this server>}:3001, read-only, on a copy of today's data."
+  say "Sign in as you do now. Nothing there changes anything. Remove it: HOUSTON_SHADOW=remove, then this installer again."
 }
 
 # probe_address: where to check Mission Control answers.
@@ -449,8 +544,6 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      RAILS_ENV: production
-      SOLID_QUEUE_IN_PUMA: "1"
       HOUSTON_TUNNEL_TOKEN_PATH: /houston/tunnel-token
       HOUSTON_RUNNERS: "$RUNNERS"
       HOUSTON_TOOLS_IMAGE: $IMAGE
@@ -460,18 +553,16 @@ services:
       # Deleting a project removes Kamal's files for it here (its env files
       # hold secrets); the path is on the host, reached through a container.
       HOUSTON_KAMAL_HOME: $houston_home/.kamal
-      # Each runner's claim long-polls on a Puma thread; leave plenty for the UI and webhooks.
-      RAILS_MAX_THREADS: "8"
     ports:
       - "\${HOUSTON_BIND:-127.0.0.1}:3000:80"
     group_add:
       - "$docker_gid"
     volumes:
-      - mission-control-storage:/rails/storage
+      # Its database and the git hosts' keys. (The Rails one's
+      # mission-control-storage is kept as it was, unused.)
+      - mission-control-data:/data
       - houston-config:/houston
       - /var/run/docker.sock:/var/run/docker.sock
-      # Mission Control reads linked repos' compose files with the CLI's own parser.
-      - /usr/local/bin/houston:/usr/local/bin/houston:ro
 
   # Waits for the token Mission Control writes in setup step 2, then connects.
   cloudflared:
@@ -498,7 +589,7 @@ services:
 
 $(runner_services)
 volumes:
-  mission-control-storage:
+  mission-control-data:
   houston-config:
   registry-data:
 
@@ -531,7 +622,7 @@ fetch_images() {
   else
     sha=$(source_sha)
     step "Building Mission Control from $HOUSTON_SOURCE"
-    docker build --quiet --target production --build-arg HOUSTON_SOURCE_SHA="$sha" -t "$IMAGE" "$HOUSTON_SOURCE/mission_control" >/dev/null
+    docker build --quiet --target production --build-arg HOUSTON_SOURCE_SHA="$sha" -t "$IMAGE" -f "$HOUSTON_SOURCE/mission-control-go/Dockerfile" "$HOUSTON_SOURCE" >/dev/null
     step "Building the runner image"
     docker build --quiet -t "$RUNNER_IMAGE" -f "$HOUSTON_SOURCE/install/runner.Dockerfile" "$HOUSTON_SOURCE/install" >/dev/null
   fi
@@ -574,7 +665,7 @@ start() {
 report() {
   address=$(host_address || true)
   if [ "$bind" = 0.0.0.0 ]; then url="http://${address:-<this server>}:3000"; else url="http://$bind:3000"; fi
-  if code=$(compose exec -T mission-control bin/rails houston:setup_code 2>/dev/null); then
+  if code=$(compose exec -T mission-control /app task setup-code 2>/dev/null); then
     say ""
     say "Houston $(installed_version) is running."
     say "Finish setup at  $url"
@@ -602,11 +693,18 @@ report() {
 check_system
 install_prereqs
 fetch_images
+if [ -n "$HOUSTON_SHADOW" ]; then
+  write_env
+  choose_bind
+  shadow
+  exit 0
+fi
 create_user
 check_ssh
 write_env
 write_runner_token
 choose_bind
+move_from_rails
 write_compose
 install_cli
 start
