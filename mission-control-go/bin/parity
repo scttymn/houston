@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# The parity check (docs/plans/mission-control-go.md, decision 2): the Rails
+# and Go versions of Mission Control on the same data (made by the Rails app,
+# then moved), sent the same requests by test/parity, their answers compared.
+# Needs the images built: mission-control-app (cd mission_control && docker
+# compose build) and houston-dev-cli (bin/go builds it).
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+root=$PWD
+work=$(mktemp -d)
+net=mc-parity-$$
+token=parity-runner-token-0123456789abcdef0123
+secret=parity-secret-key-base
+go_run=(docker run --rm -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod -v houston-dev_gocache:/root/.cache/go-build)
+
+cleanup() {
+	docker rm -f "$net-rails" "$net-go" >/dev/null 2>&1 || true
+	docker network rm "$net" >/dev/null 2>&1 || true
+	rm -rf "$work" "$root"/mission_control/tmp/parity.sqlite3*
+}
+trap cleanup EXIT
+
+echo "== the Rails app's data"
+(cd mission_control && docker compose --progress quiet run --rm --no-deps -T -e DATABASE_URL=sqlite3:tmp/parity.sqlite3 app \
+	sh -c 'bin/rails db:schema:load >/dev/null && bin/rails runner -') <mission-control-go/test/parity/fixture.rb
+cp mission_control/tmp/parity.sqlite3 "$work/rails.sqlite3"
+
+echo "== moved into the Go app's"
+"${go_run[@]}" -v "$work:/parity" -e GANTRY_ENV=development -e DATABASE_URL=sqlite:///parity/go.sqlite3 \
+	-e AR_ENCRYPTION_PRIMARY_KEY=dev-only-primary-key-not-for-production-use \
+	-e AR_ENCRYPTION_KEY_DERIVATION_SALT=dev-only-key-derivation-salt-not-for-production \
+	houston-dev-cli go run ./cmd/mission-control-go move /parity/rails.sqlite3
+
+echo "== both, side by side"
+docker network create "$net" >/dev/null
+docker run -d --name "$net-rails" --network "$net" -v "$root/mission_control:/rails" -e DATABASE_URL=sqlite3:tmp/parity.sqlite3 \
+	-e RAILS_DEVELOPMENT_HOSTS=admin.houston.localhost,hooks.houston.localhost \
+	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent \
+	mission-control-app bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid >/dev/null
+docker run -d --name "$net-go" --network "$net" -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod \
+	-v houston-dev_gocache:/root/.cache/go-build -v "$work:/parity" -e GANTRY_ENV=development -e DATABASE_URL=sqlite:///parity/go.sqlite3 \
+	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent -e ADDR=:8080 \
+	houston-dev-cli go run ./cmd/mission-control-go >/dev/null
+
+echo "== the same requests to each"
+"${go_run[@]}" --network "$net" houston-dev-cli sh -c "
+	for i in \$(seq 120); do
+		curl -sf -o /dev/null -H 'Host: admin.houston.localhost' http://$net-rails:3000/up && curl -sf -o /dev/null http://$net-go:8080/up && break
+		sleep 1
+	done
+	go run ./test/parity -rails http://$net-rails:3000 -go http://$net-go:8080 -token $token" || {
+	status=$?
+	echo "== the Rails app's log"; docker logs --tail 40 "$net-rails" 2>&1
+	echo "== the Go app's log"; docker logs --tail 40 "$net-go" 2>&1
+	exit $status
+}
