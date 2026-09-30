@@ -62,6 +62,7 @@ func (a *App) Router() *web.Router {
 	runner := api.Controller{DB: a.DB, Log: a.Log}
 	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
 		s.Handle("POST /projects/sync", runner.Sync)
+		s.Handle("GET /projects/{name}/secrets/{key}", runner.Secret)
 	})
 
 	homePage := home.Controller{DB: a.DB}
