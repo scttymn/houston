@@ -334,6 +334,9 @@ func copyHosts(hosts []string, t Target) []string {
 	return append(kept, t.ExtraHosts...)
 }
 
+// Hosts are the hosts a deploy of p to t serves: kamal-proxy's.
+func Hosts(p *project.Project, t Target) []string { return copyHosts(proxyHosts(p, t.BaseDomain), t) }
+
 func proxyHosts(p *project.Project, base string) []string {
 	hosts := []string{p.Name + "." + base}
 	seen := map[string]bool{hosts[0]: true}

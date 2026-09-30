@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -436,6 +437,7 @@ type harness struct {
 	project string // the claimed job's project, as a runner passes it
 	// snapshotEvery: how often the pre-deploy snapshot is polled.
 	snapshotEvery time.Duration
+	http          *http.Client // the warm-up's; nil: no warm-up
 }
 
 // reported: some progress report named step.
@@ -513,7 +515,7 @@ func (h *harness) run() int {
 		Fresh:          h.fresh,
 		Houston:        "/usr/local/bin/houston",
 		SnapshotEvery:  h.snapshotEvery,
-	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission, Exec: h.exec})
+	}, Deps{Docker: h.docker, Git: h.git, Mission: h.mission, Exec: h.exec, HTTP: h.http})
 }
 
 func TestDeployHappyPath(t *testing.T) {
@@ -1440,4 +1442,41 @@ func (m *fakeMission) steps() []string {
 		}
 	}
 	return steps
+}
+
+// Once the new version serves, the deploy fetches its hosts' pages and
+// files (docs/plans/warm-up.md), then says GO; without a client it doesn't.
+func TestDeployWarmsUp(t *testing.T) {
+	withDomain := strings.Replace(shopCompose, "  health: /up\n", "  health: /up\n  domains: [shop.example]\n", 1)
+	s := &sites{hosts: map[string]http.Handler{
+		"shop.svnmns.com": page(`<script src="/app.js"></script>`, "MISS"),
+		"shop.example":    page(`<script src="/app.js"></script>`, "HIT"),
+	}}
+	h := newHarness(t, withDomain)
+	h.http = s.client()
+	if code := h.run(); code != 0 {
+		t.Fatalf("exit %d\n%s", code, h.stderr.String())
+	}
+	if got, want := s.got(), []string{"https://shop.example/", "https://shop.example/app.js", "https://shop.svnmns.com/", "https://shop.svnmns.com/app.js"}; !slices.Equal(got, want) {
+		t.Errorf("fetched %v", got)
+	}
+	var steps []string
+	for _, r := range h.mission.reports {
+		if r.Step != "" {
+			steps = append(steps, r.Step)
+		}
+	}
+	if len(steps) < 2 || steps[len(steps)-1] != "Warm-up" || !slices.Contains(steps, "Deploy") {
+		t.Errorf("steps %v: Warm-up last, after Deploy", steps)
+	}
+	out := h.stdout.String()
+	warmed, gone := strings.Index(out, "ok  warmed https://shop.svnmns.com/: 1 file, 1 newly cached"), strings.Index(out, "GO: shop is serving")
+	if warmed < 0 || gone < warmed || !strings.Contains(out, "ok  warmed https://shop.example/: 1 file\n") {
+		t.Errorf("the warm-up, then GO:\n%s", out)
+	}
+
+	h = newHarness(t, withDomain)
+	if code := h.run(); code != 0 || strings.Contains(h.stdout.String(), "warm") {
+		t.Errorf("no client, no warm-up: %d\n%s", code, h.stdout.String())
+	}
 }

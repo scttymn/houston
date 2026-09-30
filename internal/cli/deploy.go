@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/scttymn/houston/internal/deploy"
 	"github.com/scttymn/houston/internal/docker"
@@ -49,7 +51,7 @@ func runDeploy(file, ref string, fresh bool, stdout, stderr io.Writer, d docker.
 		Environ: os.Environ(),
 		Stdout:  stdout,
 		Stderr:  stderr,
-	}, deploy.Deps{Docker: d, Git: gitCLI{}, Mission: client, Exec: execCLI{}})
+	}, deploy.Deps{Docker: d, Git: gitCLI{}, Mission: client, Exec: execCLI{}, HTTP: warmClient})
 }
 
 // runRunner implements houston runner: a houston-runner-N container's loop.
@@ -74,7 +76,7 @@ func runRunner(name, workspace string, stderr io.Writer, d docker.Runner) int {
 	r := &runner.Runner{
 		Name: name, Workspace: workspace, Mission: client, Git: gitCLI{}, Sleep: runner.Sleep, Docker: d,
 		Deploy: func(ctx context.Context, o deploy.Options) int {
-			return deploy.Run(ctx, o, deploy.Deps{Docker: d, Git: gitCLI{}, Mission: client, Exec: execCLI{}})
+			return deploy.Run(ctx, o, deploy.Deps{Docker: d, Git: gitCLI{}, Mission: client, Exec: execCLI{}, HTTP: warmClient})
 		},
 		Base: deploy.Options{Arch: runtime.GOARCH, SSHDir: filepath.Join(home, ".ssh"), Environ: os.Environ(), Stdout: os.Stdout, Stderr: stderr, Houston: self},
 	}
@@ -117,3 +119,7 @@ func (gitCLI) Output(dir string, args ...string) (string, error) {
 	}
 	return string(out), err
 }
+
+// warmClient fetches a new version's pages and files after a deploy, for
+// Cloudflare's cache (docs/plans/warm-up.md).
+var warmClient = &http.Client{Timeout: 15 * time.Second}

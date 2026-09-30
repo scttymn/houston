@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -107,6 +108,10 @@ type Deps struct {
 	Git     Git
 	Mission Mission
 	Exec    Exec
+	// HTTP fetches the new version's pages and files through their public
+	// addresses once it serves, filling Cloudflare's cache (the Warm-up
+	// step: docs/plans/warm-up.md). Nil: no warm-up.
+	HTTP *http.Client
 }
 
 // Run deploys and returns the exit code.
@@ -214,6 +219,7 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	defer cancel(nil)
 
 	r := &run{ctx: runCtx, o: o, d: d, p: p, generation: target.Generation, dir: dir, file: abs, sha: sha, config: config, secretsFile: secretsFile, timeout: timeout,
+		hosts:    kamal.Hosts(p, target),
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
 		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now(),
@@ -368,6 +374,7 @@ type run struct {
 	kamalEnv    []string // Environ plus HOUSTON_S_<NAME>=<carrier>
 	kamalArgs   []string // -e HOUSTON_S_<NAME> for each
 	appEnv      map[string]string
+	hosts       []string // the hosts the new version serves, to warm up
 	report      *reporter
 }
 
@@ -461,6 +468,7 @@ func (r *run) deploy(tookOver bool) int {
 		if err != nil {
 			return r.fail(fmt.Sprintf("the handover failed: %v; %s keeps serving its hosts", err, copy.From))
 		}
+		r.hosts = append(r.hosts, moved...)
 		if len(moved) > 0 {
 			r.report.logf("ok  handed over: %s\n", strings.Join(moved, ", "))
 		} else {
@@ -474,6 +482,11 @@ func (r *run) deploy(tookOver bool) int {
 		if err != nil || code != 0 {
 			r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
 		}
+	}
+
+	if r.d.HTTP != nil && r.ctx.Err() == nil {
+		r.report.step("Warm-up")
+		warmUp(r.ctx, r.d.HTTP, r.hosts, r.report.logf)
 	}
 
 	if r.ctx.Err() != nil {
