@@ -57,7 +57,7 @@ In slices, each merged before the next; each slice adds its tables' part of the 
 
 | Slice | Criterion | Test |
 | --- | --- | --- |
-| 1a | The door (`api/base_controller.rb`): through the tunnel (`Cf-Ray`, or `Cf-Connecting-Ip` from cloudflared) an empty 404; the runner token as a bearer, constant-time, refused below 32 characters (401 JSON); 409 until Cloudflare is connected; a body over its limit 413, one that isn't JSON 400 | `api.TestDoor` |
+| 1a | The door (`api/base_controller.rb`): through the tunnel (`Cf-Ray`, or `Cf-Connecting-Ip` from cloudflared) an empty 404; the runner token as a bearer, constant-time, refused below 32 characters (401 JSON); 409 until Cloudflare is connected; a body over its limit 413, one that isn't JSON 400 | `api.TestDoor` (done) |
 | 1b | Projects and sync: the payload validated as `ProjectSync#validate` does (a table of each rule), the project saved with its container names claimed (another project's name refused, nothing saved), required secrets missing is HOLD (422 with `missing`), reserved names, a restore in flight 409, a runner's sync must match its claimed deploy (token, project) | `api.TestSync*`; `move.TestProjects` |
 | 1c | Cloudflare for sync: per-host DNS (a record Houston didn't make refused), custom domains' states, dropped domains removed, a never-served project waits for its first GO, maintenance routes pushed; against a fake Cloudflare API | `cloudflare.Test*`, `api.TestSyncDNS` |
 | 1d | Secrets: one value as `text/plain`, only for a key compose.yml names; else 404 JSON | `api.TestSecret`; `move.TestSecrets` |

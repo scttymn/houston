@@ -20,3 +20,15 @@ func (q *Queries) InstallationBaseDomain(ctx context.Context) (string, error) {
 	err := row.Scan(&base_domain)
 	return base_domain, err
 }
+
+const installationConnected = `-- name: InstallationConnected :one
+SELECT cloudflare_connected_at IS NOT NULL AS connected FROM installations WHERE id = 1
+`
+
+// Whether setup has connected Cloudflare (no row before setup).
+func (q *Queries) InstallationConnected(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, installationConnected)
+	var connected bool
+	err := row.Scan(&connected)
+	return connected, err
+}
