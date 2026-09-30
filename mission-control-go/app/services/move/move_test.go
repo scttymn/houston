@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/scttymn/gantry/crypt"
 
+	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/test"
 )
 
@@ -50,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -113,6 +115,31 @@ func TestInstallation(t *testing.T) {
 	}
 }
 
+// The installation is one row, id 1, whatever id Rails gave it; were
+// there two, the first is Rails' Installation.current.
+func TestInstallationIsOne(t *testing.T) {
+	useKeys(t)
+	from := railsDB(t)
+	r, _ := sql.Open("sqlite", from)
+	for _, q := range []string{`UPDATE installations SET id = 7`,
+		`INSERT INTO installations (id, base_domain, time_zone, port_open, created_at, updated_at) VALUES (9, 'second.example', 'UTC', 1, '2026-01-01', '2026-01-01')`} {
+		if _, err := r.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Close()
+	to := test.DB(t)
+	if _, err := Run(context.Background(), from, devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	var id int
+	var base string
+	to.Read.QueryRow(`SELECT id, base_domain FROM installations`).Scan(&id, &base)
+	if id != 1 || base != "houston.example" || count(t, to.Read, "installations") != 1 {
+		t.Errorf("= %d %s, %d rows", id, base, count(t, to.Read, "installations"))
+	}
+}
+
 // The move is once: into an empty database, from the Rails schema it was
 // written for, with keys that open Rails' values. Anything else moves
 // nothing.
@@ -160,4 +187,88 @@ func count(t *testing.T, d interface {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// The projects and what hangs off them move with their ids, their JSON as
+// the app reads it, their secrets decrypted from Rails' encryption and
+// stored in gantry's, and Rails' NULLs as the Go tables have them.
+func TestProjects(t *testing.T) {
+	useKeys(t)
+	ctx := context.Background()
+	to := test.DB(t)
+	if _, err := Run(ctx, railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	q := models.New(to.Read)
+	shop, err := q.ProjectByName(ctx, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blog, _ := q.ProjectByName(ctx, "blog")
+	if shop.ID != 1 || blog.ID != 2 {
+		t.Errorf("ids %d %d", shop.ID, blog.ID)
+	}
+	for _, c := range []struct{ name, got, want string }{
+		{"services", fmt.Sprint(shop.Services.V), "[web db]"},
+		{"domains", fmt.Sprint(shop.Domains.V), "[shop.houston.example shop.example.com]"},
+		{"domain states", fmt.Sprint(shop.DomainStates.V), "map[shop.example.com:{OK points at the tunnel}]"},
+		{"variables", fmt.Sprint(shop.Variables.V), "[{SECRET_KEY_BASE true} {SENTRY_DSN false}]"},
+		{"volumes", fmt.Sprint(shop.Volumes.V), "[{data /rails/storage}]"},
+		{"databases", fmt.Sprint(shop.Databases.V), "[{db postgres:17}]"},
+		{"details", fmt.Sprintf("%+v", shop.Details.V), "{Images:map[db:postgres:17] CPUs:2 Memory: Console:bin/rails console}"},
+		{"deploy rule", string(shop.DeployRule.V), `{"on":"tag","tags":"v*"}`},
+		{"seen refs", fmt.Sprint(shop.SeenRefs.V), "map[refs/heads/main:" + strings.Repeat("a", 40) + "]"},
+		{"numbers", fmt.Sprint(shop.Port, shop.DataGeneration, shop.KeepAuto, shop.KeepDeploy, shop.BackupLocationID.Int64), "3000 2 7 5 1"},
+		{"texts", strings.Join([]string{shop.BackupSchedule, shop.RepoUrl, shop.Branch, shop.ComposePath, shop.DeployKeyPublic,
+			shop.MaintenanceBy, shop.MaintenanceMessage, shop.MaintenancePage}, "|"),
+			"daily 04:30|git@github.com:scttymn/shop.git|main|compose.yml|ssh-ed25519 AAAA shop|scotty|Back at noon|<h1>Closed</h1>"},
+		{"deploy key", shop.DeployKeyPrivate.Reveal(), "-----BEGIN OPENSSH PRIVATE KEY-----\n" + strings.Repeat("k", 400) + "\n-----END OPENSSH PRIVATE KEY-----\n"},
+		{"webhook secret", shop.WebhookSecret.Reveal(), "whsec-shop"},
+		{"times", fmt.Sprint(shop.MaintenanceSince.Time, shop.SyncedAt.Time, shop.CreatedAt), "2026-09-30 07:00:00 +0000 UTC 2026-09-30 06:30:00 +0000 UTC 2026-01-05 00:00:00 +0000 UTC"},
+		// A first sync's project: Rails' NULLs are the Go defaults.
+		{"blog", fmt.Sprint(blog.RepoUrl == "", blog.Branch == "", blog.MaintenancePage == "", blog.DeployKeyPrivate.Reveal() == "",
+			blog.BackupLocationID.Valid, blog.MaintenanceSince.Valid, blog.Domains.V, blog.DomainStates.V, string(blog.DeployRule.V)),
+			"true true true true false false [] map[]{}"}, // Sprint: no space before a string
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: %s\nwant %s", c.name, c.got, c.want)
+		}
+	}
+
+	secrets, _ := models.Secrets(ctx, q, shop.ID)
+	if secrets["SECRET_KEY_BASE"] != "s3cret-ünïcode" || secrets["SENTRY_DSN"] != "https://key@sentry.example/1"+strings.Repeat("0", 200) {
+		t.Errorf("secrets %v", secrets)
+	}
+	if names, _ := q.ProjectHostNames(ctx, shop.ID); fmt.Sprint(names) != "[shop shop-db-g2]" {
+		t.Errorf("shop's names %v", names)
+	}
+
+	var (
+		credentials, password crypt.String
+		plainSettings         string
+		isDefault             bool
+		pruned                sql.NullTime
+	)
+	to.Read.QueryRow(`SELECT settings, is_default, pruned_at FROM storage_locations WHERE name = 'nas'`).Scan(&plainSettings, &isDefault, &pruned)
+	to.Read.QueryRow(`SELECT credentials, restic_password FROM storage_locations WHERE name = 'offsite'`).Scan(&credentials, &password)
+	if plainSettings != `{"server":"192.168.0.10","export":"/volume1/houston"}` || !isDefault || !pruned.Valid ||
+		credentials.Reveal() != `{"access_key_id":"AKIA123","secret_access_key":"s3cr3t/+="}` || password.Reveal() != strings.Repeat("r", 200) {
+		t.Errorf("storage: %s %v %v %q %q", plainSettings, isDefault, pruned, credentials.Reveal(), password.Reveal())
+	}
+
+	restore, err := q.DeployByID(ctx, 2)
+	queued, _ := q.DeployByID(ctx, 3)
+	if err != nil || restore.Kind != "restore" || restore.Status != "in_flight" || restore.Generation != 2 || restore.Runner != "houston-runner-1" ||
+		!restore.OwnedBy("two") || !restore.SwitchedAt.Valid || restore.SourceLocationID.Int64 != 1 || restore.SyncPayload.String != `{"name":"shop","port":3000}` {
+		t.Errorf("the restore: %+v %v", restore, err)
+	}
+	if queued.Runner != "" || queued.Step != "" || queued.TokenDigest != "" || !queued.Fresh || queued.SyncPayload.Valid || queued.FinishedAt.Valid {
+		t.Errorf("the queued deploy: %+v", queued)
+	}
+	var runner string
+	var seen time.Time
+	to.Read.QueryRow(`SELECT name, last_seen_at FROM runners`).Scan(&runner, &seen)
+	if runner != "houston-runner-1" || !seen.Equal(time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("runner %s %v", runner, seen)
+	}
 }

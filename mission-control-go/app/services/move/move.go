@@ -16,7 +16,7 @@ import (
 // another version is refused, not guessed at.
 const RailsSchemaVersion = "20260929220000"
 
-// Report is what moved, a line a table ("1 installation").
+// Report is what moved, a line a table ("1 installation", "2 projects").
 type Report struct{ Moved []string }
 
 // Run moves the Rails app's database at railsPath into to, which must be
@@ -48,19 +48,11 @@ func Run(ctx context.Context, railsPath string, keys RailsKeys, to *db.DB) (Repo
 			if err != nil {
 				return fmt.Errorf("move: %s: %w", t.name, err)
 			}
-			report.Moved = append(report.Moved, fmt.Sprintf("%d %s", moved, t.name))
+			report.Moved = append(report.Moved, t.report(moved))
 		}
 		return nil
 	})
 	return report, err
-}
-
-// tables are moved in order, each by its own func (installation.go, ...).
-var tables = []struct {
-	name string
-	move func(context.Context, *rails, *db.Tx) (int, error)
-}{
-	{"installation", moveInstallation},
 }
 
 // openRails opens the Rails database read-only, and checks it's at the
