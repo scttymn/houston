@@ -131,7 +131,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
 		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
-		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), Tools: cfg.ToolsImage}
+		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), Tools: cfg.ToolsImage, KnownHosts: cfg.KnownHosts}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}

@@ -52,3 +52,22 @@ UPDATE deploys SET log = log || ? WHERE id = ?;
 -- Whether nothing else of the project's has served: no other GO, no other
 -- switched restore.
 SELECT NOT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND id != ? AND (status = 'go' OR switched_at IS NOT NULL)) AS is_first;
+
+-- name: StaleInFlight :many
+SELECT * FROM deploys WHERE status = 'in_flight' AND heartbeat_at < ? ORDER BY id;
+
+-- name: NextQueued :one
+-- The oldest queued deploy whose project has none in flight.
+SELECT * FROM deploys WHERE status = 'queued'
+  AND project_id NOT IN (SELECT project_id FROM deploys WHERE status = 'in_flight')
+ORDER BY created_at, id LIMIT 1;
+
+-- name: ClaimQueued :execrows
+-- Only if it's still queued: another runner may have had it since.
+UPDATE deploys SET status = 'in_flight', runner = @runner, token_digest = @token_digest, generation = @generation,
+  heartbeat_at = @now, updated_at = @now
+WHERE id = @id AND status = 'queued';
+
+-- name: SeeRunner :exec
+INSERT INTO runners (name, last_seen_at, updated_at) VALUES (@name, @now, @now)
+ON CONFLICT (name) DO UPDATE SET last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at;

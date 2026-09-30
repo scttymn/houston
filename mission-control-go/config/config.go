@@ -21,6 +21,9 @@ type Config struct {
 	// default http://mission-control:8080; HOUSTON_APPS_URL, default
 	// http://kamal-proxy:80).
 	MissionControlURL, AppsURL string
+	// KnownHosts is the git hosts' keys Mission Control records
+	// (HOUSTON_KNOWN_HOSTS, default DATA_DIR/known_hosts).
+	KnownHosts string
 	// ToolsImage makes volumes' directories (HOUSTON_TOOLS_IMAGE).
 	ToolsImage string
 	// TunnelHost is cloudflared's name on the Docker network
@@ -58,6 +61,7 @@ func Load(getenv func(string) string) Config {
 		JobsInServer:      getenv("JOBS_IN_SERVER") != "false",
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
+	c.KnownHosts = or("HOUSTON_KNOWN_HOSTS", c.DataDir+"/known_hosts")
 	return c
 }
 

@@ -40,6 +40,35 @@ func (q *Queries) AppendLog(ctx context.Context, arg AppendLogParams) error {
 	return err
 }
 
+const claimQueued = `-- name: ClaimQueued :execrows
+UPDATE deploys SET status = 'in_flight', runner = ?1, token_digest = ?2, generation = ?3,
+  heartbeat_at = ?4, updated_at = ?4
+WHERE id = ?5 AND status = 'queued'
+`
+
+type ClaimQueuedParams struct {
+	Runner      string
+	TokenDigest string
+	Generation  int64
+	Now         time.Time
+	ID          int64
+}
+
+// Only if it's still queued: another runner may have had it since.
+func (q *Queries) ClaimQueued(ctx context.Context, arg ClaimQueuedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimQueued,
+		arg.Runner,
+		arg.TokenDigest,
+		arg.Generation,
+		arg.Now,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createDeploy = `-- name: CreateDeploy :one
 INSERT INTO deploys (project_id, number, kind, status, sha, ref, generation, token_digest, heartbeat_at, sync_payload)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
@@ -243,6 +272,44 @@ func (q *Queries) NextDeployNumber(ctx context.Context, projectID int64) (int64,
 	return next, err
 }
 
+const nextQueued = `-- name: NextQueued :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE status = 'queued'
+  AND project_id NOT IN (SELECT project_id FROM deploys WHERE status = 'in_flight')
+ORDER BY created_at, id LIMIT 1
+`
+
+// The oldest queued deploy whose project has none in flight.
+func (q *Queries) NextQueued(ctx context.Context) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, nextQueued)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const projectHasServed = `-- name: ProjectHasServed :one
 SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND (status = 'go' OR switched_at IS NOT NULL)) AS served
 `
@@ -396,4 +463,70 @@ func (q *Queries) SaveProgress(ctx context.Context, arg SaveProgressParams) (Dep
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const seeRunner = `-- name: SeeRunner :exec
+INSERT INTO runners (name, last_seen_at, updated_at) VALUES (?1, ?2, ?2)
+ON CONFLICT (name) DO UPDATE SET last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at
+`
+
+type SeeRunnerParams struct {
+	Name string
+	Now  time.Time
+}
+
+func (q *Queries) SeeRunner(ctx context.Context, arg SeeRunnerParams) error {
+	_, err := q.db.ExecContext(ctx, seeRunner, arg.Name, arg.Now)
+	return err
+}
+
+const staleInFlight = `-- name: StaleInFlight :many
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE status = 'in_flight' AND heartbeat_at < ? ORDER BY id
+`
+
+func (q *Queries) StaleInFlight(ctx context.Context, heartbeatAt time.Time) ([]Deploy, error) {
+	rows, err := q.db.QueryContext(ctx, staleInFlight, heartbeatAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Deploy{}
+	for rows.Next() {
+		var i Deploy
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Number,
+			&i.Kind,
+			&i.Status,
+			&i.Sha,
+			&i.Ref,
+			&i.Fresh,
+			&i.Generation,
+			&i.Step,
+			&i.Error,
+			&i.Log,
+			&i.Runner,
+			&i.ProposedName,
+			&i.TokenDigest,
+			&i.HeartbeatAt,
+			&i.FinishedAt,
+			&i.SwitchedAt,
+			&i.SourceLocationID,
+			&i.SourceSnapshotID,
+			&i.SyncPayload,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

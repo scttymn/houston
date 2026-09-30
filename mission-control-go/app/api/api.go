@@ -24,6 +24,8 @@ type Controller struct {
 	Tools string
 	// Live tells open pages what changed.
 	Live *live.Hub
+	// KnownHosts is the file of git hosts' keys (HOUSTON_KNOWN_HOSTS).
+	KnownHosts string
 }
 
 func (c Controller) placement() volumes.Placement {
