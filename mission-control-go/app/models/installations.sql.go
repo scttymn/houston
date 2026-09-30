@@ -13,6 +13,43 @@ import (
 	"github.com/scttymn/gantry/crypt"
 )
 
+const connectCloudflare = `-- name: ConnectCloudflare :exec
+INSERT INTO installations (id, base_domain, cloudflare_account_id, cloudflare_zone_id, tunnel_id, cloudflare_api_token, tunnel_token, dns_mode,
+  cloudflare_connected_at, updated_at)
+VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+ON CONFLICT (id) DO UPDATE SET base_domain = excluded.base_domain, cloudflare_account_id = excluded.cloudflare_account_id,
+  cloudflare_zone_id = excluded.cloudflare_zone_id, tunnel_id = excluded.tunnel_id, cloudflare_api_token = excluded.cloudflare_api_token,
+  tunnel_token = excluded.tunnel_token, dns_mode = excluded.dns_mode, cloudflare_connected_at = excluded.cloudflare_connected_at,
+  updated_at = excluded.updated_at
+`
+
+type ConnectCloudflareParams struct {
+	BaseDomain          string
+	CloudflareAccountID string
+	CloudflareZoneID    string
+	TunnelID            string
+	CloudflareApiToken  crypt.String
+	TunnelToken         crypt.String
+	DnsMode             string
+	ConnectedAt         sql.NullTime
+}
+
+// Setup's Cloudflare step, done: the installation's first row, or the one
+// a rerun finishes.
+func (q *Queries) ConnectCloudflare(ctx context.Context, arg ConnectCloudflareParams) error {
+	_, err := q.db.ExecContext(ctx, connectCloudflare,
+		arg.BaseDomain,
+		arg.CloudflareAccountID,
+		arg.CloudflareZoneID,
+		arg.TunnelID,
+		arg.CloudflareApiToken,
+		arg.TunnelToken,
+		arg.DnsMode,
+		arg.ConnectedAt,
+	)
+	return err
+}
+
 const currentInstallation = `-- name: CurrentInstallation :one
 SELECT id, base_domain, time_zone, dns_mode, port_open, cloudflare_account_id, cloudflare_zone_id, cloudflare_api_token, cloudflare_connected_at, tunnel_id, tunnel_token, latest_release, latest_release_url, latest_release_checked_at, registry_cleanup_since, created_at, updated_at FROM installations WHERE id = 1
 `

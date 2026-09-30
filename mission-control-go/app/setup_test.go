@@ -12,6 +12,7 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare/cloudflaretest"
 )
 
 // firstRun is a server fresh from the installer: no admin, a code printed,
@@ -192,5 +193,49 @@ func TestSetupNextStep(t *testing.T) {
 	// Signing in and out is never a step's.
 	if w := b.do("GET", "/sign-in", nil); w.Code != 200 {
 		t.Errorf("sign-in = %d", w.Code)
+	}
+}
+
+// Step 2: the base domain and the token; its checks when it fails, and on
+// to storage when it passes. Closed once connected.
+func TestSetupCloudflare(t *testing.T) {
+	a, b := signedIn(t)
+	fake := cloudflaretest.New(t)
+	fake.Account("acct", "Seven Moons")
+	fake.Zone("zbase", "svnmns.com", "active")
+	a.Cloudflare = fake.URL
+	b.h = a.Handler()
+	page := b.do("GET", "/setup/cloudflare", nil).Body.String()
+	contains(t, page, "<title>Connect Cloudflare · Mission Control</title>",
+		`<li class="steps__step is-done"><span class="mono steps__number">GO</span> <span class="mono steps__name">ADMIN ACCOUNT</span></li>`,
+		`<li class="steps__step is-current" aria-current="step"><span class="mono steps__number">02</span>`,
+		`<form class="setup__form" action="/setup/cloudflare" accept-charset="UTF-8" method="post">`, `name="cloudflare[base_domain]"`,
+		`<span class="mono">houston-&lt;base&gt;</span>`, `<span class="mono">*.example.com</span>`)
+
+	w := b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"svnmns.com"}, "cloudflare[api_token]": {"nope"}})
+	if w.Code != 422 {
+		t.Fatalf("a wrong token = %d", w.Code)
+	}
+	contains(t, w.Body.String(), `<span class="mono eyebrow">TOKEN CHECK</span>`,
+		`<p class="check"><span class="mono check__state check__state--nogo">NO-GO</span> <span>The token isn&#39;t valid (Cloudflare: Invalid API Token).`,
+		`value="svnmns.com" name="cloudflare[base_domain]"`, `<span class="mono">houston-svnmns</span>`, `<span class="mono">admin.svnmns.com</span>`)
+	w = b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"https://svnmns.com"}, "cloudflare[api_token]": {"cf-token"}})
+	contains(t, w.Body.String(), `<span class="field__error">Base domain must be a domain like example.com, with no scheme, path or wildcard.</span>`)
+
+	w = b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"svnmns.com"}, "cloudflare[api_token]": {"cf-token"}})
+	if w.Code != 302 || location(w) != "/" {
+		t.Fatalf("connect = %d %q\n%s", w.Code, location(w), w.Body.String())
+	}
+	if w := b.do("GET", "/", nil); location(w) != "/setup/storage" {
+		t.Errorf("after = %q", location(w))
+	}
+	for _, method := range []string{"GET", "POST"} {
+		if w := b.do(method, "/setup/cloudflare", nil); w.Code != 302 || location(w) != "/" {
+			t.Errorf("%s once connected = %d %q", method, w.Code, location(w))
+		}
+	}
+	b.jar = nil
+	if w := b.do("GET", "/setup/cloudflare", nil); location(w) != "/sign-in" {
+		t.Errorf("signed out = %q", location(w))
 	}
 }

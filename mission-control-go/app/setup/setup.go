@@ -14,6 +14,7 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsetup"
 	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
 )
 
@@ -22,6 +23,8 @@ type Controller struct {
 	DB     *db.DB
 	SignIn *auth.Auth
 	Limits *web.Limits
+	// Cloudflare is step 2's work.
+	Cloudflare cfsetup.Setup
 }
 
 // NextStep is where a signed-in admin goes until setup is done: "" once
@@ -99,4 +102,49 @@ func (c Controller) Create(w http.ResponseWriter, r *http.Request) error {
 
 func page(r *http.Request) layout.Page {
 	return layout.SetupStep(r, "First-run setup · Mission Control", 1)
+}
+
+// connected is whether Cloudflare is: then step 2 is closed.
+func (c Controller) connected(w http.ResponseWriter, r *http.Request) (models.Installation, bool, error) {
+	inst, err := models.New(c.DB.Read).CurrentInstallation(r.Context())
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return inst, false, err
+	}
+	if inst.CloudflareConnectedAt.Valid {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return inst, true, nil
+	}
+	return inst, false, nil
+}
+
+// ShowCloudflare is GET /setup/cloudflare: step 2.
+func (c Controller) ShowCloudflare(w http.ResponseWriter, r *http.Request) error {
+	inst, closed, err := c.connected(w, r)
+	if closed || err != nil {
+		return err
+	}
+	return web.Render(w, r, http.StatusOK, CloudflarePage(cloudflarePage(r), cfsetup.Form{BaseDomain: inst.BaseDomain}, nil, nil))
+}
+
+// ConnectCloudflare is POST /setup/cloudflare: the token checked, the
+// tunnel made, and on to storage.
+func (c Controller) ConnectCloudflare(w http.ResponseWriter, r *http.Request) error {
+	if _, closed, err := c.connected(w, r); closed || err != nil {
+		return err
+	}
+	form := cfsetup.Form{BaseDomain: r.PostFormValue("cloudflare[base_domain]"), APIToken: r.PostFormValue("cloudflare[api_token]")}
+	ok, checks, err := c.Cloudflare.Save(r.Context(), form, time.Now())
+	var invalid web.Invalid
+	switch {
+	case errors.As(err, &invalid), err == nil && !ok:
+		return web.Render(w, r, http.StatusUnprocessableEntity, CloudflarePage(cloudflarePage(r), form.Normal(), checks, invalid))
+	case err != nil:
+		return err
+	}
+	http.Redirect(w, r, "/", http.StatusFound)
+	return nil
+}
+
+func cloudflarePage(r *http.Request) layout.Page {
+	return layout.SetupStep(r, "Connect Cloudflare · Mission Control", 2)
 }

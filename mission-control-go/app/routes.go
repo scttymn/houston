@@ -20,6 +20,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsetup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
@@ -102,8 +103,9 @@ type App struct {
 	// Limits counts requests for rate limits, in this process.
 	Limits web.Limits
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
-	// trusted (proxies); "" trusts none.
-	TunnelHost string
+	// trusted (proxies); "" trusts none. TunnelTokenPath is where it reads
+	// the tunnel's token, which setup writes.
+	TunnelHost, TunnelTokenPath string
 }
 
 // Handler is every route, in gantry's middleware.
@@ -209,9 +211,14 @@ func (a *App) Router() *web.Router {
 	// Sign-in, then every page behind it.
 	signIn := a.signIn()
 	rt.Scope("", web.Pipeline{a.firstRun}, func(s *web.Scope) { signIn.Routes(s) })
-	firstRun := setup.Controller{DB: a.DB, SignIn: signIn, Limits: &a.Limits}
+	firstRun := setup.Controller{DB: a.DB, SignIn: signIn, Limits: &a.Limits,
+		Cloudflare: cfsetup.Setup{DB: a.DB, API: a.Cloudflare, Services: a.Services, TokenPath: a.TunnelTokenPath}}
 	rt.Handle("GET /setup", firstRun.Show)
 	rt.Handle("POST /setup", firstRun.Create)
+	rt.Scope("/setup", web.Pipeline{signIn.Required}, func(s *web.Scope) {
+		s.Handle("GET /cloudflare", firstRun.ShowCloudflare)
+		s.Handle("POST /cloudflare", firstRun.ConnectCloudflare)
+	})
 	rt.Handle("GET /session/new", func(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)
 		return nil

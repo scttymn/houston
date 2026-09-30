@@ -174,7 +174,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	runners, _ := strconv.Atoi(cfg.Runners)
 	own := owncontainer.Own{Docker: dockercmd.Docker, Hostname: hostname}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
-		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
+		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost, TunnelTokenPath: cfg.TunnelTokenPath,
 		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts, Git: gitremote.Git{Run: gitremote.Exec, KnownHosts: cfg.KnownHosts},
 		Version: version, Release: release.Checker{API: "https://api.github.com", Repo: cfg.Repo, Version: version},
 		KamalHome: cfg.KamalHome, Registry: registry.Registry{URL: cfg.RegistryURL, ComposeProject: cfg.ComposeProject, Docker: dockercmd.Docker},

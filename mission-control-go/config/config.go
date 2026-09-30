@@ -42,8 +42,9 @@ type Config struct {
 	// ToolsImage makes volumes' directories (HOUSTON_TOOLS_IMAGE).
 	ToolsImage string
 	// TunnelHost is cloudflared's name on the Docker network
-	// (HOUSTON_TUNNEL_HOST, default cloudflared).
-	TunnelHost string
+	// (HOUSTON_TUNNEL_HOST, default cloudflared); TunnelTokenPath, where it
+	// reads the tunnel's token, which setup writes (HOUSTON_TUNNEL_TOKEN_PATH).
+	TunnelHost, TunnelTokenPath string
 	// EncryptionKeys are gantry's crypt keys (ENCRYPTION_KEYS, crypt.NewKey
 	// makes one; the newest first). Development and tests have their own.
 	EncryptionKeys string
@@ -77,6 +78,7 @@ func Load(getenv func(string) string) Config {
 		SecretKeyBase:     getenv("SECRET_KEY_BASE"),
 		RunnerToken:       getenv("HOUSTON_RUNNER_TOKEN"),
 		TunnelHost:        or("HOUSTON_TUNNEL_HOST", "cloudflared"),
+		TunnelTokenPath:   getenv("HOUSTON_TUNNEL_TOKEN_PATH"),
 		ToolsImage:        or("HOUSTON_TOOLS_IMAGE", "houston/mission-control:local"),
 		MissionControlURL: or("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:8080"),
 		AppsURL:           or("HOUSTON_APPS_URL", "http://kamal-proxy:80"),

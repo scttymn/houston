@@ -1,5 +1,6 @@
 // Package cloudflaretest is a fake of the parts of Cloudflare's API Houston
-// calls: zones, their DNS records, and a tunnel's configuration.
+// calls: accounts, zones, their DNS records, and tunnels (made, their
+// tokens, and their configuration).
 package cloudflaretest
 
 import (
@@ -31,7 +32,7 @@ type Fake struct {
 	// Fail, when set, is the error every call answers; failCalls, the
 	// error one call answers ("PATCH /zones/z/dns_records/rec1").
 	fail      string
-	failCalls map[string]string
+	failCalls map[string]failure
 	// Calls are what was asked, "GET /zones?name=x" style.
 	calls []string
 	// Loose makes it ignore a list's comment.exact filter, as an API that
@@ -111,15 +112,23 @@ func (f *Fake) Fail(msg string) {
 	f.fail = msg
 }
 
-// FailCall makes one call answer Cloudflare's error msg: call is its
+// FailCall makes one call answer Cloudflare's error msg, 403: call is its
 // method and path, "PATCH /zones/z/dns_records/rec1".
-func (f *Fake) FailCall(call, msg string) {
+func (f *Fake) FailCall(call, msg string) { f.FailCallWith(call, 403, msg) }
+
+// FailCallWith makes one call answer Cloudflare's error msg with status.
+func (f *Fake) FailCallWith(call string, status int, msg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failCalls == nil {
-		f.failCalls = map[string]string{}
+		f.failCalls = map[string]failure{}
 	}
-	f.failCalls[call] = msg
+	f.failCalls[call] = failure{status, msg}
+}
+
+type failure struct {
+	status int
+	msg    string
 }
 
 // Calls are the calls made so far.
@@ -145,8 +154,8 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		answer(w, 400, nil, f.fail)
 		return
 	}
-	if msg, ok := f.failCalls[r.Method+" "+r.URL.Path]; ok {
-		answer(w, 403, nil, msg)
+	if fail, ok := f.failCalls[r.Method+" "+r.URL.Path]; ok {
+		answer(w, fail.status, nil, fail.msg)
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -163,6 +172,21 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		f.dnsRecords(w, r, parts[1], parts[3:])
 	case r.Method == "GET" && len(parts) == 1 && parts[0] == "accounts":
 		answer(w, 200, append([]map[string]string{}, f.accounts...), "")
+	case r.Method == "GET" && len(parts) == 3 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		answer(w, 200, f.tunnelList(parts[1], r.URL.Query().Get("name")), "")
+	case r.Method == "POST" && len(parts) == 3 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		var body struct{ Name string }
+		json.NewDecoder(r.Body).Decode(&body)
+		f.nextID++
+		tunnel := map[string]any{"id": fmt.Sprintf("tun%d", f.nextID), "name": body.Name, "status": "inactive", "connections": []any{}}
+		f.details[parts[1]+"/"+tunnel["id"].(string)] = tunnel
+		answer(w, 200, tunnel, "")
+	case r.Method == "GET" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "token":
+		if _, ok := f.details[parts[1]+"/"+parts[3]]; ok {
+			answer(w, 200, "token-for-"+parts[3], "")
+		} else {
+			answer(w, 404, nil, "Tunnel not found")
+		}
 	case r.Method == "GET" && len(parts) == 4 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
 		if d, ok := f.details[parts[1]+"/"+parts[3]]; ok {
 			answer(w, 200, d, "")
@@ -179,6 +203,24 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		answer(w, 404, nil, "no route for "+call)
 	}
+}
+
+// tunnelList is account's tunnels, those named name when it's set.
+func (f *Fake) tunnelList(account, name string) []any {
+	found := []any{}
+	for key, d := range f.details {
+		id, ok := strings.CutPrefix(key, account+"/")
+		if !ok {
+			continue
+		}
+		var t struct{ Name string }
+		b, _ := json.Marshal(d)
+		json.Unmarshal(b, &t)
+		if name == "" || t.Name == name {
+			found = append(found, map[string]any{"id": id, "name": t.Name})
+		}
+	}
+	return found
 }
 
 func (f *Fake) dnsRecords(w http.ResponseWriter, r *http.Request, zone string, rest []string) {
