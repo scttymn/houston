@@ -22,7 +22,14 @@ import (
 // time.UTC, ReportArgs{}). In tests, a.Jobs.Drain(ctx) runs what's due.
 func (a *App) DefineJobs() error {
 	a.Backup = jobs.Define(a.Jobs, "backup", a.backup, jobs.Opts[models.BackupArgs]{Queue: "backups"})
+	a.Check = jobs.Define(a.Jobs, "check_for_changes", a.checkForChanges, jobs.Opts[models.CheckArgs]{})
 	return nil
+}
+
+// checkForChanges looks at a project's repo for a push to deploy (batch 3
+// of docs/plans/mission-control-go.md; until then it says so).
+func (a *App) checkForChanges(ctx context.Context, args models.CheckArgs) error {
+	return errors.New("change checks don't run in the Go version yet")
 }
 
 // backup carries out a backup run: a snapshot, or a restore's data (batch

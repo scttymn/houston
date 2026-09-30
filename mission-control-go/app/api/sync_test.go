@@ -154,6 +154,14 @@ func TestSync(t *testing.T) {
 		t.Errorf("saved %s %s %s %d", services, domains, states, port)
 	}
 
+	// A maintenance page of 512 KB, which JSON escapes to about 3 MB.
+	page := strings.Repeat("<", 512<<10)
+	body, _ := json.Marshal(map[string]any{"name": "shop", "app_service": "web", "services": []string{"web", "db"}, "domains": []string{},
+		"variables": []any{}, "health": "/up", "port": 3000, "maintenance_page": page})
+	if w := post(h, "POST", "/api/projects/sync", string(body), nil); w.Code != 200 || len(body) < 3<<20 {
+		t.Errorf("a big page (%d bytes): %d %s", len(body), w.Code, w.Body.String())
+	}
+
 	// A payload that isn't what Houston expects: 422, field by field.
 	w := post(h, "POST", "/api/projects/sync", payload(map[string]any{"port": 0, "health": "up"}), nil)
 	is(t, w, 422, `{"error":"compose.yml doesn't match what Houston expects","errors":{"port":["must be a port number"],"health":["must be a path starting with /"]}}`)

@@ -46,8 +46,12 @@ type App struct {
 	Tools  string
 	// KnownHosts is the file of git hosts' keys Mission Control recorded.
 	KnownHosts string
-	// Backup runs a backup or a restore's data (app/jobs.go).
+	// Backup runs a backup or a restore's data; Check looks at a project's
+	// repo for changes (app/jobs.go).
 	Backup *jobs.Job[models.BackupArgs]
+	Check  *jobs.Job[models.CheckArgs]
+	// Limits counts requests for rate limits, in this process.
+	Limits web.Limits
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
 	// trusted (proxies); "" trusts none.
 	TunnelHost string
@@ -65,17 +69,19 @@ func (a *App) Router() *web.Router {
 	// files, so they show even when the app can't draw a page.
 	rt.Public = assets.All
 
+	// The runner API: houston deploy on the server, and the runners.
+	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
+		Check: a.Check, Limits: &a.Limits}
+
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
 		s.Handle("GET /ping", a.ping)
-		s.Handle("POST /{name}", notFound) // the webhook comes with the runner API (batch 1)
+		s.Handle("POST /{name}", runner.Webhook)
 		s.Handle("/", notFound)
 	})
 
 	rt.Handle("GET /ping", a.ping)
 
-	// The runner API: houston deploy on the server, and the runners.
-	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup}
 	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
 		s.Handle("POST /projects/sync", runner.Sync)
 		s.Handle("GET /projects/{name}/secrets/{key}", runner.Secret)

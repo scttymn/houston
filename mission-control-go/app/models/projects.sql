@@ -51,3 +51,6 @@ INSERT INTO secrets (project_id, key, value) VALUES (?, ?, ?);
 
 -- name: ProjectsInMaintenance :many
 SELECT * FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name;
+
+-- name: MarkWebhookVerified :exec
+UPDATE projects SET webhook_verified_at = ? WHERE id = ? AND webhook_verified_at IS NULL;

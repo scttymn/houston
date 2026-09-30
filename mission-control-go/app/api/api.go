@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
+	"time"
 
 	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/live"
+	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/models"
@@ -30,6 +33,12 @@ type Controller struct {
 	KnownHosts string
 	// Backup is the backup job, for the runs a deploy asks for.
 	Backup models.Enqueuer[models.BackupArgs]
+	// Check is the change check, which a verified webhook queues.
+	Check interface {
+		Enqueue(ctx context.Context, a models.CheckArgs) (int64, error)
+	}
+	// Limits counts requests for rate limits.
+	Limits *web.Limits
 }
 
 func (c Controller) placement() volumes.Placement {
@@ -37,3 +46,5 @@ func (c Controller) placement() volumes.Placement {
 }
 
 func sqlNumber(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: true} }
+
+func sqlTime(t time.Time) sql.NullTime { return sql.NullTime{Time: t, Valid: true} }

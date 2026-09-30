@@ -44,6 +44,20 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 	return err
 }
 
+const markWebhookVerified = `-- name: MarkWebhookVerified :exec
+UPDATE projects SET webhook_verified_at = ? WHERE id = ? AND webhook_verified_at IS NULL
+`
+
+type MarkWebhookVerifiedParams struct {
+	WebhookVerifiedAt sql.NullTime
+	ID                int64
+}
+
+func (q *Queries) MarkWebhookVerified(ctx context.Context, arg MarkWebhookVerifiedParams) error {
+	_, err := q.db.ExecContext(ctx, markWebhookVerified, arg.WebhookVerifiedAt, arg.ID)
+	return err
+}
+
 const moveGenerationForward = `-- name: MoveGenerationForward :execrows
 UPDATE projects SET data_generation = ?1, updated_at = ?2 WHERE id = ?3 AND data_generation < ?1
 `
