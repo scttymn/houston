@@ -18,8 +18,8 @@ type Config struct {
 	RunnerToken string
 	// MissionControlURL and AppsURL are where the tunnel sends Mission
 	// Control's hosts and everything else (HOUSTON_MISSION_CONTROL_URL,
-	// default http://mission-control:8080; HOUSTON_APPS_URL, default
-	// http://kamal-proxy:80).
+	// default http://mission-control:80, the image's port, as the Rails
+	// app's; HOUSTON_APPS_URL, default http://kamal-proxy:80).
 	MissionControlURL, AppsURL string
 	// KnownHosts is the git hosts' keys Mission Control records
 	// (HOUSTON_KNOWN_HOSTS, default DATA_DIR/known_hosts).
@@ -80,7 +80,7 @@ func Load(getenv func(string) string) Config {
 		TunnelHost:        or("HOUSTON_TUNNEL_HOST", "cloudflared"),
 		TunnelTokenPath:   getenv("HOUSTON_TUNNEL_TOKEN_PATH"),
 		ToolsImage:        or("HOUSTON_TOOLS_IMAGE", "houston/mission-control:local"),
-		MissionControlURL: or("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:8080"),
+		MissionControlURL: or("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:80"),
 		AppsURL:           or("HOUSTON_APPS_URL", "http://kamal-proxy:80"),
 		JobsInServer:      getenv("JOBS_IN_SERVER") != "false",
 	}

@@ -1,7 +1,7 @@
 # Stages: toolchain (Go, templ, sqlc, sqlite3), dev (the mounted code,
-# rebuilt on change), test, and production (a static binary on an empty
-# image). Houston builds dev for gantry dev, test for gantry test, and
-# production to deploy.
+# rebuilt on change), test, and production (the static binary, with what
+# Mission Control runs). Houston builds dev for gantry dev, test for gantry
+# test, and production to deploy.
 
 FROM golang:1.27-bookworm AS toolchain
 COPY --from=sqlc/sqlc:1.31.1 /workspace/sqlc /usr/local/bin/sqlc
@@ -45,13 +45,29 @@ WORKDIR /app/mission-control-go
 RUN --mount=type=cache,id=mission-control-go-assets,target=/cache/assets,sharing=locked \
     templ generate -path /app/mission-control-go && go run ./cmd/mission-control-go assets /cache/assets && cp -a /cache/assets/. assets/built/ \
  && go build -trimpath -ldflags "-s -w" -tags timetzdata,nodynamic -o /out/app ./cmd/mission-control-go
-RUN mkdir -p /out/data
 
-FROM scratch AS production
-COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Mission Control drives Docker on its server (restic, volumes, logs), reads
+# linked repos with git over ssh, and is its own tools image for helper
+# containers (sh, mkdir, and /app backup-sqlite), as the Rails app's image
+# was. It runs as 1000, the uid cloudflared reads the tunnel's token as;
+# port 80 inside, as the Rails app's, so the tunnel's routes and the
+# runners' address stay the same.
+FROM debian:bookworm-slim AS production
+COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN apt-get update -qq \
+ && apt-get install --no-install-recommends -y ca-certificates git openssh-client sqlite3 \
+ && rm -rf /var/lib/apt/lists /var/cache/apt/archives \
+ && groupadd --system --gid 1000 houston && useradd houston --uid 1000 --gid 1000 --create-home --shell /bin/sh \
+ && mkdir /data && chown 1000:1000 /data
 COPY --from=build /out/app /app
-COPY --from=build --chown=65532:65532 /out/data /data
-USER 65532:65532
-ENV ADDR=:8080 DATA_DIR=/data
-EXPOSE 8080
+USER 1000:1000
+ENV ADDR=:80 DATA_DIR=/data
+EXPOSE 80
+# Which Houston this is (HoustonVersion): a release's tag, from the release
+# workflow, or a checkout's commit, from the installer. Last, so a new
+# version doesn't rebuild the layers above.
+ARG HOUSTON_VERSION=""
+ARG HOUSTON_SOURCE_SHA=""
+ENV HOUSTON_VERSION=$HOUSTON_VERSION \
+    HOUSTON_SOURCE_SHA=$HOUSTON_SOURCE_SHA
 ENTRYPOINT ["/app"]
