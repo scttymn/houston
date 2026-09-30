@@ -481,9 +481,12 @@ func (q *Queries) Projects(ctx context.Context) ([]Project, error) {
 }
 
 const projectsInMaintenance = `-- name: ProjectsInMaintenance :many
-SELECT id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name
+SELECT id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at FROM projects WHERE maintenance_since IS NOT NULL
+  AND id NOT IN (SELECT project_id FROM project_deletions WHERE project_id IS NOT NULL AND removing_at IS NOT NULL AND status != 'go')
+ORDER BY name
 `
 
+// Not one being removed: its hosts stop reaching Mission Control.
 func (q *Queries) ProjectsInMaintenance(ctx context.Context) ([]Project, error) {
 	rows, err := q.db.QueryContext(ctx, projectsInMaintenance)
 	if err != nil {

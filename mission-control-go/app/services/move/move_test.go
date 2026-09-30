@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 Add project draft" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -325,5 +325,18 @@ func TestRepoLinks(t *testing.T) {
 	if err != nil || l.DeployKeyPrivate.Reveal() != "-----NEW KEY-----" || l.WebhookSecret.Reveal() != "new-whsec" ||
 		l.Preview.String != `{"sync":{"name":"new"}}` || l.Branch != "main" {
 		t.Errorf("draft %+v %v", l, err)
+	}
+}
+
+// A deleted project's record moves, with who asked and its final snapshot.
+func TestDeletions(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	d, err := models.New(to.Read).DeletionByID(context.Background(), 1)
+	if err != nil || d.Name != "old" || d.RequestedBy != "scotty" || d.ProjectID.Valid || d.SnapshotLocationID.Int64 != 1 || d.Status != "go" || !d.RemovingAt.Valid {
+		t.Errorf("= %+v %v", d, err)
 	}
 }

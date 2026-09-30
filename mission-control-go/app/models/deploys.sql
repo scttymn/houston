@@ -57,9 +57,12 @@ SELECT NOT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND id != ? AND (s
 SELECT * FROM deploys WHERE status = 'in_flight' AND heartbeat_at < ? ORDER BY id;
 
 -- name: NextQueued :one
--- The oldest queued deploy whose project has none in flight.
+-- The oldest queued deploy whose project has none in flight and isn't
+-- being deleted.
 SELECT * FROM deploys WHERE status = 'queued'
   AND project_id NOT IN (SELECT project_id FROM deploys WHERE status = 'in_flight')
+  AND project_id NOT IN (SELECT project_id FROM project_deletions WHERE project_id IS NOT NULL
+    AND (status IN ('queued', 'running') OR (status = 'no_go' AND removing_at IS NOT NULL)))
 ORDER BY created_at, id LIMIT 1;
 
 -- name: ClaimQueued :execrows

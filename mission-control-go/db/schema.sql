@@ -83,6 +83,27 @@ CREATE TABLE installations (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE project_deletions (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  repo_url TEXT NOT NULL DEFAULT '',
+  requested_by TEXT NOT NULL,
+  delete_backups BOOLEAN NOT NULL DEFAULT FALSE,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'go', 'no_go')),
+  step TEXT NOT NULL DEFAULT '',
+  error TEXT NOT NULL DEFAULT '' CHECK (length(error) <= 4000),
+  log TEXT NOT NULL DEFAULT '',
+  snapshot_id TEXT NOT NULL DEFAULT '',
+  snapshot_location_id INTEGER REFERENCES storage_locations (id),
+  heartbeat_at DATETIME NOT NULL,
+  started_at DATETIME,
+  -- Set once removal begins: from then on, asking again resumes it.
+  removing_at DATETIME,
+  finished_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE project_hosts (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
@@ -195,4 +216,7 @@ CREATE UNIQUE INDEX backup_runs_one_scheduled_per_day ON backup_runs (project_id
 CREATE INDEX backup_runs_project_created ON backup_runs (project_id, created_at);
 CREATE UNIQUE INDEX deploys_one_in_flight ON deploys (project_id) WHERE status = 'in_flight';
 CREATE UNIQUE INDEX deploys_one_queued ON deploys (project_id) WHERE status = 'queued';
+CREATE INDEX project_deletions_name ON project_deletions (name);
+CREATE UNIQUE INDEX project_deletions_one_active ON project_deletions (project_id) WHERE status IN ('queued', 'running');
+CREATE INDEX project_deletions_project ON project_deletions (project_id);
 CREATE INDEX project_hosts_project_id ON project_hosts (project_id);

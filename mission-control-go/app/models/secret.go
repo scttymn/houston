@@ -46,6 +46,9 @@ func GeneratedSecret() string {
 // already queued is returned as it is (a double click).
 func RequestManualBackup(ctx context.Context, tx *db.Tx, jobs Enqueuer[BackupArgs], p Project, now time.Time) (BackupRun, error) {
 	q := New(tx)
+	if err := refuseWhileDeleting(ctx, q, p); err != nil {
+		return BackupRun{}, err
+	}
 	served, err := q.ProjectHasServed(ctx, p.ID)
 	if err != nil {
 		return BackupRun{}, err

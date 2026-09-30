@@ -24,6 +24,13 @@ type Config struct {
 	// KnownHosts is the git hosts' keys Mission Control records
 	// (HOUSTON_KNOWN_HOSTS, default DATA_DIR/known_hosts).
 	KnownHosts string
+	// KamalHome is where Kamal keeps its files on the host
+	// (HOUSTON_KAMAL_HOME): a deletion removes the project's.
+	KamalHome string
+	// RegistryURL is Houston's registry (HOUSTON_REGISTRY_URL, default
+	// http://registry:5000); ComposeProject, the compose project it runs in
+	// (HOUSTON_COMPOSE_PROJECT, default houston).
+	RegistryURL, ComposeProject string
 	// Repo is Houston's own on GitHub, for its latest release
 	// (HOUSTON_REPO, default scttymn/houston).
 	Repo string
@@ -73,6 +80,9 @@ func Load(getenv func(string) string) Config {
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	c.KnownHosts = or("HOUSTON_KNOWN_HOSTS", c.DataDir+"/known_hosts")
 	c.Repo = or("HOUSTON_REPO", "scttymn/houston")
+	c.KamalHome = getenv("HOUSTON_KAMAL_HOME")
+	c.RegistryURL = or("HOUSTON_REGISTRY_URL", "http://registry:5000")
+	c.ComposeProject = or("HOUSTON_COMPOSE_PROJECT", "houston")
 	c.EncryptionKeys = getenv("ENCRYPTION_KEYS")
 	if c.EncryptionKeys == "" && c.Env != "production" {
 		c.EncryptionKeys = devEncryptionKey

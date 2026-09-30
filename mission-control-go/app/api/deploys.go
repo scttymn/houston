@@ -53,6 +53,8 @@ func (c Controller) StartDeploy(w http.ResponseWriter, r *http.Request) error {
 		return web.Status(http.StatusConflict, fmt.Errorf("another deploy of %s just started", project.Name))
 	case errors.As(err, &invalid):
 		return web.Status(http.StatusUnprocessableEntity, invalid)
+	case errors.As(err, new(models.Refused)): // being deleted (Rails lets this through as a 500)
+		return web.Status(http.StatusConflict, err)
 	case err != nil:
 		return err
 	}

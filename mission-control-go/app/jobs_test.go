@@ -15,6 +15,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 )
 
@@ -175,5 +176,45 @@ func TestLatestRelease(t *testing.T) {
 		if got := latest(); got != "v0.4.28 https://github.com/scttymn/houston/releases/tag/v0.4.28" {
 			t.Errorf("after %s: %q", bad, got)
 		}
+	}
+}
+
+// The registry's clean-up waits while anything may be pushing, then frees
+// the space and says so on the deletion's log, the lock let go.
+func TestCleanRegistry(t *testing.T) {
+	a := newApp(t)
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.OK("reg1\n"), "ps")
+	docker.On(dockercmdtest.OK("12 blobs and 3 manifests eligible for deletion\n"), "exec")
+	a.Registry = registry.Registry{ComposeProject: "houston", Docker: docker}
+	must := func(q string, args ...any) {
+		if _, err := a.DB.Write.Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	must(`INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
+	must(`INSERT INTO projects (id, name, app_service, services, health, port) VALUES (1, 'blog', 'web', '["web"]', '/', 80)`)
+	must(`INSERT INTO deploys (project_id, number, status, sha, ref, heartbeat_at) VALUES (1, 4, 'in_flight', 'abc', 'main', ?)`, time.Now())
+	must(`INSERT INTO project_deletions (id, name, requested_by, status, heartbeat_at) VALUES (1, 'shop', 'token laptop', 'go', CURRENT_TIMESTAMP)`)
+	a.CleanRegistry.Enqueue(t.Context(), models.DeletionArgs{ID: 1})
+	a.Jobs.Drain(t.Context())
+	pending, _ := a.Jobs.Pending(t.Context())
+	if len(pending) != 1 || pending[0].Attempts != 1 || len(docker.Calls()) != 0 {
+		t.Fatalf("behind a push: pending %+v, ran %v", pending, docker.Ran())
+	}
+	if !strings.Contains(pending[0].Error, "deploy #4 of blog is in flight") {
+		t.Errorf("why %q", pending[0].Error)
+	}
+
+	must(`UPDATE deploys SET status = 'go'`)
+	must(`DELETE FROM gantry_jobs`)
+	a.CleanRegistry.Enqueue(t.Context(), models.DeletionArgs{ID: 1})
+	a.Jobs.Drain(t.Context())
+	var log string
+	var locked bool
+	a.DB.Read.QueryRow(`SELECT log FROM project_deletions WHERE id = 1`).Scan(&log)
+	a.DB.Read.QueryRow(`SELECT registry_cleanup_since IS NOT NULL FROM installations`).Scan(&locked)
+	if log != "ok  registry space freed (12 blobs and 3 manifests eligible for deletion)\n" || locked {
+		t.Errorf("log %q, locked %v", log, locked)
 	}
 }

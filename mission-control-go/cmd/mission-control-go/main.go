@@ -32,6 +32,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 	"github.com/scttymn/houston/mission-control-go/app/services/move"
+	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
@@ -165,7 +166,8 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
 		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
 		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts, Git: gitremote.Git{Run: gitremote.Exec, KnownHosts: cfg.KnownHosts},
-		Version: version, Release: release.Checker{API: "https://api.github.com", Repo: cfg.Repo, Version: version}}
+		Version: version, Release: release.Checker{API: "https://api.github.com", Repo: cfg.Repo, Version: version},
+		KamalHome: cfg.KamalHome, Registry: registry.Registry{URL: cfg.RegistryURL, ComposeProject: cfg.ComposeProject, Docker: dockercmd.Docker}}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}

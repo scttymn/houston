@@ -37,6 +37,9 @@ func RequestSnapshot(ctx context.Context, tx *db.Tx, jobs Enqueuer[BackupArgs], 
 	if d.Restore() {
 		reason = "restore"
 	}
+	if err := refuseWhileDeleting(ctx, q, p); err != nil {
+		return BackupRun{}, err
+	}
 	served, err := q.ProjectHasServed(ctx, p.ID)
 	if err != nil {
 		return BackupRun{}, err

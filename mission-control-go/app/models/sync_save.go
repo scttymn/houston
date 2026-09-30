@@ -26,6 +26,9 @@ func (s Sync) Save(ctx context.Context, tx *db.Tx, now time.Time) (Project, []st
 	existing, err := q.ProjectByName(ctx, s.Name)
 	switch {
 	case err == nil:
+		if err := refuseWhileDeleting(ctx, q, existing); err != nil {
+			return Project{}, nil, err
+		}
 		for _, d := range existing.Domains.V {
 			if !contains(s.Domains, d) {
 				dropped = append(dropped, d)

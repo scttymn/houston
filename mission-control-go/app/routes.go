@@ -19,6 +19,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
@@ -64,6 +65,13 @@ type App struct {
 	Schedule, Prune, LatestRelease *jobs.Job[struct{}]
 	// Release asks GitHub for Houston's latest release.
 	Release release.Checker
+	// Delete carries out a project's deletion; CleanRegistry frees the
+	// registry's space after one.
+	Delete, CleanRegistry *jobs.Job[models.DeletionArgs]
+	// Registry is Houston's image registry; KamalHome, where Kamal keeps
+	// its files on the host (HOUSTON_KAMAL_HOME).
+	Registry  registry.Registry
+	KamalHome string
 	// Git reads projects' repos.
 	Git gitremote.Git
 	// Limits counts requests for rate limits, in this process.
@@ -87,7 +95,8 @@ func (a *App) Router() *web.Router {
 
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
-		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git}
+		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git,
+		Delete: a.Delete}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -118,6 +127,8 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /storage", remote.Storage)
 		s.Handle("GET /projects", remote.Projects)
 		s.Handle("GET /projects/{name}", remote.Project)
+		s.Handle("DELETE /projects/{name}", remote.DeleteProject)
+		s.Handle("GET /deletions/{id}", remote.Deletion)
 		s.Handle("GET /projects/{name}/deploys", remote.Deploys)
 		s.Handle("POST /projects/{name}/deploys", remote.DeployNow)
 		s.Handle("POST /projects/{name}/restores", remote.RequestRestore)

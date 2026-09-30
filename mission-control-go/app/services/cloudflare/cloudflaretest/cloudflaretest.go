@@ -28,6 +28,9 @@ type Fake struct {
 	fail string
 	// Calls are what was asked, "GET /zones?name=x" style.
 	calls []string
+	// Loose makes it ignore a list's comment.exact filter, as an API that
+	// didn't know it would.
+	Loose bool
 }
 
 // New is a fake, stopped when the test ends.
@@ -130,8 +133,9 @@ func (f *Fake) dnsRecords(w http.ResponseWriter, r *http.Request, zone string, r
 	switch {
 	case r.Method == "GET" && len(rest) == 0:
 		found := []cloudflare.Record{}
+		q := r.URL.Query()
 		for _, rec := range records {
-			if rec.Name == r.URL.Query().Get("name") {
+			if (!q.Has("name") || rec.Name == q.Get("name")) && (f.Loose || !q.Has("comment.exact") || rec.Comment == q.Get("comment.exact")) {
 				found = append(found, rec)
 			}
 		}

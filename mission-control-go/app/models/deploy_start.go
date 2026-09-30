@@ -87,6 +87,9 @@ type Started struct {
 // word for StaleAfter) is finished as abandoned; a live one is Busy.
 func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now time.Time) (Started, error) {
 	q := New(tx)
+	if err := refuseWhileDeleting(ctx, q, p); err != nil {
+		return Started{}, err
+	}
 	cleaning, err := q.RegistryCleaning(ctx, sql.NullTime{Time: now.Add(-RegistryCleanupStale), Valid: true})
 	if err != nil {
 		return Started{}, err

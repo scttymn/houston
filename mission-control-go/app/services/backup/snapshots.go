@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -147,14 +148,24 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines[max(0, len(lines)-n):], "\n")
 }
 
-// LocationsFor are every location the project's backups used, and its
-// current target, by name. (With deletions, also the ones holding the
-// final snapshots of deleted projects of the same name.)
+// LocationsFor are every location the project's backups used, the ones
+// holding the final snapshots of deleted projects of the same name, and
+// its current target, by name.
 func LocationsFor(ctx context.Context, q *models.Queries, p models.Project) ([]models.StorageLocation, error) {
 	used, err := q.LocationsUsedBy(ctx, p.ID)
 	if err != nil {
 		return nil, err
 	}
+	finals, err := q.DeletionSnapshotLocations(ctx, p.Name)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range finals {
+		if !slices.ContainsFunc(used, func(u models.StorageLocation) bool { return u.ID == l.ID }) {
+			used = append(used, l)
+		}
+	}
+	sort.Slice(used, func(i, j int) bool { return used[i].Name < used[j].Name })
 	target, err := q.BackupLocationFor(ctx, p.BackupLocationID.Int64)
 	if err == nil {
 		seen := false

@@ -49,6 +49,10 @@ type Controller struct {
 	// Refs reads a project's repo's refs; Git, anything else of a repo.
 	Refs models.RefReader
 	Git  gitremote.Git
+	// Delete is the deletion job.
+	Delete interface {
+		Enqueue(ctx context.Context, a models.DeletionArgs) (int64, error)
+	}
 }
 
 func (c Controller) placement() volumes.Placement {

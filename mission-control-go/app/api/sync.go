@@ -62,6 +62,11 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 	existing, err := q.ProjectByName(ctx, s.Name)
 	switch {
 	case err == nil:
+		if deleting, err := models.Deleting(ctx, q, existing.ID); err != nil {
+			return err
+		} else if deleting {
+			return web.Status(http.StatusConflict, fmt.Errorf("%s is being deleted", existing.Name))
+		}
 		// A restore owns the project's config until it's done: its safety
 		// snapshot and its cleanup read it. One gone silent doesn't: a hand
 		// houston deploy (which syncs first) is how it's taken over.

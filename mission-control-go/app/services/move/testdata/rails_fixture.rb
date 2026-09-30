@@ -80,9 +80,15 @@ BackupRun.create!(project: shop, location: nas, kind: "deploy", reason: "deploy"
 ApiToken.create!(name: "laptop", token_digest: ApiToken.digest("hou_laptop-token"), last_used_at: Time.utc(2026, 9, 30, 9))
 ApiToken.issue!("agent")
 
+# A deleted project's record (its project gone, its final snapshot kept).
+ProjectDeletion.create!(name: "old", repo_url: "git@github.com:scttymn/old.git", by: "scotty", status: "go", step: "rows",
+                        snapshot_id: "d" * 64, snapshot_location: nas, log: "== check\nGO: old is deleted\n",
+                        heartbeat_at: Time.utc(2026, 8, 1), started_at: Time.utc(2026, 8, 1), removing_at: Time.utc(2026, 8, 1, 0, 5),
+                        finished_at: Time.utc(2026, 8, 1, 0, 10))
+
 # Add project, midway: a draft that has read its compose.yml.
 RepoLink.create!(repo_url: "git@github.com:scttymn/new.git", deploy_key_private: "-----NEW KEY-----", deploy_key_public: "ssh-ed25519 AAAA new",
                  webhook_secret: "new-whsec", preview: { "sync" => { "name" => "new" } }, preview_sha: "c" * 40)
 
 puts "made #{ActiveRecord::Base.connection_db_config.database}: #{Installation.count} installation, #{Project.count} projects, " \
-     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts"
+     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts, #{ProjectDeletion.count} deletions"

@@ -529,10 +529,13 @@ func (q *Queries) NextDeployNumber(ctx context.Context, projectID int64) (int64,
 const nextQueued = `-- name: NextQueued :one
 SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE status = 'queued'
   AND project_id NOT IN (SELECT project_id FROM deploys WHERE status = 'in_flight')
+  AND project_id NOT IN (SELECT project_id FROM project_deletions WHERE project_id IS NOT NULL
+    AND (status IN ('queued', 'running') OR (status = 'no_go' AND removing_at IS NOT NULL)))
 ORDER BY created_at, id LIMIT 1
 `
 
-// The oldest queued deploy whose project has none in flight.
+// The oldest queued deploy whose project has none in flight and isn't
+// being deleted.
 func (q *Queries) NextQueued(ctx context.Context) (Deploy, error) {
 	row := q.db.QueryRowContext(ctx, nextQueued)
 	var i Deploy

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/removal"
 )
 
 // DefineJobs defines the app's background jobs on a.Jobs (gantry's jobs
@@ -56,6 +58,14 @@ func (a *App) DefineJobs() error {
 	if err := a.Prune.Cron("30 4 * * *", time.UTC, struct{}{}); err != nil {
 		return err
 	}
+	// A project's deletion, then the registry's clean-up once nothing is
+	// being pushed (waiting up to 6 hours).
+	a.Delete = jobs.Define(a.Jobs, "delete_project", a.deleteProject, jobs.Opts[models.DeletionArgs]{Queue: "deletions"})
+	a.CleanRegistry = jobs.Define(a.Jobs, "clean_registry", a.cleanRegistry, jobs.Opts[models.DeletionArgs]{Queue: "deletions",
+		Retry: jobs.Retry{Attempts: int(6 * time.Hour / registryWait), Wait: registryWait},
+		OnExhausted: func(ctx context.Context, args models.DeletionArgs, err error) {
+			a.noteDeletion(ctx, args.ID, "registry space wasn't freed: waited 6 hours ("+err.Error()+")")
+		}})
 	a.LatestRelease = jobs.Define(a.Jobs, "check_latest_release", a.checkLatestRelease, jobs.Opts[struct{}]{})
 	a.LatestRelease.Every(6*time.Hour, struct{}{})
 	return nil
@@ -84,6 +94,9 @@ func (a *App) scheduleBackups(ctx context.Context, _ struct{}) error {
 		}
 		served, err := q.ProjectHasServed(ctx, p.ID)
 		if err != nil || !served {
+			continue
+		}
+		if deleting, err := models.Deleting(ctx, q, p.ID); err != nil || deleting {
 			continue
 		}
 		location, err := q.BackupLocationFor(ctx, p.BackupLocationID.Int64)
@@ -143,6 +156,77 @@ func (a *App) prune(ctx context.Context, _ struct{}) error {
 func lastLines(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(strings.Join(lines[max(0, len(lines)-n):], "\n"))
+}
+
+// deleteProject carries out a project's deletion.
+func (a *App) deleteProject(ctx context.Context, args models.DeletionArgs) error {
+	r := removal.Removal{DB: a.DB, Docker: a.DockerCLI, Registry: a.Registry, Cloudflare: a.Cloudflare, Services: a.Services,
+		Backups:   backup.Runner{DB: a.DB, Docker: a.DockerCLI, Tools: a.Tools, ToolsBin: a.ToolsBin, Log: a.Log, Snapshots: a.Snapshots},
+		Snapshots: a.Snapshots, Tools: a.Tools, KamalHome: a.KamalHome, Log: a.Log, Refresh: func() { a.Live.Refresh(api.FlightBoard, "") }}
+	err := r.Do(ctx, args.ID, func(ctx context.Context, id int64) error {
+		_, err := a.CleanRegistry.Enqueue(ctx, models.DeletionArgs{ID: id})
+		return err
+	})
+	if err != nil {
+		return jobs.Discard(err) // recorded on the deletion; asking again resumes it
+	}
+	return nil
+}
+
+// registryWait is how long the registry's clean-up waits before trying
+// again.
+const registryWait = 30 * time.Second
+
+// cleanRegistry frees the space of deleted manifests in Houston's
+// registry: its garbage collection, which must never run during a push (it
+// can delete a layer being uploaded). It holds the lock that keeps deploys
+// from starting (the installation's registry_cleanup_since) while it runs.
+func (a *App) cleanRegistry(ctx context.Context, args models.DeletionArgs) error {
+	now := time.Now()
+	var busy error
+	err := a.DB.Tx(ctx, func(tx *db.Tx) error {
+		q := models.New(tx)
+		d, err := q.LiveDeployInFlight(ctx, now.Add(-models.StaleAfter))
+		if err == nil {
+			what := "deploy"
+			if d.Kind == "restore" {
+				what = "restore"
+			}
+			busy = fmt.Errorf("%s #%d of %s is in flight", what, d.Number, d.Project)
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		taken, err := q.TakeRegistryLock(ctx, models.TakeRegistryLockParams{Now: sql.NullTime{Time: now, Valid: true},
+			Stale: sql.NullTime{Time: now.Add(-models.RegistryCleanupStale), Valid: true}})
+		if err == nil && taken == 0 {
+			busy = errors.New("the registry is already being cleaned")
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if busy != nil {
+		return busy // wait and try again
+	}
+	freed, err := a.Registry.Collect(ctx)
+	models.New(a.DB.Write).ReleaseRegistryLock(context.Background())
+	if err != nil {
+		a.noteDeletion(ctx, args.ID, "registry space wasn't freed: "+err.Error())
+		return nil
+	}
+	line := "ok  registry space freed"
+	if freed != "" {
+		line += " (" + freed + ")"
+	}
+	a.noteDeletion(ctx, args.ID, line)
+	return nil
+}
+
+func (a *App) noteDeletion(ctx context.Context, id int64, line string) {
+	models.New(a.DB.Write).NoteDeletion(context.WithoutCancel(ctx), models.NoteDeletionParams{Line: line + "\n", Now: time.Now(), ID: id})
 }
 
 // checkLatestRelease asks GitHub for Houston's latest release, for the

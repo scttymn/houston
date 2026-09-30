@@ -50,7 +50,10 @@ SELECT key, value FROM secrets WHERE project_id = ? ORDER BY key;
 INSERT INTO secrets (project_id, key, value) VALUES (?, ?, ?);
 
 -- name: ProjectsInMaintenance :many
-SELECT * FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name;
+-- Not one being removed: its hosts stop reaching Mission Control.
+SELECT * FROM projects WHERE maintenance_since IS NOT NULL
+  AND id NOT IN (SELECT project_id FROM project_deletions WHERE project_id IS NOT NULL AND removing_at IS NOT NULL AND status != 'go')
+ORDER BY name;
 
 -- name: MarkWebhookVerified :exec
 UPDATE projects SET webhook_verified_at = ? WHERE id = ? AND webhook_verified_at IS NULL;

@@ -155,6 +155,11 @@ func (c Controller) viewProject(ctx context.Context, p models.Project, inst mode
 			v.CopyProposal = &copyProposalView{Name: d.ProposedName, Sha: d.Sha, Deploy: d.Number, Refusal: refusal}
 		}
 	}
+	if deletion, err := q.HoldingDeletion(ctx, sqlNumber(p.ID)); err == nil {
+		v.Deleting = c.viewDeletion(ctx, deletion, false)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return v, err
+	}
 	running, err := q.RunningDeploySummary(ctx, p.ID)
 	if err == nil {
 		v.RunningSha = &running.Sha

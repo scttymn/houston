@@ -141,6 +141,9 @@ func newest(wanted map[string]string) string {
 // that.
 func QueueDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, fresh bool, now time.Time) (Deploy, error) {
 	q := New(tx)
+	if err := refuseWhileDeleting(ctx, q, p); err != nil {
+		return Deploy{}, err
+	}
 	queued, err := q.QueuedDeploy(ctx, p.ID)
 	if err == nil {
 		log := queued.Log
@@ -179,6 +182,9 @@ type RefReader func(ctx context.Context, p Project) (map[string]string, string)
 func CheckForChanges(ctx context.Context, d *db.DB, refs RefReader, p Project, now time.Time) ([]Deploy, error) {
 	q := New(d.Read)
 	if underway, err := q.RestoreOrCopyUnderway(ctx, p.ID); err != nil || underway {
+		return nil, err
+	}
+	if deleting, err := Deleting(ctx, q, p.ID); err != nil || deleting {
 		return nil, err
 	}
 	found, problem := refs(ctx, p)
@@ -226,6 +232,9 @@ func QueueHead(ctx context.Context, d *db.DB, refs RefReader, p Project, fresh b
 	}
 	if underway {
 		return Deploy{}, Refused{"a restore of " + p.Name + " is queued or in flight; deploy after it"}
+	}
+	if err := refuseWhileDeleting(ctx, q, p); err != nil {
+		return Deploy{}, err
 	}
 	found, problem := refs(ctx, p)
 	if problem != "" {

@@ -28,10 +28,15 @@ func RequestRestore(ctx context.Context, d *db.DB, snapshots *Snapshots, commit 
 	if confirm != p.Name {
 		return refuse("type %s to confirm", p.Name)
 	}
+	q := models.New(d.Read)
+	if deleting, err := models.Deleting(ctx, q, p.ID); err != nil {
+		return models.Deploy{}, err
+	} else if deleting {
+		return refuse("%s is being deleted", p.Name)
+	}
 	if p.RepoUrl == "" {
 		return refuse("link the repo first (houston link): a restore fetches the snapshot's commit from it")
 	}
-	q := models.New(d.Read)
 	busy, err := q.BusyDeploy(ctx, p.ID)
 	if err == nil {
 		what := "deploy"
