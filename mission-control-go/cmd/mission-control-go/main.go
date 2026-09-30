@@ -13,15 +13,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/images"
 	"github.com/scttymn/gantry/jobs"
 	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
 	"github.com/scttymn/houston/mission-control-go/db/migrations"
 	"github.com/scttymn/houston/mission-control-go/db/seeds"
@@ -37,6 +40,7 @@ func main() {
 const usage = `usage:
   mission-control-go                        serve (the default), and run the jobs unless JOBS_IN_SERVER=false
   mission-control-go jobs                   run the background jobs alone
+  mission-control-go assets [DIR]           the assets precompiled, into DIR (assets/built; the build runs it)
   mission-control-go db migrate|rollback [N]|status|seed|reset|console
   mission-control-go tasks                  the app's own tasks (app/tasks.go)
   mission-control-go task NAME [ARGS...]    run one
@@ -54,6 +58,22 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 		err = serve(ctx, cfg, logger, nil)
 	case "jobs":
 		err = runJobs(ctx, cfg, logger)
+	case "assets":
+		// Rails' assets:precompile: the Dockerfile runs it before go build,
+		// which embeds what it makes (the scripts minified, the pictures'
+		// copies).
+		dir := filepath.Join("assets", "built")
+		if len(args) > 0 {
+			dir = args[0]
+		}
+		if why := images.AVIFSlow(); why != "" {
+			fmt.Fprintf(errOut, "assets: no AVIF copies, as %s: the encoder would take minutes a copy here; the pictures are WebP alone\n", why)
+		}
+		var made int
+		made, err = assets.All.Precompile(ctx, dir)
+		if err == nil {
+			fmt.Fprintf(out, "assets: precompiled into %s (%d picture copies made)\n", dir, made)
+		}
 	case "db":
 		return dbCommand(ctx, cfg, args, in, out, errOut)
 	case "tasks":

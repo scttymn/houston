@@ -28,6 +28,10 @@ RUN go mod download
 COPY . .
 WORKDIR /app/mission-control-go
 RUN templ generate -path /app/mission-control-go
+# The assets precompiled as the build does them, so the tests see what
+# production serves and no picture is resized on request.
+RUN --mount=type=cache,id=mission-control-go-assets,target=/cache/assets,sharing=locked \
+    go run ./cmd/mission-control-go assets /cache/assets && cp -a /cache/assets/. assets/built/
 CMD ["sh", "-c", "go vet ./... && go test ./..."]
 
 FROM toolchain AS build
@@ -35,7 +39,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 WORKDIR /app/mission-control-go
-RUN templ generate -path /app/mission-control-go && go build -trimpath -ldflags "-s -w" -tags timetzdata,nodynamic -o /out/app ./cmd/mission-control-go
+# The assets precompiled first (Rails' assets:precompile: the scripts
+# minified, the pictures' copies), for go build to embed. They're kept in a
+# build cache between deploys, so only a new or changed picture is resized.
+RUN --mount=type=cache,id=mission-control-go-assets,target=/cache/assets,sharing=locked \
+    templ generate -path /app/mission-control-go && go run ./cmd/mission-control-go assets /cache/assets && cp -a /cache/assets/. assets/built/ \
+ && go build -trimpath -ldflags "-s -w" -tags timetzdata,nodynamic -o /out/app ./cmd/mission-control-go
 RUN mkdir -p /out/data
 
 FROM scratch AS production

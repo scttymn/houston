@@ -1,4 +1,8 @@
 .cache/
+# What the build makes (`mission-control-go assets`): the scripts minified, the
+# pictures' copies.
+assets/built/*
+!assets/built/.gitkeep
 .env
 .houston/
 compose.local.yml

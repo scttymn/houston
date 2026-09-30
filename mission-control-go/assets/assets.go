@@ -12,7 +12,7 @@ import (
 	gantry "github.com/scttymn/gantry/assets"
 )
 
-//go:embed css js public
+//go:embed css js public all:built
 var files embed.FS
 
 // All is every asset, digested once at start.
@@ -30,6 +30,14 @@ var ImportMap = All.ImportMap(
 	gantry.PinAll("controllers"),
 	gantry.PinVendor("vendor"),
 )
+
+// Images is the pictures in assets (JPEG, PNG, GIF, WebP) at every width, as
+// WebP: a page draws one with @assets.Images.Img("hero.jpg", images.Img{Alt:
+// "…", Sizes: "100vw"}), and the browser fetches the copy that fits. The
+// build makes the copies (`mission-control-go assets`, into built/, embedded), only
+// those missing; in development a copy is made when it's first asked for.
+// The build minifies the scripts there too.
+var Images = All.Images(nil)
 
 // Path is an asset's URL: "/assets/application-1a2b3c4d.css".
 func Path(name string) string { return All.Path(name) }
