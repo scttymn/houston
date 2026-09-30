@@ -21,6 +21,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/maintenance"
 	"github.com/scttymn/houston/mission-control-go/app/services/port"
 	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
@@ -201,10 +202,25 @@ func (a *App) Router() *web.Router {
 		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)
 		return nil
 	})
-	board := projects.Controller{DB: a.DB, Live: a.Live, Stats: a.Stats, Status: a.SystemStatus, Version: a.Version}
+	pages := projects.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer, Stats: a.Stats, Status: a.SystemStatus, Version: a.Version,
+		Refs: a.Refs, Git: a.Git, Backup: a.Backup,
+		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare}}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
-		s.Handle("GET /{$}", board.Index)
-		s.Handle("GET /resources", board.Resources)
+		s.Handle("GET /{$}", pages.Index)
+		s.Handle("GET /resources", pages.Resources)
+		s.Handle("GET /projects/{name}", pages.ShowProject)
+		s.Handle("POST /projects/{name}/check", pages.Check)
+		s.Handle("POST /projects/{name}/rotate_webhook", pages.RotateWebhook)
+		s.Handle("POST /projects/{name}/deploys", pages.Deploy)
+		s.Handle("POST /projects/{name}/backups", pages.BackUp)
+		s.Handle("PATCH /projects/{name}/volumes/{volume}", pages.ChooseVolume)
+		s.Handle("PATCH /projects/{name}/backup_target", pages.BackupTarget)
+		s.Handle("PATCH /projects/{name}/repo", pages.MoveRepo)
+		s.Handle("PATCH /projects/{name}/maintenance", pages.ToggleMaintenance)
+		s.Handle("PUT /projects/{name}/secrets/{key}", pages.SetSecret)
+		s.Handle("PATCH /projects/{name}/secrets/{key}", pages.SetSecret)
+		s.Handle("DELETE /projects/{name}/secrets/{key}", pages.RemoveSecret)
+		s.Handle("POST /projects/{name}/secrets/{key}/generate", pages.GenerateSecret)
 	})
 
 	// The pages' live streams, for whoever may see the pages.

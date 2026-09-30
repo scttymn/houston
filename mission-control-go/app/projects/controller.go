@@ -10,11 +10,14 @@ import (
 	"github.com/a-h/templ"
 	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/live"
+	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/turbo"
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
+	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/maintenance"
 	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
 )
@@ -23,13 +26,21 @@ import (
 // changes.
 const FlightBoard = "flight_board"
 
-// Controller draws the flight board and projects' pages.
+// Controller draws the flight board and projects' pages, and takes their
+// forms.
 type Controller struct {
 	DB      *db.DB
 	Live    *live.Hub
+	Signer  sign.Signer // the flash's
 	Stats   *appstats.Stats
 	Status  *systemstatus.Status
 	Version string
+	// Refs reads a project's repo's refs; Git, anything else of a repo.
+	Refs models.RefReader
+	Git  gitremote.Git
+	// Backup is the backup job; Maintenance, the maintenance switch.
+	Backup      models.Enqueuer[models.BackupArgs]
+	Maintenance maintenance.Switch
 }
 
 // rows are the projects as the board shows them, by name.

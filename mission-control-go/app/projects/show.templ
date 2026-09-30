@@ -1,0 +1,560 @@
+package projects
+
+import (
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
+	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
+)
+
+// PerPage is how many deploys a page of the history has.
+const PerPage = 10
+
+// VolumeRow is one of the app's volumes with where it lives.
+type VolumeRow struct {
+	Volume models.Volume
+	Placed bool
+	Where  string // its location's name, or local disk
+	Chosen string // the chosen location's name ("": local disk)
+	NFS    bool
+}
+
+// Show is what the project page shows.
+type Show struct {
+	Page          layout.Page
+	P             models.Project
+	Inst          models.Installation
+	Status        string
+	Running       *models.Deploy
+	Deploys       []models.Deploy
+	DeployCount   int
+	PageN         int
+	Secrets       map[string]models.Secret
+	Variables     []models.Variable
+	Missing       []string
+	SecretErrors  map[string]string
+	Replace       string // the secret being replaced
+	HooksRoute    *systemstatus.Route
+	Storage       *models.StorageLocation
+	Backup        *models.BackupRun
+	SQLiteVolumes []string
+	Live          []models.StorageLocation
+	Volumes       []VolumeRow
+	CopyActive    *models.ProjectCopy
+	CopyActiveTo  int64 // its deploy's number
+	CopyFailed    *models.ProjectCopy
+	CopyTo        *models.ProjectCopy
+	CopiedFrom    *models.ProjectCopy
+	Deletion      *models.ProjectDeletion
+	Deleting      bool
+	Proposal      *models.Deploy
+	Refusal       string
+	Notice, Alert string
+	SnapshotsKind string
+	Now           time.Time
+}
+
+// StateChip is a status as a chip.
+templ StateChip(status string) {
+	<span class={ "mono state state--" + Dasherize(status) }>{ StateLabel(status) }</span>
+}
+
+templ sectionNav(label string, items [][2]string) {
+	<nav class="section-nav" aria-label={ label } data-controller="section-nav">
+		for _, item := range items {
+			<a data-action="section-nav#choose" href={ templ.SafeURL("#" + item[1]) }>{ item[0] }</a>
+		}
+	</nav>
+}
+
+templ button(action, label, class string, params map[string]string) {
+	<form class="button_to" method="post" action={ templ.SafeURL(action) }>
+		for k, v := range params {
+			<input type="hidden" name={ k } value={ v } autocomplete="off"/>
+		}
+		<button class={ class } type="submit">{ label }</button>
+	</form>
+}
+
+templ ShowPage(s Show) {
+	{{ p := s.P }}
+	{{ path := "/projects/" + p.Name }}
+	@layout.Layout(s.Page) {
+		<main class="page project">
+			<nav class="mono crumbs"><a href="/">Projects</a> <span>/</span> <span class="crumbs__here">{ p.Name }</span></nav>
+			<div class="project-head">
+				<div class="project-head__main">
+					<div class="project-head__title">
+						<h1 class="disp">{ p.Name }</h1>
+						@StatePill(s.Status)
+					</div>
+					<div class="host-chips">
+						for _, host := range p.Hostnames(s.Inst.BaseDomain) {
+							{{ state := hostState(s, host) }}
+							<a target="_blank" rel="noopener noreferrer" class={ "host-chip host-chip--" + orUnknown(Parameterize(state)) } href={ templ.SafeURL("https://" + host) }>
+								<span class="host-chip__dot"></span>{ host }
+								if state != "" {
+									<small class={ "mono domain-state domain-state--" + Parameterize(state) } title={ p.DomainStates.V[host].Reason }>{ state }</small>
+								}
+								<svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2H10v5.5M10 2L2.5 9.5" stroke="currentColor" stroke-width="1.4"></path></svg>
+								<span class="visually-hidden">(opens in a new window)</span>
+							</a>
+						}
+					</div>
+				</div>
+				<div class="project-head__actions">
+					if console := p.Details.V.Console; console != "" {
+						<div class="console-box" data-controller="clipboard">
+							<span class="mono console-box__label">CONSOLE · RUNS <span>{ console }</span> FROM COMPOSE.YML</span>
+							<span class="console-box__field">
+								<span class="mono console-box__command" data-clipboard-target="source">houston console --server</span>
+								<button type="button" data-action="clipboard#copy" data-clipboard-target="button" aria-label="Copy console command">Copy</button>
+							</span>
+						</div>
+					}
+				</div>
+			</div>
+			@notices(s)
+			<div class="facts-strip">
+				<div>
+					<span class="mono facts-strip__label">RUNNING SHA</span>
+					<span class="mono facts-strip__sha">
+						if s.Running != nil {
+							{ s.Running.ShortSha() }
+						} else {
+							never deployed
+						}
+					</span>
+				</div>
+				<div>
+					<span class="mono facts-strip__label">DEPLOY RULE</span>
+					<span>{ p.DeployRuleWords() }</span>
+				</div>
+				<div>
+					<span class="mono facts-strip__label">RESOURCES</span>
+					<span>{ orWords(p.ResourcesWords(), "no limits") }</span>
+				</div>
+				<div>
+					<span class="mono facts-strip__label">{ "SERVICES · " + strconv.Itoa(len(p.Accessories())) }</span>
+					<span class="facts-strip__services">
+						for _, service := range p.Accessories() {
+							<span class="service"><span class="service__dot"></span><span class="service__name">{ service }</span> <span class="mono service__image">{ orWords(p.ServiceImage(service), "—") }</span></span>
+						}
+						if len(p.Accessories()) == 0 {
+							<span>none besides the app</span>
+						}
+					</span>
+				</div>
+				<div>
+					<span class="mono facts-strip__label">REPO</span>
+					<span>{ orWords(p.RepoWords(), "not linked") }</span>
+				</div>
+			</div>
+			<div class="project-layout">
+				@sectionNav("Project sections", sections(s))
+				<div class="project-sections">
+					if p.RepoUrl != "" {
+						@webhookPanel(s, path)
+					}
+					@historyPanel(s, path)
+					if !p.MaintenanceSince.Valid {
+						@maintenancePanel(s, path)
+					}
+					@secretsPanel(s, path)
+					// The head renders with the page; the list is a lazy frame, since reading a repository can take seconds.
+					<section class="panel snapshots" id="snapshots">
+						<div class="panel__head">
+							<h2 class="disp panel__title">Snapshots</h2>
+							<span class="panel__meta">
+								if s.Storage != nil {
+									<span class="mono eyebrow">{ s.Storage.Name }</span>
+									<form class="button_to" method="post" action={ templ.SafeURL(path + "/backups") }><button class="button button--primary button--small" title={ "Take a snapshot of " + p.Name + " now: code and data" } type="submit">Create</button></form>
+								}
+							</span>
+						</div>
+						if s.Storage != nil {
+							@BackupRun(s.Backup, s.Now)
+						}
+						<turbo-frame id="snapshots-list" src={ snapshotsSrc(s) } loading="lazy">
+							<p class="panel__row panel__row--muted">Reading the snapshots…</p>
+						</turbo-frame>
+					</section>
+					if len(p.Volumes.V) > 0 {
+						@volumesPanel(s, path)
+					}
+					@dangerPanel(s, path)
+				</div>
+			</div>
+		</main>
+	}
+}
+
+templ notices(s Show) {
+	{{ p := s.P }}
+	if p.MaintenanceSince.Valid {
+		<div class="notice notice--hold">
+			<span class="mono">MAINTENANCE</span>
+			<span class="notice__text">{ maintenanceWords(p, s.Page) }</span>
+			@button("/projects/"+p.Name+"/maintenance", "Turn it off", "button button--small", map[string]string{"_method": "patch", "on": "0"})
+		</div>
+	}
+	if d := s.Deletion; d != nil {
+		if d.Status == "queued" || d.Status == "running" {
+			<div class="notice notice--hold">
+				<span class="mono">DELETING</span>
+				<span class="notice__text">{ p.Name + " is being deleted" + deletionStep(d) + ". " }<a href={ templ.SafeURL("/deletions/" + strconv.FormatInt(d.ID, 10)) }>Follow it</a></span>
+			</div>
+		} else if d.Status == "no_go" && d.RemovingAt.Valid {
+			<div class="notice notice--nogo">
+				<span class="mono">NO-GO</span>
+				<span class="notice__text">{ "Deleting " + p.Name + " " + d.Error + ". It serves nothing new until it's finished. " }<a href={ templ.SafeURL("/deletions/" + strconv.FormatInt(d.ID, 10)) }>The log</a></span>
+				@button("/projects/"+p.Name+"/deletion", "Finish deleting", "button button--small", map[string]string{"confirm": p.Name})
+			</div>
+		} else if d.Status == "no_go" {
+			<div class="notice notice--nogo">
+				<span class="mono">NO-GO</span>
+				<span class="notice__text">{ "Deleting " + p.Name + " was " + d.Error + ". Nothing was removed. " }<a href={ templ.SafeURL("/deletions/" + strconv.FormatInt(d.ID, 10)) }>The log</a></span>
+			</div>
+		}
+	}
+	if c := s.CopyActive; c != nil {
+		<div class="notice notice--hold">
+			<span class="mono">COPYING</span>
+			<span class="notice__text">
+				{ "Copying " + p.Name + " to " + c.ToName + "; " + p.Name + " keeps serving until it's GO." }
+				if s.CopyActiveTo > 0 {
+					<a href={ templ.SafeURL("/projects/" + c.ToName + "/deploys/" + strconv.FormatInt(s.CopyActiveTo, 10)) }>Follow it</a>
+				}
+			</span>
+		</div>
+	}
+	if c := s.CopyFailed; c != nil {
+		<div class="notice notice--nogo">
+			<span class="mono">NO-GO</span>
+			<span class="notice__text">
+				{ "The copy to " + c.ToName + " failed: " + c.Error + ". " + p.Name + " kept serving, and " + c.ToName + " was removed; fix it and copy again." }
+				if c.Log != "" {
+					<details class="copy-log"><summary>Its log</summary><pre class="mono log">{ lastLines(c.Log, 60) }</pre></details>
+				}
+			</span>
+		</div>
+	}
+	if c := s.CopyTo; c != nil {
+		<div class="notice notice--go">
+			<span class="mono">COPIED</span>
+			<span class="notice__text">
+				{ p.Name + " was copied to " }<a href={ templ.SafeURL("/projects/" + c.ToName) }>{ c.ToName }</a>{ servesWords(c) + "." }
+				{ "Delete " + p.Name + " when you're happy with " + c.ToName + "." }
+			</span>
+			if !s.Deleting {
+				<a class="button button--small" href={ templ.SafeURL("/projects/" + p.Name + "/deletion/new") }>{ "Delete " + p.Name }</a>
+			}
+		</div>
+	}
+	if c := s.CopiedFrom; c != nil {
+		<div class="notice notice--go">
+			<span class="mono">COPIED</span>
+			<span class="notice__text">{ p.Name + " was copied from " + c.FromName + ", which is still there: delete it when you're happy, or undo the copy (Danger zone)." }</span>
+			<a class="button button--small" href={ templ.SafeURL("/projects/" + c.FromName) }>{ "Go to " + c.FromName }</a>
+		</div>
+	}
+	if d := s.Proposal; d != nil {
+		<div class="notice notice--hold">
+			<span class="mono">HOLD</span>
+			<span class="notice__text">
+				{ "compose.yml on " + orWords(p.Branch, "the deploy branch") + " names " + d.ProposedName + " (" + d.ShortSha() + "), so deploy #" + strconv.FormatInt(d.Number, 10) + " held." }
+				{ p.Name + " keeps serving " + runningWords(s.Running) + "." }
+				if s.Refusal != "" {
+					{ s.Refusal + ": change " }<span class="mono">name:</span>{ " in compose.yml, then push." }
+				} else {
+					{ "A new name is a new app: copy " + p.Name + " to it, or change " }<span class="mono">name:</span>{ " back." }
+				}
+			</span>
+			if s.Refusal == "" {
+				<a class="button button--small" href={ templ.SafeURL("/projects/" + p.Name + "/copy/new") }>{ "Copy " + p.Name + " to " + d.ProposedName }</a>
+			}
+		</div>
+	}
+	if s.Notice != "" {
+		<div class="notice notice--go"><span class="mono">OK</span><span class="notice__text">{ s.Notice }</span></div>
+	}
+	if s.Alert != "" {
+		<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ s.Alert }</span></div>
+	}
+}
+
+templ webhookPanel(s Show, path string) {
+	{{ p := s.P }}
+	<section class="panel webhook" id="webhook">
+		<div class="panel__head"><h2 class="disp panel__title">Connect pushes</h2><span class="panel__meta muted">In the repo's webhook settings</span></div>
+		<p class="panel__row">Your git host calls this address on every push. Houston checks the secret, reads the repo's refs itself, and deploys what the deploy rule matches.</p>
+		<dl class="plan">
+			<dt class="mono">WEBHOOK URL</dt><dd class="mono">{ "https://hooks." + s.Inst.BaseDomain + "/" + p.Name }</dd>
+			<dt class="mono">SECRET</dt>
+			<dd class="mono">
+				if p.WebhookVerifiedAt.Valid {
+					•••••••• (shown until the first push arrived)
+				} else {
+					{ p.WebhookSecret.Reveal() }
+				}
+			</dd>
+			<dt class="mono">SEND</dt><dd>Push events, as <span class="mono">application/json</span></dd>
+			<dt class="mono">REPO</dt>
+			<dd>
+				<form class="inline-form repo-form" action={ templ.SafeURL(path + "/repo") } method="post">
+					<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+					<input type="text" name="repo_url" id="repo_url" value={ p.RepoUrl } class="mono" autocomplete="off" aria-label="Repo URL"/>
+					<input type="submit" name="commit" value="Change" class="button button--small"/>
+				</form>
+				<small class="muted">{ "Branch " + p.Branch + ". Moved or renamed on the git host? The same deploy key keeps working." }</small>
+			</dd>
+		</dl>
+		<p class="panel__row panel__row--muted">
+			<span>
+				if p.WebhookVerifiedAt.Valid {
+					{ "First push arrived " + Ago(p.WebhookVerifiedAt.Time, s.Now) + " ago." }
+				} else {
+					Waiting for the first push. The secret is shown in full only until one arrives.
+				}
+				if r := s.HooksRoute; r != nil && r.State != "go" {
+					<br/>
+					if r.State == "hold" {
+						@StateChip("queued")
+					} else {
+						@StateChip("no_go")
+					}
+					{ " hooks." + s.Inst.BaseDomain + ": " + r.Reason }
+				}
+				if p.LastCheckError != "" {
+					<br/><span class="field__error">{ "Last check: " + p.LastCheckError }</span>
+				}
+			</span>
+		</p>
+		<div class="panel__row panel__row--actions">
+			@button(path+"/check", "Check for changes", "button button--small", nil)
+			@button(path+"/rotate_webhook", "Rotate secret", "button button--small", nil)
+		</div>
+	</section>
+}
+
+templ historyPanel(s Show, path string) {
+	{{ p := s.P }}
+	<section class="panel history" id="history">
+		<div class="panel__head">
+			<h2 class="disp panel__title">Deploy history</h2>
+			<span class="panel__meta">
+				<span class="mono eyebrow">{ strings.ToUpper(countWords(s.DeployCount, "deploy")) }</span>
+				if p.RepoUrl != "" {
+					<form class="button_to" method="post" action={ templ.SafeURL(path + "/deploys?fresh=1") }><button class="button button--small" title="Deploy the head, building it from scratch: without Docker's layer cache (after a change to the server, say)" type="submit">Rebuild</button></form>
+					<form class="button_to" method="post" action={ templ.SafeURL(path + "/deploys") }><button class="button button--primary button--small" title={ "Deploy the head of what the deploy rule matches (" + strings.ToLower(p.DeployRuleWords()) + ")" } type="submit">Deploy</button></form>
+				}
+			</span>
+		</div>
+		if len(s.Deploys) == 0 {
+			<p class="panel__row panel__row--muted">
+				if p.RepoUrl != "" {
+					{ "No deploys yet. Deploy sends the head of " + ruleShort(p) + ", and so does every push once the webhook is connected." }
+				} else {
+					No deploys yet. On the server, in a checkout of the repo: <span class="mono">houston deploy</span>
+				}
+			</p>
+		}
+		for _, d := range s.Deploys {
+			<div class={ "history__row", templ.KV("history__row--no-go", d.Status == "no_go") } data-deploy={ strconv.FormatInt(d.Number, 10) }>
+				<span class="mono muted">{ "#" + strconv.FormatInt(d.Number, 10) }</span>
+				<span class="mono">{ d.ShortSha() }</span>
+				<span class="history__what">
+					<span>{ historyWhat(d) }</span>
+					<small class={ templ.KV("history__error", d.Error != "") }>{ historyNote(d, s.Now, s.Page) }</small>
+				</span>
+				@StateChip(d.Status)
+				<span class="mono muted">{ historyTime(d, s.Now) }</span>
+				<a href={ templ.SafeURL(path + "/deploys/" + strconv.FormatInt(d.Number, 10)) }>Log</a>
+			</div>
+		}
+		if s.DeployCount > PerPage {
+			{{ first := (s.PageN-1)*PerPage + 1 }}
+			<nav class="pager" aria-label="Deploy history pages">
+				<span class="mono muted pager__range">{ strconv.Itoa(first) + "–" + strconv.Itoa(min(first+PerPage-1, s.DeployCount)) + " of " + strconv.Itoa(s.DeployCount) }</span>
+				if s.PageN > 1 {
+					<a class="button button--small" href={ templ.SafeURL(path + "?page=" + strconv.Itoa(s.PageN-1)) }>← Newer</a>
+				} else {
+					<span class="button button--small is-disabled">← Newer</span>
+				}
+				<span class="mono">{ "Page " + strconv.Itoa(s.PageN) + " of " + strconv.Itoa((s.DeployCount+PerPage-1)/PerPage) }</span>
+				if s.PageN*PerPage < s.DeployCount {
+					<a class="button button--small" href={ templ.SafeURL(path + "?page=" + strconv.Itoa(s.PageN+1)) }>Older →</a>
+				} else {
+					<span class="button button--small is-disabled">Older →</span>
+				}
+			</nav>
+		}
+	</section>
+}
+
+templ maintenancePanel(s Show, path string) {
+	{{ p := s.P }}
+	<section class="panel maintenance" id="maintenance">
+		<div class="panel__head"><h2 class="disp panel__title">Maintenance page</h2></div>
+		<p class="panel__row panel__row--muted">{ "Houston shows it on every hostname of " + p.Name + ", whatever state the app is in, until you turn it off. Deploys and restores never change it." }</p>
+		<iframe class="maintenance__preview" sandbox="" src={ path + "/maintenance/preview" } title="Maintenance page preview" loading="lazy"></iframe>
+		<p class="panel__row panel__row--muted">
+			if p.MaintenancePage != "" {
+				The project's own page (x-houston.maintenance).
+			} else {
+				Houston's default page. Set x-houston.maintenance in compose.yml to use your own.
+			}
+		</p>
+		<form class="panel__row inline-form" action={ templ.SafeURL(path + "/maintenance") } method="post">
+			<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+			<input type="hidden" name="on" id="on" value="1" autocomplete="off"/>
+			<input placeholder="Message (optional)" maxlength="500" aria-label="Maintenance message" type="text" name="message" id="message"/>
+			<input type="submit" name="commit" value="Show maintenance page" class="button button--small" data-turbo-confirm={ "Visitors to " + p.Name + " will see the maintenance page within seconds. Show it?" }/>
+		</form>
+	</section>
+}
+
+templ secretsPanel(s Show, path string) {
+	<section class="panel secrets" id="secrets">
+		<div class="panel__head">
+			<h2 class="disp panel__title">Secrets</h2>
+			<span class="panel__meta muted">Values are write-only.</span>
+		</div>
+		if len(s.Missing) > 0 {
+			<div class="notice notice--nogo"><span class="mono">HOLD</span><span class="notice__text">{ missingWords(s.Missing) }</span></div>
+		}
+		if len(s.Variables) == 0 {
+			<p class="panel__row panel__row--muted">compose.yml references no variables.</p>
+		}
+		for _, v := range s.Variables {
+			{{ key := v.Name }}
+			{{ secret, saved := s.Secrets[key] }}
+			{{ error := s.SecretErrors[key] }}
+			{{ set := saved && secret.Value.Reveal() != "" }}
+			{{ formID := "secret-form-" + key }}
+			<div class={ "secret", templ.KV("secret--missing", !set && v.Required) } id={ "secret-" + key } data-secret={ key }>
+				<span class="mono secret__name">
+					{ key }
+					if !v.Required {
+						<small>optional</small>
+					}
+				</span>
+				if set && s.Replace != key && error == "" {
+					<span class="muted">{ "•••••••• · set " + secret.UpdatedAt.In(s.Now.Location()).Format("Jan 02") }</span>
+					<span class="secret__actions">
+						<a href={ templ.SafeURL(path + "?replace=" + key + "#secret-" + key) }>Replace</a>
+						<form class="button_to" method="post" action={ templ.SafeURL(path + "/secrets/" + key) }>
+							<input type="hidden" name="_method" value="delete" autocomplete="off"/>
+							<button class="link-button link-button--danger" data-turbo-confirm={ removeWords(v) } type="submit">Remove</button>
+						</form>
+					</span>
+				} else {
+					<input type="password" name="value" id={ formID + "-value" } form={ formID } class="mono" autocomplete="off" placeholder={ orWords(valuePlaceholder(set), "") } aria-label={ "Value for " + key }/>
+					<span class="secret__actions">
+						<form id={ formID } action={ templ.SafeURL(path + "/secrets/" + key) } method="post">
+							<input type="hidden" name="_method" value="put" autocomplete="off"/>
+							<input type="submit" name="commit" value={ saveLabel(set) } class="button button--primary button--small"/>
+						</form>
+						if set {
+							<a href={ templ.SafeURL(path + "#secret-" + key) }>Cancel</a>
+						} else {
+							<form class="button_to" method="post" action={ templ.SafeURL(path + "/secrets/" + key + "/generate") }><button class="link-button" title="Save a random value nobody needs to know" type="submit">Generate</button></form>
+						}
+					</span>
+				}
+				if error != "" {
+					<span class="field__error secret__error">{ key + " " + error }</span>
+				}
+			</div>
+		}
+	</section>
+}
+
+templ volumesPanel(s Show, path string) {
+	<section class="panel volumes" id="volumes">
+		<div class="panel__head"><h2 class="disp panel__title">Volumes</h2><span class="panel__meta muted">Where each one lives</span></div>
+		for _, row := range s.Volumes {
+			<div class="panel__row" data-volume={ row.Volume.Name }>
+				<span><span class="mono">{ row.Volume.Name }</span> → <span class="mono">{ row.Volume.Path }</span></span>
+				if row.Placed {
+					<span>{ row.Where + " · " }<small class="muted">moving a volume is a later feature</small></span>
+				} else {
+					<form class="inline-form" action={ templ.SafeURL(path + "/volumes/" + row.Volume.Name) } method="post">
+						<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+						<select aria-label={ "Where " + row.Volume.Name + " lives" } name="location" id="location">
+							<option value="" selected?={ row.Chosen == "" }>Local disk (this server)</option>
+							for _, l := range s.Live {
+								<option value={ l.Name } selected?={ row.Chosen == l.Name }>{ choiceLabel(l) }</option>
+							}
+						</select>
+						<input type="submit" name="commit" value="Save" class="button button--small"/>
+					</form>
+				}
+				if row.NFS {
+					<small class="field__error">{ nfsWords(s, row) }</small>
+				}
+			</div>
+		}
+		<p class="panel__row panel__row--muted">Chosen before Houston makes the volume, at its first deploy. Local disk is the server's own disk, and right for databases. Postgres data always stays on local disk.</p>
+	</section>
+}
+
+templ dangerPanel(s Show, path string) {
+	{{ p := s.P }}
+	<section class="panel danger" id="danger">
+		<div class="panel__head"><h2 class="disp panel__title">Danger zone</h2></div>
+		if c := s.CopiedFrom; c != nil {
+			<div class="panel__row">
+				<span>
+					<strong>{ "Undo the copy from " + c.FromName + "." }</strong>
+					{ " The hosts go back to " + c.FromName + " with no failed request, then " + p.Name + " is deleted (its backups kept). Anything written to " + p.Name + " since stays with it." }
+				</span>
+				<form class="inline-form" action={ templ.SafeURL(path + "/copy/undo") } method="post">
+					<input type="text" name="confirm" id="confirm" class="mono" placeholder={ "Type " + p.Name } autocomplete="off" aria-label={ "Type " + p.Name + " to confirm" }/>
+					<input type="submit" name="commit" value="Undo the copy" class="button button--danger button--small"/>
+				</form>
+			</div>
+		}
+		<div class="panel__row">
+			<span>
+				<strong>Delete this project.</strong> Its containers, data, domains and settings go. A final snapshot is taken first and its backups are kept, unless you choose to delete them too.
+			</span>
+			if s.Deleting {
+				<span class="muted">Being deleted</span>
+			} else {
+				<a class="button button--danger button--small" href={ templ.SafeURL(path + "/deletion/new") }>Delete this project</a>
+			}
+		</div>
+	</section>
+}
+
+// BackupRun is the project's latest backup run, under Create in the
+// Snapshots panel.
+templ BackupRun(run *models.BackupRun, now time.Time) {
+	<p class="backup-run" data-backup={ runStatus(run) }>
+		switch runState(run, now) {
+			case "":
+				<span class="muted">No backups yet.</span>
+			case "queued", "running":
+				@StateChip("in_flight")
+				{ " Backing up… " }<span class="muted">{ "(started " + ShortTime(startedAt(run).In(now.Location())) + ")" }</span>
+			case "go":
+				@StateChip("go")
+				{ " " + ShortTime(run.FinishedAt.Time.In(now.Location())) + " · " }<span class="mono">{ run.SnapshotID[:min(8, len(run.SnapshotID))] }</span>{ " · " + humanSize(run.Bytes) }
+				if run.Error != "" {
+					<small>{ run.Error }</small>
+				}
+			case "skipped":
+				<span class="muted">{ "Last backup: " + run.Error + ", as of its last deploy." }</span>
+			case "stale":
+				@StateChip("no_go")
+				{ " " + run.StaleError() }
+			default:
+				@StateChip("no_go")
+				{ " " + ShortTime(endedAt(run).In(now.Location())) + " · " + run.Error }
+		}
+	</p>
+}

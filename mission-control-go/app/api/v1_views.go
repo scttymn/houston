@@ -204,14 +204,8 @@ func (c Controller) viewProjectDetail(ctx context.Context, p models.Project, ins
 
 // nameRefusal is why name can't be copied to, or nil when it can.
 func (c Controller) nameRefusal(ctx context.Context, name string) (*string, error) {
-	if !models.ValidName(name) {
-		return orNull(name + " can't be a project's name"), nil
-	}
-	taken, err := models.New(c.DB.Read).ProjectExists(ctx, name)
-	if err != nil || !taken {
-		return nil, err
-	}
-	return orNull(name + " is another project"), nil
+	refusal, err := models.NameRefusal(ctx, models.New(c.DB.Read), name)
+	return orNull(refusal), err
 }
 
 // storageView is a storage location as the API shows it.

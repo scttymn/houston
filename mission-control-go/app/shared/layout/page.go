@@ -5,6 +5,7 @@ import (
 
 	"github.com/a-h/templ"
 	"strconv"
+	"time"
 
 	"github.com/scttymn/gantry/web"
 )
@@ -19,6 +20,9 @@ type Page struct {
 	Toast    *Toast
 	// Head is what the page adds to the head (Rails' content_for :head).
 	Head templ.Component
+	// Zone is the request's time zone (the installation's), for showing
+	// times.
+	Zone *time.Location
 }
 
 func (p Page) title() string {
@@ -62,5 +66,5 @@ var ChromeKey = web.NewKey[Chrome]("chrome")
 // the request.
 func For(r *http.Request, title string) Page {
 	c, _ := web.Get(r, ChromeKey)
-	return Page{Title: title, Chrome: c}
+	return Page{Title: title, Chrome: c, Zone: web.Zone(r)}
 }

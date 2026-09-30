@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/scttymn/gantry/crypt"
@@ -17,8 +16,8 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
-	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/maintenance"
 )
 
 // v1Body is a small write's JSON (Rails' params): what's sent, each field
@@ -147,11 +146,6 @@ func (c V1) RotateWebhook(w http.ResponseWriter, r *http.Request) error {
 	return c.webhookView(w, r, p)
 }
 
-// toggles serializes maintenance toggles (the Rails app's file lock; one
-// process here): each push is built from the database after its own
-// change, so the last push holds them all.
-var toggles sync.Mutex
-
 // Maintenance is PATCH or PUT .../maintenance {on, message}: Houston's page
 // for the project. On routes its hostnames to Mission Control at the
 // tunnel; off routes them back. A toggle Cloudflare refuses is rolled back,
@@ -166,49 +160,22 @@ func (c V1) Maintenance(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ctx, now := r.Context(), time.Now()
-	q := models.New(c.DB.Read)
-	inst, err := q.CurrentInstallation(ctx)
-	if err != nil {
-		return err
-	}
-	if !inst.CloudflareConnectedAt.Valid || inst.TunnelID == "" {
-		return badGatewayAnswer(w, "Cloudflare isn't connected, so there's no tunnel to route through")
-	}
-	change := models.SetMaintenanceParams{UpdatedAt: now, ID: p.ID}
+	s := maintenance.Switch{DB: c.DB, Services: c.Services, Cloudflare: c.Cloudflare}
 	if isTrue(body, "on") {
 		message, _ := field(body, "message")
-		if len([]rune(message)) > 500 {
-			return web.Status(http.StatusUnprocessableEntity, errors.New("Maintenance message is too long (maximum is 500 characters)"))
-		}
 		token, _ := web.Get(r, tokenKey)
-		change.MaintenanceSince, change.MaintenanceBy, change.MaintenanceMessage = sqlTime(now), "token "+token.Name, message
+		p, err = s.On(ctx, p, "token "+token.Name, message, now)
+	} else {
+		p, err = s.Off(ctx, p, now)
 	}
-	toggles.Lock()
-	defer toggles.Unlock()
-	p, err = q.ProjectByID(ctx, p.ID)
-	if err != nil {
-		return err
-	}
-	if change.MaintenanceSince.Valid && p.MaintenanceSince.Valid {
-		change.MaintenanceSince = p.MaintenanceSince // on since it was first switched on
-	}
-	before := models.SetMaintenanceParams{MaintenanceSince: p.MaintenanceSince, MaintenanceBy: p.MaintenanceBy, MaintenanceMessage: p.MaintenanceMessage,
-		UpdatedAt: p.UpdatedAt, ID: p.ID}
-	write := models.New(c.DB.Write)
-	if err := write.SetMaintenance(ctx, change); err != nil {
-		return err
-	}
-	if err := c.dns(inst).PushRoutes(ctx, q, c.Services); err != nil {
-		if rollback := write.SetMaintenance(ctx, before); rollback != nil {
-			return rollback
-		}
-		var cf *cloudflare.Error
-		if errors.As(err, &cf) {
-			return badGatewayAnswer(w, "Cloudflare said no: "+cf.Msg)
-		}
-		return err
-	}
-	if p, err = q.ProjectByID(ctx, p.ID); err != nil {
+	var failed maintenance.Failed
+	var refused models.Refused
+	switch {
+	case errors.As(err, &failed):
+		return badGatewayAnswer(w, string(failed))
+	case errors.As(err, &refused):
+		return web.Status(http.StatusUnprocessableEntity, refused)
+	case err != nil:
 		return err
 	}
 	c.Live.Refresh(FlightBoard, "")
@@ -256,54 +223,26 @@ func (c V1) ChooseVolume(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	name := r.PathValue("volume")
-	var volume *models.Volume
-	for _, v := range p.Volumes.V {
-		if v.Name == name {
-			volume = &v
-		}
-	}
-	if volume == nil {
-		return web.Status(http.StatusNotFound, fmt.Errorf("%s has no volume %s", p.Name, name))
-	}
-	if location != nil {
-		if location.Kind != "nfs" && location.Kind != "local" {
-			return web.Status(http.StatusUnprocessableEntity, fmt.Errorf("%s can't hold live volumes (backups only)", location.Name))
-		}
-		if !location.AcknowledgedAt.Valid {
-			return web.Status(http.StatusUnprocessableEntity, fmt.Errorf("%s isn't set up yet", location.Name))
-		}
-	}
-	ctx := r.Context()
-	var row models.ProjectVolume
-	err = c.DB.Tx(ctx, func(tx *db.Tx) error {
-		q := models.New(tx)
-		if err := q.EnsureProjectVolume(ctx, models.EnsureProjectVolumeParams{ProjectID: p.ID, Name: name}); err != nil {
-			return err
-		}
-		if row, err = q.ProjectVolumeByName(ctx, models.ProjectVolumeByNameParams{ProjectID: p.ID, Name: name}); err != nil {
-			return err
-		}
-		if row.PlacedAt.Valid {
-			where := "local disk"
-			if row.LocationID.Valid {
-				l, err := q.StorageLocationByID(ctx, row.LocationID.Int64)
-				if err != nil {
-					return err
-				}
-				where = l.Name
-			}
-			return web.Status(http.StatusConflict, fmt.Errorf("%s is already on %s; moving a volume is a later feature", name, where))
-		}
-		var id sql.NullInt64
-		if location != nil {
-			id = sqlNumber(location.ID)
-		}
-		return q.SetVolumeLocation(ctx, models.SetVolumeLocationParams{LocationID: id, UpdatedAt: time.Now(), ID: row.ID})
-	})
-	if err != nil {
+	_, err = models.ChooseVolume(r.Context(), c.DB, p, name, location, time.Now())
+	var none models.NoVolume
+	var refused models.Refused
+	var placed models.Placed
+	switch {
+	case errors.As(err, &none):
+		return web.Status(http.StatusNotFound, none)
+	case errors.As(err, &refused):
+		return web.Status(http.StatusUnprocessableEntity, refused)
+	case errors.As(err, &placed):
+		return web.Status(http.StatusConflict, placed)
+	case err != nil:
 		return err
 	}
-	view := volumeView{Name: volume.Name, Path: volume.Path}
+	view := volumeView{Name: name}
+	for _, v := range p.Volumes.V {
+		if v.Name == name {
+			view.Path = v.Path
+		}
+	}
 	if location != nil {
 		view.Location = &location.Name
 	}
@@ -325,22 +264,17 @@ func (c V1) BackupTarget(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	var id sql.NullInt64
-	if location != nil {
-		if !location.AcknowledgedAt.Valid {
-			return web.Status(http.StatusUnprocessableEntity, fmt.Errorf("%s isn't set up yet", location.Name))
-		}
-		id = sqlNumber(location.ID)
+	target, err := models.ChooseBackupTarget(r.Context(), c.DB, p, location, time.Now())
+	var refused models.Refused
+	if errors.As(err, &refused) {
+		return web.Status(http.StatusUnprocessableEntity, refused)
 	}
-	ctx := r.Context()
-	if err := models.New(c.DB.Write).SetBackupLocation(ctx, models.SetBackupLocationParams{BackupLocationID: id, UpdatedAt: time.Now(), ID: p.ID}); err != nil {
+	if err != nil {
 		return err
 	}
 	var name *string
-	if l, err := models.New(c.DB.Read).BackupLocationFor(ctx, id.Int64); err == nil {
-		name = &l.Name
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return err
+	if target != nil {
+		name = &target.Name
 	}
 	return web.JSON(w, http.StatusOK, map[string]any{"backup_location": name})
 }
