@@ -19,4 +19,6 @@ blog = Project.create!(name: "blog", app_service: "web", services: %w[web], doma
 blog.hosts.create!(name: "blog")
 blog.deploys.create!(number: 1, sha: "b" * 40, ref: "refs/heads/main", status: "queued", token_digest: "", heartbeat_at: Time.utc(2026, 9, 1))
 ApiToken.create!(name: "parity", token_digest: ApiToken.digest("hou_parity-personal-token"))
+# Who signs in to look at the pages side by side (bin/parity --serve).
+User.create!(email_address: "admin@houston.localhost", password: "parity-password")
 puts "parity data: #{Project.count} projects, #{Deploy.count} deploys"

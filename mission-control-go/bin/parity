@@ -4,7 +4,12 @@
 # then moved), sent the same requests by test/parity, their answers compared.
 # Needs the images built: mission-control-app (cd mission_control && docker
 # compose build) and houston-dev-cli (bin/go builds it).
+#
+# --serve: afterwards, keep both running to look at side by side: Rails at
+# http://localhost:3101, Go at http://127.0.0.1:3102 (another host, as cookies ignore the port; sign in as
+# admin@houston.localhost, parity-password), until interrupted.
 set -euo pipefail
+serve=; [ "${1:-}" = --serve ] && serve=1
 cd "$(dirname "$0")/../.."
 root=$PWD
 work=$(mktemp -d)
@@ -33,11 +38,13 @@ echo "== moved into the Go app's"
 
 echo "== both, side by side"
 docker network create "$net" >/dev/null
-docker run -d --name "$net-rails" --network "$net" -v "$root/mission_control:/rails" -e DATABASE_URL=sqlite3:tmp/parity.sqlite3 \
+ports_rails=(); ports_go=()
+[ -n "$serve" ] && ports_rails=(-p 127.0.0.1:3101:3000) && ports_go=(-p 127.0.0.1:3102:8080)
+docker run -d --name "$net-rails" --network "$net" "${ports_rails[@]}" -v "$root/mission_control:/rails" -e DATABASE_URL=sqlite3:tmp/parity.sqlite3 \
 	-e RAILS_DEVELOPMENT_HOSTS=admin.houston.localhost,hooks.houston.localhost \
 	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent \
 	mission-control-app bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid >/dev/null
-docker run -d --name "$net-go" --network "$net" -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod \
+docker run -d --name "$net-go" --network "$net" "${ports_go[@]}" -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod \
 	-v houston-dev_gocache:/root/.cache/go-build -v "$work:/parity" -e GANTRY_ENV=development -e DATABASE_URL=sqlite:///parity/go.sqlite3 \
 	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent -e ADDR=:8080 \
 	houston-dev-cli go run ./cmd/mission-control-go >/dev/null
@@ -54,3 +61,8 @@ echo "== the same requests to each"
 	echo "== the Go app's log"; docker logs --tail 40 "$net-go" 2>&1
 	exit $status
 }
+
+if [ -n "$serve" ]; then
+	echo "== serving: Rails http://localhost:3101, Go http://127.0.0.1:3102 (admin@houston.localhost, parity-password)"
+	while true; do sleep 3600; done
+fi

@@ -25,6 +25,8 @@ import (
 type side struct {
 	name, base string
 	state      map[string]string
+	// browser is signed in, for the pages.
+	browser *http.Client
 }
 
 // step is one request. Its path, headers and body may name what an
@@ -171,7 +173,25 @@ func main() {
 			fmt.Printf("ok   %s (%d)\n", st.name, ra.status)
 		}
 	}
-	fmt.Printf("\n%d of %d steps differ (and %d as known)\n", failed, len(steps), known)
+	for _, s := range []*side{rails, gov} {
+		if err := signIn(s); err != nil {
+			fmt.Printf("FAIL signing in: %s: %v\n", s.name, err)
+			os.Exit(1)
+		}
+	}
+	for _, path := range pages {
+		switch diff, err := comparePage(rails, gov, path); {
+		case err != nil:
+			fmt.Printf("FAIL page %s: %v\n", path, err)
+			failed++
+		case diff != "":
+			fmt.Printf("FAIL page %s\n%s\n", path, diff)
+			failed++
+		default:
+			fmt.Printf("ok   page %s\n", path)
+		}
+	}
+	fmt.Printf("\n%d of %d steps and pages differ (and %d as known)\n", failed, len(steps)+len(pages), known)
 	if failed > 0 {
 		os.Exit(1)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/scttymn/gantry/auth"
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/turbo"
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/internal/mission"
@@ -94,6 +95,9 @@ func (c Controller) ShowSnapshots(w http.ResponseWriter, r *http.Request) error 
 				s.List = append(s.List, snap)
 			}
 		}
+	}
+	if turbo.Frame(r) == "" {
+		return web.Render(w, r, http.StatusOK, SnapshotsPage(layout.For(r, ""), s))
 	}
 	return web.Render(w, r, http.StatusOK, SnapshotsFrame(s))
 }

@@ -74,6 +74,14 @@ templ SnapshotsFrame(s Snapshots) {
 	</turbo-frame>
 }
 
+// SnapshotsPage is the list visited on its own, outside the project page's
+// frame: in the layout, as Rails answers it.
+templ SnapshotsPage(page layout.Page, s Snapshots) {
+	@layout.Layout(page) {
+		@SnapshotsFrame(s)
+	}
+}
+
 // snapshotSettings is Snapshots' Settings tab: the backup plan.
 templ snapshotSettings(s Snapshots) {
 	{{ p := s.P }}

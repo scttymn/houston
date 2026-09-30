@@ -29,7 +29,13 @@ func withSnapshots(t *testing.T) (*app.App, *browser, *dockercmdtest.Fake) {
 // The Snapshots panel's list: each tab, and the backup plan.
 func TestSnapshotsFrame(t *testing.T) {
 	a, b, _ := withSnapshots(t)
+	// Visited on its own, it's a page; the project page's frame gets the list alone.
+	contains(t, b.do("GET", "/projects/shop/snapshots", nil).Body.String(), "<title>Mission Control</title>", "Sign out", `<turbo-frame id="snapshots-list">`)
+	b.frame = "snapshots-list"
 	page := b.do("GET", "/projects/shop/snapshots", nil).Body.String()
+	if strings.Contains(page, "Sign out") {
+		t.Error("the layout in the frame's answer")
+	}
 	contains(t, page, `<turbo-frame id="snapshots-list">`, `<a role="tab" aria-selected="true" class="tabs__tab" href="/projects/shop/snapshots">`,
 		`href="/projects/shop/snapshots?kind=deploy"><span class="tabs__label" data-label="Pre-deploy">`,
 		"Daily at 03:00 (UTC), plus any you create. One per day is kept for 14 days · kept 1 / 14.",

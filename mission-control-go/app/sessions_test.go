@@ -30,6 +30,7 @@ type browser struct {
 	addr   string
 	tunnel bool
 	host   string // "mc.local" when blank
+	frame  string // the <turbo-frame> asking, if one is
 }
 
 // admin is the app with its admin, and a browser on the network.
@@ -62,6 +63,9 @@ func (b *browser) do(method, path string, form url.Values) *httptest.ResponseRec
 	r.RemoteAddr = b.addr + ":40000"
 	if b.tunnel {
 		r.Header.Set("Cf-Ray", "8f-MCI")
+	}
+	if b.frame != "" {
+		r.Header.Set("Turbo-Frame", b.frame)
 	}
 	for _, c := range b.jar {
 		r.AddCookie(c)
