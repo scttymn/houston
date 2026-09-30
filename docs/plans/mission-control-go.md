@@ -77,6 +77,20 @@ In your port order (API before jobs), so an endpoint whose work is a batch 3 fea
 | 2c | Writes that are Mission Control's own: the time zone, secrets (set, generate, remove; values Kamal can't carry refused), the webhook's secret rotated, maintenance (routes pushed), a volume's location, the backup target, a manual backup queued | `api.TestV1Settings`, `TestV1Secrets`, `TestV1RotateWebhook`, `TestV1Maintenance`, `TestV1ChooseVolume`, `TestV1BackupTarget`, `TestV1BackupNow`, `TestV1DefaultStorage`; parity (done: 61 steps, none differ, 4 known) |
 | 2d | With batch 3's features: add project and relink (git), Cloudflare's token and repair, the server update, restores, copies, deletion, logs, snapshots and their download, deploy now | with each feature |
 
+### Batch 3: jobs and their leases
+gantry's jobs, the Rails app's queues (default 3 at once; backups 1; snapshots 2; deletions 1) and recurring entries. Each slice brings the personal API's endpoints that ride on it (2d).
+
+| Slice | Criterion | Test |
+| --- | --- | --- |
+| 3a | Backups: the backup job claims its run under a token (one running a project; a silent one abandoned; a restore's own runs only while one is queued or in flight; none while the server updates), beats, snapshots the project's volumes and Postgres dumps with restic, finishes under its token (log capped at 1 MiB), waits while busy for up to 3 h; the snapshots list and a snapshot's download (2d) | `jobs.TestBackup*` with a fake restic |
+| 3b | Restores: a restore requested (its snapshot in its location, its commit still in the repo, the next generation's names claimed), its data put back into that generation (2d: POST restores) | `jobs.TestRestore*` |
+| 3c | Git and change checks: reading a repo (keys, known hosts, 60 s timeouts), a push's check queues the head the deploy rule matches (one check a project at a time), the 10-minute poll; deploy now, add project, relink (2d) | `gitremote.Test*`, `jobs.TestCheck*` |
+| 3d | Schedules and upkeep: the backup schedule (each project's daily time, in the installation's time zone, once a local day), prune (daily, the kept counts), the latest release (6-hourly), the registry's clean-up (its lock) | `jobs.TestSchedule*`, … |
+| 3e | Deletions: the final snapshot, then removal, resumable; the project's names released; held back from claims and the tunnel's routes (2d: DELETE a project, GET a deletion) | `jobs.TestDelete*` |
+| 3f | Copies: to a new name, the old project's data and the handover of shared hosts, cancel and undo, clean-up (2d, and the runner's copy endpoints) | `jobs.TestCopy*` |
+| 3g | The server update, and the port: the installer run, settling (every minute), claims and backups held meanwhile (2d: update, port) | `jobs.TestServerUpdate*` |
+| 3h | Live reads: app stats (docker stats, on demand), a project's logs streamed, Cloudflare's view, token and repair (2d) | `appstats.Test*`, `api.TestV1Logs`, … |
+
 **Found along the way, for later batches**
 - Batch 5: the production image can't be `FROM scratch`: Mission Control runs the docker CLI (volumes, restic, logs), git over ssh, and its own image's `mkdir` for volume directories (`HOUSTON_TOOLS_IMAGE`). The tunnel's Mission Control address (`HOUSTON_MISSION_CONTROL_URL`, default `http://mission-control:8080`) must match the container the installer runs.
 - Batch 5: the switch carries the Rails app's `storage/known_hosts` to the Go app's `HOUSTON_KNOWN_HOSTS` (default `DATA_DIR/known_hosts`).
