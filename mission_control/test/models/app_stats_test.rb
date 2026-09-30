@@ -94,15 +94,34 @@ class AppStatsTest < ActiveSupport::TestCase
     assert_in_delta 100 * 0.03 / 0.5, cart.cpu_percent, 0.0001, "its limit, not the host"
     assert_in_delta 100.0 * 12 / 64, cart.memory_percent, 0.0001
 
-    # The host is read with the disk, every 5 minutes; when Docker can't say,
+    # The host's cores and memory are read each time; when Docker can't say,
     # what was read stays, and before anything was, no share.
-    travel 6.minutes
+    travel 30.seconds
+    use_fake_docker(docker(info: "16 #{32 * GIB}")) { AppStats.sample! }
+    assert_equal 16, reading(@equip).cpu_whole, "each sample, not with the disk"
     use_fake_docker(docker(info: failure("no"))) { AppStats.sample! }
-    assert_equal 8, reading(@equip).cpu_whole
+    assert_equal 16, reading(@equip).cpu_whole
     Rails.cache.delete(AppStats::CACHE_KEY)
     use_fake_docker(docker(info: failure("no"))) { AppStats.sample! }
     assert_nil reading(@equip).cpu_percent
-    assert_nil reading(@equip).disk_percent
+  end
+
+  # The disk's size is read with the volumes, every 5 minutes, or at once when
+  # a reading has none (one kept from before Mission Control read it).
+  test "the host's disk, with the volumes or when missing" do
+    use_fake_docker(docker) { AppStats.sample! }
+    Rails.cache.write(AppStats::CACHE_KEY, Rails.cache.read(AppStats::CACHE_KEY).merge("host" => nil))
+    AppStats.disk_size = -> { 200 * GIB }
+    use_fake_docker(docker) { |fake| AppStats.sample!; @df = fake.calls.count { |c| c.args.first == "system" } }
+    assert_equal 0, @df, "the volumes aren't due"
+    assert_equal 200 * GIB, reading(@equip).disk_whole, "but the missing size is read now"
+    AppStats.disk_size = -> { 300 * GIB }
+    travel 1.minute
+    use_fake_docker(docker) { AppStats.sample! }
+    assert_equal 200 * GIB, reading(@equip).disk_whole, "and kept until the volumes are read again"
+    travel 5.minutes
+    use_fake_docker(docker) { AppStats.sample! }
+    assert_equal 300 * GIB, reading(@equip).disk_whole
   end
 
   test "disk per project, now and then" do
@@ -149,5 +168,6 @@ class AppStatsTest < ActiveSupport::TestCase
     assert_equal 0, count.call { use_fake_docker(docker) { AppStats.sample! } }, "the same numbers"
     busier = STATS.sub("300MiB / 1GiB", "600MiB / 1GiB")
     assert_equal 1, count.call { use_fake_docker(docker(stats: busier)) { AppStats.sample! } }
+    assert_equal 1, count.call { use_fake_docker(docker(stats: busier, info: "16 #{16 * GIB}")) { AppStats.sample! } }, "the host changed: every share did"
   end
 end

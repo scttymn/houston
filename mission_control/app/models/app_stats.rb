@@ -54,14 +54,18 @@ module AppStats
   def self.sample!(projects = Project.all.to_a)
     kept = Rails.cache.read(CACHE_KEY) || {}
     containers = read_containers or return
-    disk, host = kept["disk"], kept["host"]
+    disk, host = kept["disk"], (kept["host"] || {}).dup
     disk_at = kept["disk_sampled_at"] && Time.zone.parse(kept["disk_sampled_at"])
+    # The host's cores and memory each time (docker info is quick); its disk's
+    # size with the volumes (slow: every 5 minutes), or now when it's missing.
+    host.merge!(read_machine || {})
     if disk.nil? || disk_at.nil? || disk_at < DISK_EVERY.ago
       if (fresh = read_volumes)
         disk, disk_at = fresh, Time.current
       end
-      host = read_host || host
+      host["disk"] = disk_size.call || host["disk"]
     end
+    host["disk"] ||= disk_size.call
 
     rows = projects.each_with_object({}) do |project, out|
       mine = containers.select { |c| app_container?(project, c[:name]) }
@@ -76,7 +80,9 @@ module AppStats
     end
     Rails.cache.write(CACHE_KEY, { "sampled_at" => Time.current.iso8601, "projects" => rows, "disk" => disk,
                                    "disk_sampled_at" => disk_at&.iso8601, "host" => host })
-    FlightBoard.refresh! if shown(rows) != shown(kept["projects"] || {})
+    # The board redraws when what it shows changed: an app's numbers, or what
+    # a share is of.
+    FlightBoard.refresh! if shown(rows) != shown(kept["projects"] || {}) || host != (kept["host"] || {})
   end
 
   def self.app_container?(project, name)
@@ -126,15 +132,14 @@ module AppStats
   end
   private_class_method :read_volumes
 
-  # The host's cores and memory (docker info), and the size of the disk
-  # Docker keeps its volumes on; nil when Docker can't say.
-  def self.read_host
+  # The host's cores and memory (docker info); nil when Docker can't say.
+  def self.read_machine
     info = DockerCommand.run("info", "--format", "{{.NCPU}} {{.MemTotal}}", timeout: TIMEOUT)
     return failed("docker info", info) unless info.success
     cpus, memory = info.output.split.map(&:to_i)
-    { "cpus" => cpus, "memory" => memory, "disk" => disk_size.call }
+    { "cpus" => cpus, "memory" => memory }
   end
-  private_class_method :read_host
+  private_class_method :read_machine
 
   # The size of the disk under Mission Control's container: the one Docker
   # keeps its volumes on (the host's /var/lib/docker). nil when df can't say.
