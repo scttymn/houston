@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/scttymn/gantry/crypt"
 	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/images"
 	"github.com/scttymn/gantry/jobs"
@@ -26,6 +28,7 @@ import (
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
+	"github.com/scttymn/houston/mission-control-go/app/services/move"
 	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
 	"github.com/scttymn/houston/mission-control-go/db/migrations"
@@ -44,6 +47,7 @@ const usage = `usage:
   mission-control-go jobs                   run the background jobs alone
   mission-control-go assets [DIR]           the assets precompiled, into DIR (assets/built; the build runs it)
   mission-control-go db migrate|rollback [N]|status|seed|reset|console
+  mission-control-go move RAILS_DB          the one-time move from the Rails app's database into this one (new)
   mission-control-go tasks                  the app's own tasks (app/tasks.go)
   mission-control-go task NAME [ARGS...]    run one
 `
@@ -78,6 +82,12 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 		}
 	case "db":
 		return dbCommand(ctx, cfg, args, in, out, errOut)
+	case "move":
+		if len(args) != 1 {
+			fmt.Fprint(errOut, usage)
+			return 2
+		}
+		err = moveCommand(ctx, cfg, args[0], out)
 	case "tasks":
 		for _, t := range app.Tasks {
 			fmt.Fprintf(out, "%-20s %s\n", t.Name, t.Help)
@@ -99,6 +109,9 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 // build opens the database, brings it up to date, and is the app on it,
 // its jobs defined. close closes the database.
 func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.App, close func(), err error) {
+	if err := useKeys(cfg); err != nil {
+		return nil, nil, err
+	}
 	database, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, nil, err
@@ -216,4 +229,38 @@ func task(ctx context.Context, cfg config.Config, logger *slog.Logger, args []st
 		return t.Run(ctx, app.TaskEnv{DB: database, Log: logger, Out: out}, args[1:])
 	}
 	return fmt.Errorf("no task %q: `mission-control-go tasks` lists them", args[0])
+}
+
+// useKeys sets gantry's crypt keys, which secrets are kept with.
+func useKeys(cfg config.Config) error {
+	keys, err := crypt.ParseKeys(cfg.EncryptionKeys)
+	if err == nil && len(keys) == 0 {
+		err = errors.New("ENCRYPTION_KEYS is missing: 32 random bytes in base64 (openssl rand -base64 32)")
+	}
+	if err != nil {
+		return err
+	}
+	return crypt.Use(keys...)
+}
+
+// moveCommand moves the Rails app's database at from into DATABASE_URL's,
+// which must be new: migrated here first, then filled.
+func moveCommand(ctx context.Context, cfg config.Config, from string, out io.Writer) error {
+	if err := useKeys(cfg); err != nil {
+		return err
+	}
+	database, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+	if err := migrations.Up(ctx, database); err != nil {
+		return err
+	}
+	report, err := move.Run(ctx, from, move.RailsKeys{PrimaryKey: cfg.RailsPrimaryKey, Salt: cfg.RailsKeySalt}, database)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "moved %s\n", strings.Join(report.Moved, ", "))
+	return nil
 }

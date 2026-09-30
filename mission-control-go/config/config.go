@@ -29,6 +29,13 @@ type Config struct {
 	// TunnelHost is cloudflared's name on the Docker network
 	// (HOUSTON_TUNNEL_HOST, default cloudflared).
 	TunnelHost string
+	// EncryptionKeys are gantry's crypt keys (ENCRYPTION_KEYS, crypt.NewKey
+	// makes one; the newest first). Development and tests have their own.
+	EncryptionKeys string
+	// RailsKeys are the Rails app's Active Record encryption keys
+	// (AR_ENCRYPTION_PRIMARY_KEY, AR_ENCRYPTION_KEY_DERIVATION_SALT), for
+	// the one-time move from its database.
+	RailsPrimaryKey, RailsKeySalt string
 	// JobsInServer runs the background jobs in the server's process (Rails 8's
 	// Solid Queue in Puma). JOBS_IN_SERVER=false leaves them to a process of
 	// their own, `mission-control-go jobs`.
@@ -62,8 +69,17 @@ func Load(getenv func(string) string) Config {
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	c.KnownHosts = or("HOUSTON_KNOWN_HOSTS", c.DataDir+"/known_hosts")
+	c.EncryptionKeys = getenv("ENCRYPTION_KEYS")
+	if c.EncryptionKeys == "" && c.Env != "production" {
+		c.EncryptionKeys = devEncryptionKey
+	}
+	c.RailsPrimaryKey, c.RailsKeySalt = getenv("AR_ENCRYPTION_PRIMARY_KEY"), getenv("AR_ENCRYPTION_KEY_DERIVATION_SALT")
 	return c
 }
+
+// devEncryptionKey encrypts development's and tests' secrets (as the Rails
+// app's development keys do); production's come from ENCRYPTION_KEYS.
+const devEncryptionKey = "ZGV2LW9ubHkta2V5LW5vdC1mb3ItcHJvZHVjdGlvbiE="
 
 // FromEnv is the process's settings.
 func FromEnv() Config { return Load(os.Getenv) }
