@@ -12,6 +12,7 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/projects"
 )
 
 // proxies is who may say where a request comes from: cloudflared alone
@@ -33,6 +34,13 @@ func (a *App) proxies() web.Proxies {
 func (a *App) hooksHost(r *http.Request) bool {
 	base, err := models.New(a.DB.Read).InstallationBaseDomain(r.Context())
 	return err == nil && web.RequestHost(r) == "hooks."+strings.ToLower(base)
+}
+
+// appHost is a request for one of a project's hostnames (the Rails app's
+// AppHost).
+func (a *App) appHost(r *http.Request) bool {
+	p, err := projects.ForHost(r.Context(), models.New(a.DB.Read), strings.ToLower(web.RequestHost(r)))
+	return err == nil && p != nil
 }
 
 // Identity names this installation on /ping, so Mission Control can tell

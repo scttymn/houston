@@ -123,6 +123,13 @@ func (a *App) Router() *web.Router {
 		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Updater: a.Updater, FollowUpdate: a.ServerUpdate, Port: a.Port, Release: a.Release, Stats: a.Stats,
 		CloudflareSettings: a.CloudflareSettings, SystemStatus: a.SystemStatus}
 
+	// A project's hostnames reach Mission Control only for its maintenance
+	// page; nothing else answers on them, before any other route.
+	maintenancePages := projects.Controller{DB: a.DB}
+	rt.Constraint(a.appHost, func(s *web.Scope) {
+		s.Handle("/", maintenancePages.ShowMaintenance)
+	})
+
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
 		s.Handle("GET /ping", a.ping)
@@ -227,6 +234,7 @@ func (a *App) Router() *web.Router {
 		s.Handle("PATCH /projects/{name}/backup_target", pages.BackupTarget)
 		s.Handle("PATCH /projects/{name}/repo", pages.MoveRepo)
 		s.Handle("PATCH /projects/{name}/maintenance", pages.ToggleMaintenance)
+		s.Handle("GET /projects/{name}/maintenance/preview", pages.PreviewMaintenance)
 		s.Handle("PUT /projects/{name}/secrets/{key}", pages.SetSecret)
 		s.Handle("PATCH /projects/{name}/secrets/{key}", pages.SetSecret)
 		s.Handle("DELETE /projects/{name}/secrets/{key}", pages.RemoveSecret)

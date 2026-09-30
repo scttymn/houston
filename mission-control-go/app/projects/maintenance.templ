@@ -1,0 +1,63 @@
+package projects
+
+import (
+	"regexp"
+	"strings"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/assets"
+)
+
+var xmlComment = regexp.MustCompile(`(?s)<!--.*?-->\n?`)
+
+// logo is Houston's patch, for the default page to inline: that page loads
+// nothing (the app is down), so the logo is part of the HTML.
+func logo() string { return xmlComment.ReplaceAllString(string(assets.All.Read("patch.svg")), "") }
+
+// MaintenanceHTML is a project's own maintenance page (x-houston.maintenance)
+// with {{project}} and {{message}} filled in, HTML-escaped; "" without one.
+// Nothing else in the page is interpreted.
+func MaintenanceHTML(p models.Project, message string) string {
+	if p.MaintenancePage == "" {
+		return ""
+	}
+	return strings.NewReplacer("{{project}}", templ.EscapeString(p.Name), "{{message}}", templ.EscapeString(message)).Replace(p.MaintenancePage)
+}
+
+// MaintenancePage is Houston's default maintenance page.
+templ MaintenancePage(p models.Project, message string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta http-equiv="refresh" content="60"/>
+			<title>{ p.Name + " · down for maintenance" }</title>
+			<style>
+  :root { color-scheme: light dark; --bg: #f6f5f1; --fg: #1d1f24; --muted: #5d616b; --rule: #d9d6cd; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15171b; --fg: #e9e6de; --muted: #a3a7b0; --rule: #2e323b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+         background: var(--bg); color: var(--fg); font: 17px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 34rem; text-align: center; }
+  h1 { margin: 0 0 8px; font-size: 1.9rem; letter-spacing: -0.01em; }
+  p { margin: 0; color: var(--muted); }
+  .logo { width: 200px; max-width: 60vw; margin: 0 auto 28px; }
+  .logo svg { display: block; width: 100%; height: auto; }
+  .message { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--rule); color: var(--fg); white-space: pre-line; }
+			</style>
+		</head>
+		<body>
+			<main>
+				<div class="logo" role="img" aria-label="Houston">
+					@templ.Raw(logo())
+				</div>
+				<h1>{ p.Name }</h1>
+				<p>is down for maintenance. We'll be back shortly.</p>
+				if message != "" {
+					<p class="message">{ message }</p>
+				}
+			</main>
+		</body>
+	</html>
+}
