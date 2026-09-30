@@ -67,6 +67,16 @@ In slices, each merged before the next; each slice adds its tables' part of the 
 | 1h | Webhooks: verified by HMAC (GitHub, Gitea, Forgejo) or token (GitLab, Houston), constant-time; unverified and unknown alike an empty 404, counted per address and name (30 a minute, checked before the body is read); verified ones 60 a minute per project; 202 and a change check queued | `api.TestWebhook*` (done; a webhook to a deleted project's copy rings the copy once copies move, batch 3, and the change check's work is batch 3's) |
 | 1i | Parity: a script runs both versions on the same moved data and sends each the same runner API requests, comparing status and body (tokens and times by shape, null as "") | `mission-control-go/bin/parity` (done: 29 steps, none differ; 2 known until batch 3, the Rails app's backup job having run) |
 
+### Batch 2: the personal API (`/api/v1`)
+In your port order (API before jobs), so an endpoint whose work is a batch 3 feature (restic's snapshots, git, deletions, copies, server updates, app stats, Docker logs) lands with that feature, and a view's field from one reads as it would on a server with none yet (the parity check marks it known).
+
+| Slice | Criterion | Test |
+| --- | --- | --- |
+| 2a | The door (`api/v1/base_controller.rb`): a `hou_` token by its SHA-256 (401 in its words otherwise), its last use recorded at most once a minute, 409 until Cloudflare is connected, and it works through the tunnel; `GET /me` (the token's name, the server, the version and a newer release, an update running) | `api.TestV1Door`, `TestMe`; `move.TestAPITokens` |
+| 2b | Reads: projects (the list and one, `RemoteView.project`), deploys (20 a page; one with its steps and its log from a byte, on whole characters), settings, the port, Cloudflare, storage, a project's volumes, webhook and secrets (names, never values) | `api.TestV1Projects`, `TestV1Deploys`, … |
+| 2c | Writes that are Mission Control's own: the time zone, secrets (set, generate, remove; values Kamal can't carry refused), the webhook's secret rotated, maintenance (routes pushed), a volume's location, the backup target, a manual backup queued | `api.TestV1Secrets`, … |
+| 2d | With batch 3's features: add project and relink (git), Cloudflare's token and repair, the server update, restores, copies, deletion, logs, snapshots and their download, deploy now | with each feature |
+
 **Found along the way, for later batches**
 - Batch 5: the production image can't be `FROM scratch`: Mission Control runs the docker CLI (volumes, restic, logs), git over ssh, and its own image's `mkdir` for volume directories (`HOUSTON_TOOLS_IMAGE`). The tunnel's Mission Control address (`HOUSTON_MISSION_CONTROL_URL`, default `http://mission-control:8080`) must match the container the installer runs.
 - Batch 5: the switch carries the Rails app's `storage/known_hosts` to the Go app's `HOUSTON_KNOWN_HOSTS` (default `DATA_DIR/known_hosts`).
