@@ -26,7 +26,8 @@ func newApp(t *testing.T) *app.App {
 		t.Fatal(err)
 	}
 	signer := sign.Signer{Key: []byte("test-key")}
-	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q, Live: live.New(signer, live.Options{})}
+	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q, Live: live.New(signer, live.Options{}),
+		Identity: app.Identity("test-secret-key-base")}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)
 	}

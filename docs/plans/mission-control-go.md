@@ -45,9 +45,9 @@ Filled per batch when it starts (a row per endpoint or behaviour, each with its 
 ### Batch 0: foundation
 | Criterion | Test |
 | --- | --- |
-| mission-control-go is on gantry's latest release, with what `gantry new` gives an app since v0.8.0 (the assets build step, the build cache) | the app's tests; `gantry test` |
+| mission-control-go is on gantry's latest release, with what `gantry new` gives an app since v0.8.0 (the assets build step, the build cache) | the app's tests; `gantry test` (done, v0.10.0) |
 | Rails' encryption is read in Go: values the Rails app encrypted (its dev keys, short and long values, which Rails compresses) decrypt to what went in; a wrong key or a changed byte is an error, not garbage | `move.TestDecrypt`, `TestDecryptRefuses` on vectors made by `bin/rails runner` (done) |
 | The move's frame: it opens a Rails-made database read-only and writes a new one through the app's migrations; the installation (base domain, time zone, Cloudflare ids, tokens re-encrypted with gantry's keys) moves | `move.TestInstallation`, `TestMoveRefuses` on a Rails-made fixture (`testdata/rails_fixture.rb`) (done) |
-| Hosts: `hooks.<base>` answers only `GET /ping` and `POST /<name>` (else an empty 404); a project's hostname answers only its maintenance page (503) or an empty 404; everything else is Mission Control | `app.TestHosts` |
-| Where a request comes from: the client's address from `Cf-Connecting-Ip` only when the peer is the tunnel (cloudflared), from `X-Forwarded-For` only when the peer is loopback (Thruster); https only through the tunnel (`Cf-Ray`); forwarding headers from anyone else ignored | `app.TestForwarded` |
-| `GET /up` 200; `GET /ping` the installation's identity, plain text, on any host but a project's | `app.TestUpAndPing` |
+| Hosts: `hooks.<base>` answers only `GET /ping` and `POST /<name>` (else an empty 404); everything else is Mission Control. (A project's hostname, its maintenance page or an empty 404, comes with the projects table in batch 1.) | `app.TestHosts` (done) |
+| Where a request comes from: the client's address from `Cf-Connecting-Ip` only when the peer is the tunnel (cloudflared, by name: gantry v0.10.0's `Proxies.Names`); https only through the tunnel; forwarding headers from anyone else ignored, and a forwarded host from anyone (`Proxies.ForwardedHost` off). No Thruster in front of the Go version, so no loopback rule. | `app.TestForwarded` (done) |
+| `GET /up` 200; `GET /ping` the installation's identity, plain text, on any host but a project's; the identity is the Rails app's for the same `SECRET_KEY_BASE` | `app.TestUpAndPing` (done) |

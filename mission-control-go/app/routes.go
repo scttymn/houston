@@ -27,14 +27,33 @@ type App struct {
 	// a.Live.Broadcast(ctx, "post:"+id, turbo.Replace(...)), or
 	// a.Live.Refresh("post:"+id, turbo.RequestID(r)).
 	Live *live.Hub
+	// Identity names this installation on /ping (Identity(SECRET_KEY_BASE)).
+	Identity string
+	// TunnelHost is cloudflared's name on the Docker network, the one proxy
+	// trusted (proxies); "" trusts none.
+	TunnelHost string
 }
 
 // Handler is every route, in gantry's middleware.
-func (a *App) Handler() http.Handler {
+func (a *App) Handler() http.Handler { return a.Router().Handler() }
+
+// Router is every route, before Handler puts gantry's middleware around
+// them (a test may add one of its own).
+func (a *App) Router() *web.Router {
 	rt := web.NewRouter(a.Log, nil)
+	rt.Proxies = a.proxies()
 	// Errors are assets/public's pages (404.html, 500.html ...), plain
 	// files, so they show even when the app can't draw a page.
 	rt.Public = assets.All
+
+	// hooks.<base>: the webhook and the ping, else an empty 404.
+	rt.Constraint(a.hooksHost, func(s *web.Scope) {
+		s.Handle("GET /ping", a.ping)
+		s.Handle("POST /{name}", notFound) // the webhook comes with the runner API (batch 1)
+		s.Handle("/", notFound)
+	})
+
+	rt.Handle("GET /ping", a.ping)
 
 	homePage := home.Controller{DB: a.DB}
 	rt.Handle("GET /{$}", homePage.Show)
@@ -44,5 +63,5 @@ func (a *App) Handler() http.Handler {
 	rt.Handle("GET /live", a.Live.Serve)
 
 	assets.Routes(rt.Mount)
-	return rt.Handler()
+	return rt
 }

@@ -10,7 +10,13 @@ type Config struct {
 	Addr        string // ADDR, default :8080
 	DataDir     string // DATA_DIR: the database and uploads; default /data
 	DatabaseURL string // DATABASE_URL; default sqlite://DATA_DIR/mission-control-go.sqlite3
-	SecretKey   string // SECRET_KEY: signs cookies and forms; blank: a key kept in the database
+	SecretKey   string // SECRET_KEY, else SECRET_KEY_BASE: signs cookies and forms; blank: a key kept in the database
+	// SecretKeyBase is the Rails app's SECRET_KEY_BASE, from the server's
+	// .env: /ping's identity is derived from it.
+	SecretKeyBase string
+	// TunnelHost is cloudflared's name on the Docker network
+	// (HOUSTON_TUNNEL_HOST, default cloudflared).
+	TunnelHost string
 	// JobsInServer runs the background jobs in the server's process (Rails 8's
 	// Solid Queue in Puma). JOBS_IN_SERVER=false leaves them to a process of
 	// their own, `mission-control-go jobs`.
@@ -30,11 +36,13 @@ func Load(getenv func(string) string) Config {
 		return fallback
 	}
 	c := Config{
-		Env:          or("GANTRY_ENV", "production"),
-		Addr:         or("ADDR", ":8080"),
-		DataDir:      or("DATA_DIR", "/data"),
-		SecretKey:    getenv("SECRET_KEY"),
-		JobsInServer: getenv("JOBS_IN_SERVER") != "false",
+		Env:           or("GANTRY_ENV", "production"),
+		Addr:          or("ADDR", ":8080"),
+		DataDir:       or("DATA_DIR", "/data"),
+		SecretKey:     or("SECRET_KEY", getenv("SECRET_KEY_BASE")),
+		SecretKeyBase: getenv("SECRET_KEY_BASE"),
+		TunnelHost:    or("HOUSTON_TUNNEL_HOST", "cloudflared"),
+		JobsInServer:  getenv("JOBS_IN_SERVER") != "false",
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	return c

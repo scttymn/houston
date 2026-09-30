@@ -55,11 +55,11 @@ func TestInstallation(t *testing.T) {
 	}
 	var (
 		base, zone, dns, account, zoneID, tunnelID, release, releaseURL string
-		portOpen                                                       bool
-		apiToken, tunnelToken                                          crypt.String
-		storedAPIToken                                                 string
-		connected, checked, created, updated                           time.Time
-		cleanup                                                        sql.NullTime
+		portOpen                                                        bool
+		apiToken, tunnelToken                                           crypt.String
+		storedAPIToken                                                  string
+		connected, checked, created, updated                            time.Time
+		cleanup                                                         sql.NullTime
 	)
 	err = to.Read.QueryRow(`SELECT base_domain, time_zone, dns_mode, port_open, cloudflare_account_id, cloudflare_zone_id,
 		cloudflare_api_token, cloudflare_api_token, cloudflare_connected_at, tunnel_id, tunnel_token,

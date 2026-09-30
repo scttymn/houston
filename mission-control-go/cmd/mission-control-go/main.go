@@ -121,7 +121,14 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		return nil, nil, err
 	}
 	signer := sign.Signer{Key: key}
-	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger})}
+	// The identity: from SECRET_KEY_BASE, as the Rails app's; else (in
+	// development) from the signing key.
+	identity := cfg.SecretKeyBase
+	if identity == "" {
+		identity = string(key)
+	}
+	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
+		Identity: app.Identity(identity), TunnelHost: cfg.TunnelHost}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}
