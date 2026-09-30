@@ -1,6 +1,6 @@
--- The schema as the migrations leave it, for sqlc and for reading. It's
--- written from the migrations; don't edit it by hand.
-
+-- This server's Houston setup: one row (id 1). The Cloudflare tokens are
+-- crypt.String (sqlc.yaml), encrypted at rest.
+-- +goose Up
 CREATE TABLE installations (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   base_domain TEXT NOT NULL DEFAULT '',
@@ -20,3 +20,6 @@ CREATE TABLE installations (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- +goose Down
+DROP TABLE installations;

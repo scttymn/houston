@@ -15,3 +15,9 @@ sql:
         output_db_file_name: queries.go
         output_models_file_name: tables.go
         emit_empty_slices: true
+        overrides:
+          # Encrypted at rest (gantry's crypt, Rails' encrypts).
+          - column: installations.cloudflare_api_token
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: installations.tunnel_token
+            go_type: github.com/scttymn/gantry/crypt.String
