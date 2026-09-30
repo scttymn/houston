@@ -154,4 +154,5 @@ Rails.application.routes.draw do
   end
 
   root "projects#index"
+  get "resources", to: "resources#index", as: :resources
 end

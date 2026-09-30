@@ -112,3 +112,12 @@ Your ask: "could we get the graphs to work on the % of the host if the individua
 - Percentages stay unrounded until shown: a sliver reads `<1%`, with one tick (the app is running); the hover says "of the host's …· no limit set".
 - Tests: `AppStatsTest` "shares of the limit, or of the host"; `UsageHelperTest` "shares of the host"; the flight board's row test. Mission Control 526 runs, 0 failures; rubocop clean. Mutation check: all 8 caught (no host CPU fallback, the host winning over a limit, no disk share, the host forgotten or never read, no `<1%`, the hover not saying host, the disk's share not drawn).
 - `v0.4.26`: v0.4.25 read the host with the volumes (every 5 minutes), so after the update the board showed dashes until the next volume reading, and didn't redraw when it came. Now the host's cores and memory are read on every sample (docker info is quick); its disk's size with the volumes, or at once when a reading has none; and the board redraws when the host changes. Tests: "the host's disk, with the volumes or when missing"; the board's refresh test. 527 runs, 0 failures. Mutation check: all 4 caught.
+
+## Read while someone's looking (2026-09-30, v0.4.27)
+Your direction: "if someone is camped on that page, it should be refreshing. If not, then we don't need to be running resource checks."
+- No recurring job (AppStatsJob and `sample_app_stats` are gone). `AppStats.fresh!` reads Docker when the last reading is over 25 s old, one read at a time (a caller that comes while another reads gets the reading there is).
+- The flight board asks `GET /resources` at once, then every 30 s while the tab is in view, and at once when it comes back into view (`stats_controller.js`); a hidden or closed board asks nothing. The answer is a Turbo Stream `update` of every element marked `data-resources="<project>"`: the row's cell and the card's.
+- The API reads when asked (`/api/v1/projects`, `/api/v1/projects/:name`), so `houston` status output is never stale.
+- The board no longer redraws for stats (it asks for them).
+- Cores under a hundredth read to three places ("0.003 cores"), and "<0.001 cores" below that: a running app never reads as none.
+- Tests: `AppStatsTest` "fresh reads Docker only when the reading is old"; `ResourcesControllerTest` (read now, a second board within 25 s reads nothing, signed out nothing); the board's stats element and markers; the API read when asked; cores in words. 528 runs, 0 failures; rubocop clean. Mutation check: all 7 caught.

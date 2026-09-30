@@ -6,9 +6,12 @@
 module UsageHelper
   NEAR = 85 # percent: from here the ticks and the amount turn amber
 
-  # 0.15 → "0.15 cores", 1 → "1 core".
+  # 0.15 → "0.15 cores", 1 → "1 core"; under a hundredth, three places
+  # (0.003 cores), and "<0.001 cores" below that, so a running app never
+  # reads as none.
   def cores_words(cores)
-    n = format("%.2f", cores).sub(/\.?0+\z/, "")
+    n = format(cores.positive? && cores < 0.01 ? "%.3f" : "%.2f", cores).sub(/\.?0+\z/, "")
+    return "<0.001 cores" if n == "0" && cores.positive?
     "#{n} #{n == "1" ? "core" : "cores"}"
   end
 

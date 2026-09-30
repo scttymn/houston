@@ -42,10 +42,12 @@ class ApiV1ReadTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  # docs/plans/app-stats.md, row 8.
+  # docs/plans/app-stats.md, row 8. Read when asked (AppStats.fresh!): no
+  # one has to have the board open.
   test "a project's stats" do
-    api "/projects/garage"
-    assert_nil json["stats"], "nothing sampled yet"
+    down = FakeDocker.new { DockerCommand::Result.new(success: false, output: "Cannot connect to the Docker daemon") }
+    use_fake_docker(down) { api "/projects/garage" }
+    assert_nil json["stats"], "Docker can't say, and nothing was read before"
 
     stats = { "ID" => "w1", "Name" => "garage-web-#{"a" * 40}", "CPUPerc" => "50.00%", "MemUsage" => "256MiB / 1GiB" }.to_json
     fake = FakeDocker.new do |args|
@@ -55,8 +57,8 @@ class ApiV1ReadTest < ActionDispatch::IntegrationTest
       when "system" then DockerCommand::Result.new(success: true, output: [ { "Name" => "garage_storage", "Size" => "2MB" } ].to_json)
       end
     end
-    use_fake_docker(fake) { AppStats.sample! }
-    api "/projects/garage"
+    use_fake_docker(fake) { |f| api "/projects/garage"; @reads = f.calls.count { |c| c.args.first == "stats" } }
+    assert_equal 1, @reads, "read when asked"
     assert_equal({ "cpu_cores" => 0.5, "cpu_limit" => nil, "memory_bytes" => 256 * 1024**2, "memory_limit" => 1024**3, "disk_bytes" => 2_000_000 },
                  json["stats"].except("sampled_at"))
     assert json["stats"]["sampled_at"]

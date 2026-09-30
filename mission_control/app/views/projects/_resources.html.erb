@@ -1,4 +1,4 @@
-<%# Right now, from Docker every 30 seconds (AppStats): tick gauges against each limit, or the host's without one. %>
+<%# From Docker, read while the board is open (AppStats.fresh!): tick gauges against each limit, or the host's without one. %>
 <% if (stats = AppStats.for(project)) %>
   <%= usage(:cpu, "CPU", cores_words(stats.cpu_cores), limit: stats.cpu_whole && cores_words(stats.cpu_whole), percent: stats.cpu_percent, of_host: stats.cpu_of_host?) %>
   <%= usage(:memory, "MEM", size_words(stats.memory_bytes), limit: stats.memory_whole && size_words(stats.memory_whole), percent: stats.memory_percent, of_host: stats.memory_of_host?) %>

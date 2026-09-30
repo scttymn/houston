@@ -4,6 +4,8 @@
 <% turbo_refreshes_with method: :morph, scroll: :preserve %>
 <%# Live: Mission Control refreshes this stream when anything below changes (FlightBoard). %>
 <%= turbo_stream_from FlightBoard::STREAM %>
+<%# Each app's resources, read while this board is open and in view (AppStats.fresh!). %>
+<%= tag.div hidden: true, data: { controller: "stats", stats_url_value: resources_path, stats_every_value: 30_000 } %>
 
 <main class="page board">
   <div class="board__top">
@@ -88,7 +90,7 @@
           <span class="flight__cell flight__backup">
             <%= render "projects/last_backup", backup: %>
           </span>
-          <span class="flight__cell flight__resources">
+          <span class="flight__cell flight__resources" data-resources="<%= project.name %>">
             <%= render "projects/resources", project: %>
           </span>
         </div>
@@ -121,7 +123,7 @@
             </div>
             <div class="flight-card__resources flight__resources">
               <span class="mono flight-card__label">RESOURCES</span>
-              <%= render "projects/resources", project: %>
+              <div data-resources="<%= project.name %>"><%= render "projects/resources", project: %></div>
             </div>
           </div>
         </article>

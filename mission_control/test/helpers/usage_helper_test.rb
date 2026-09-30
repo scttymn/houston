@@ -42,5 +42,6 @@ class UsageHelperTest < ActionView::TestCase
 
   test "cores in words" do
     assert_equal [ "0 cores", "0.15 cores", "1 core", "2.5 cores" ], [ 0, 0.15, 1, 2.5 ].map { cores_words(it) }
+    assert_equal [ "0.01 cores", "0.003 cores", "<0.001 cores" ], [ 0.01, 0.003, 0.0004 ].map { cores_words(it) }, "a running app never reads as none"
   end
 end

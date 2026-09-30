@@ -1,8 +1,11 @@
 require "open3"
 
 # Each app's CPU, memory and disk right now, from Docker, for the flight
-# board (docs/plans/app-stats.md). AppStatsJob samples every 30 seconds and
-# keeps the readings in the cache; pages only read them, never Docker.
+# board (docs/plans/app-stats.md). Read only while someone's looking: an open
+# board asks every 30 seconds (ResourcesController), and the API when asked,
+# through fresh!, which reads Docker when the last reading is over FRESH_FOR
+# old. With no one looking, nothing reads Docker. Readings are kept in the
+# cache, so a page that renders shows the last one.
 #
 # An app's containers are Houston's own names: its web containers
 # <project>-web-<sha>, its accessories <project>-<service>[-g<n>], and its
@@ -15,6 +18,8 @@ module AppStats
   STALE_AFTER = 2.minutes
   DISK_EVERY = 5.minutes
   TIMEOUT = 20
+  FRESH_FOR = 25.seconds
+  SAMPLING = Mutex.new
 
   Reading = Data.define(:cpu_cores, :cpu_limit, :memory_bytes, :memory_limit, :disk_bytes, :sampled_at, :host) do
     def stale? = sampled_at < STALE_AFTER.ago
@@ -49,8 +54,22 @@ module AppStats
                 host: kept["host"])
   end
 
-  # Reads Docker and keeps a reading per project; the board refreshes when
-  # what it shows changed. Docker failing keeps the last readings.
+  # Reads Docker when the last reading is over FRESH_FOR old: one read at a
+  # time, so boards open together share it (one that asks while another
+  # reads gets the reading there is).
+  def self.fresh!
+    kept = Rails.cache.read(CACHE_KEY)
+    return if kept && Time.zone.parse(kept["sampled_at"]) > FRESH_FOR.ago
+    return unless SAMPLING.try_lock
+    begin
+      sample!
+    ensure
+      SAMPLING.unlock
+    end
+  end
+
+  # Reads Docker and keeps a reading per project. Docker failing keeps the
+  # last readings.
   def self.sample!(projects = Project.all.to_a)
     kept = Rails.cache.read(CACHE_KEY) || {}
     containers = read_containers or return
@@ -80,9 +99,6 @@ module AppStats
     end
     Rails.cache.write(CACHE_KEY, { "sampled_at" => Time.current.iso8601, "projects" => rows, "disk" => disk,
                                    "disk_sampled_at" => disk_at&.iso8601, "host" => host })
-    # The board redraws when what it shows changed: an app's numbers, or what
-    # a share is of.
-    FlightBoard.refresh! if shown(rows) != shown(kept["projects"] || {}) || host != (kept["host"] || {})
   end
 
   def self.app_container?(project, name)
@@ -93,14 +109,6 @@ module AppStats
 
   def self.app_volume?(project, name) = name.match?(/\A#{Regexp.escape(project.name)}(\.g\d+)?_./)
   private_class_method :app_volume?
-
-  # What the board shows, rounded as it shows it: a refresh only when that changes.
-  def self.shown(rows)
-    rows.transform_values do |r|
-      [ (r["cpu_cores"] * 100).round, r["cpu_limit"], (r["memory_bytes"] / 1.megabyte).round, r["memory_limit"], (r["disk_bytes"] / 1.megabyte).round ]
-    end
-  end
-  private_class_method :shown
 
   # Running containers: name, CPU (cores), memory used, and their limits
   # (0 when none). nil when Docker can't say.

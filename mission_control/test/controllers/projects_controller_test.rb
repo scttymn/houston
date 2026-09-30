@@ -329,6 +329,10 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
       assert_select ".usage--disk .usage__amount", "2.86 MB"
     end
     assert_select "[data-project=idle] .flight__resources", /—/
+    # The board asks for them again every 30 seconds while it's open.
+    assert_select "div[hidden][data-controller=stats][data-stats-url-value='#{resources_path}'][data-stats-every-value='30000']"
+    assert_select ".flight__resources[data-resources=equip]"
+    assert_select ".flight-card__resources [data-resources=equip]"
     assert_select "[data-project=idle] .flight__resources .usage", 0
 
     travel 3.minutes

@@ -162,12 +162,19 @@ class AppStatsTest < ActiveSupport::TestCase
     Rails.logger = old if old
   end
 
-  test "the board refreshes when the numbers change" do
-    count = ->(&block) { capture_turbo_stream_broadcasts(FlightBoard::STREAM, &block).count { |s| s["action"] == "refresh" } }
-    assert_equal 1, count.call { use_fake_docker(docker) { AppStats.sample! } }
-    assert_equal 0, count.call { use_fake_docker(docker) { AppStats.sample! } }, "the same numbers"
-    busier = STATS.sub("300MiB / 1GiB", "600MiB / 1GiB")
-    assert_equal 1, count.call { use_fake_docker(docker(stats: busier)) { AppStats.sample! } }
-    assert_equal 1, count.call { use_fake_docker(docker(stats: busier, info: "16 #{16 * GIB}")) { AppStats.sample! } }, "the host changed: every share did"
+  # Read only while someone's looking: fresh! reads Docker when the last
+  # reading is over FRESH_FOR old, one read at a time.
+  test "fresh reads Docker only when the reading is old" do
+    reads = ->(&block) { use_fake_docker(docker) { |fake| block.call; fake.calls.count { |c| c.args.first == "stats" } } }
+    assert_equal 1, reads.call { AppStats.fresh! }, "nothing read yet"
+    travel 20.seconds
+    assert_equal 0, reads.call { AppStats.fresh! }, "within 25 seconds: the reading there is"
+    travel 10.seconds
+    assert_equal 1, reads.call { AppStats.fresh! }
+    travel 30.seconds
+    AppStats::SAMPLING.lock
+    assert_equal 0, reads.call { AppStats.fresh! }, "another is reading: it doesn't wait for it"
+  ensure
+    AppStats::SAMPLING.unlock if AppStats::SAMPLING.owned?
   end
 end
