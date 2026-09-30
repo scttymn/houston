@@ -27,3 +27,28 @@ SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND (status = 'go' OR 
 -- name: CreateDeploy :one
 INSERT INTO deploys (project_id, number, kind, status, sha, ref, generation, token_digest, heartbeat_at, sync_payload)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *;
+
+-- name: DeployInFlight :one
+SELECT * FROM deploys WHERE project_id = ? AND status = 'in_flight';
+
+-- name: AbandonDeploy :exec
+UPDATE deploys SET status = 'no_go', finished_at = @now, error = @error, updated_at = @now WHERE id = @id;
+
+-- name: NextDeployNumber :one
+SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM deploys WHERE project_id = ?;
+
+-- name: SaveProgress :one
+UPDATE deploys SET step = ?, error = ?, proposed_name = ?, status = ?, finished_at = ?, heartbeat_at = ?, updated_at = ?
+WHERE id = ? RETURNING *;
+
+-- name: LogSize :one
+-- In bytes, without reading a log that can be megabytes.
+SELECT CAST(length(CAST(log AS BLOB)) AS INTEGER) AS log_size FROM deploys WHERE id = ?;
+
+-- name: AppendLog :exec
+UPDATE deploys SET log = log || ? WHERE id = ?;
+
+-- name: FirstGo :one
+-- Whether nothing else of the project's has served: no other GO, no other
+-- switched restore.
+SELECT NOT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND id != ? AND (status = 'go' OR switched_at IS NOT NULL)) AS is_first;

@@ -101,6 +101,17 @@ func TestForwarded(t *testing.T) {
 		}
 	}
 
+	// With no tunnel named, no one is trusted: not the private networks.
+	none := newApp(t)
+	nobody := none.Router()
+	nobody.Handle("GET /who", func(w http.ResponseWriter, r *http.Request) error {
+		fmt.Fprint(w, web.ClientIP(r))
+		return nil
+	})
+	if got := request(nobody.Handler(), "GET", "admin.svnmns.com", "/who", "172.18.0.3", tunnel).Body.String(); got != "172.18.0.3" {
+		t.Errorf("no tunnel named: %q", got)
+	}
+
 	// A host named in a header doesn't move a request off hooks.<base>.
 	h := a.Handler()
 	for _, header := range []http.Header{{"X-Forwarded-Host": {"admin.svnmns.com"}}, {"Forwarded": {"host=admin.svnmns.com"}}} {

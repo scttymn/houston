@@ -70,10 +70,12 @@ func (a *App) Router() *web.Router {
 	rt.Handle("GET /ping", a.ping)
 
 	// The runner API: houston deploy on the server, and the runners.
-	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools}
+	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live}
 	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
 		s.Handle("POST /projects/sync", runner.Sync)
 		s.Handle("GET /projects/{name}/secrets/{key}", runner.Secret)
+		s.Handle("POST /projects/{name}/deploys", runner.StartDeploy)
+		s.Handle("PATCH /deploys/{id}", runner.Report)
 	})
 
 	homePage := home.Controller{DB: a.DB}

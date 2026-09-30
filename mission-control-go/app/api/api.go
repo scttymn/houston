@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/live"
 
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
@@ -21,6 +22,8 @@ type Controller struct {
 	Docker   docker.Runner
 	// Tools is HOUSTON_TOOLS_IMAGE, for making volumes' directories.
 	Tools string
+	// Live tells open pages what changed.
+	Live *live.Hub
 }
 
 func (c Controller) placement() volumes.Placement {

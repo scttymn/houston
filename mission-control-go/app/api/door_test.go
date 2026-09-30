@@ -100,6 +100,14 @@ func TestDoor(t *testing.T) {
 	if w := call(h, bearer(runnerToken), `{}`); w.Code != 409 || errorOf(t, w) != "finish setup in Mission Control first" {
 		t.Errorf("before setup: %d %q", w.Code, w.Body.String())
 	}
+	// Setup begun (a base domain), Cloudflare not connected yet: still 409.
+	if _, err := d.Write.Exec(`INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`); err != nil {
+		t.Fatal(err)
+	}
+	if w := call(h, bearer(runnerToken), `{}`); w.Code != 409 {
+		t.Errorf("mid-setup: %d %q", w.Code, w.Body.String())
+	}
+	d.Write.Exec(`DELETE FROM installations`)
 	connected(t, d)
 	if w := call(h, bearer(runnerToken), `{"a":1}`); w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"a":1}` {
 		t.Errorf("the runner: %d %q", w.Code, w.Body.String())

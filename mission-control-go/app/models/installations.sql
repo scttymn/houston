@@ -8,3 +8,8 @@ SELECT cloudflare_connected_at IS NOT NULL AS connected FROM installations WHERE
 
 -- name: CurrentInstallation :one
 SELECT * FROM installations WHERE id = 1;
+
+-- name: RegistryCleaning :one
+-- The registry's garbage collection holds this lock while it runs; one
+-- older than @since was left by a Mission Control that stopped.
+SELECT EXISTS (SELECT 1 FROM installations WHERE registry_cleanup_since >= @since) AS cleaning;

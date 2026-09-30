@@ -7,6 +7,7 @@ package models
 
 import (
 	"context"
+	"database/sql"
 )
 
 const currentInstallation = `-- name: CurrentInstallation :one
@@ -60,4 +61,17 @@ func (q *Queries) InstallationConnected(ctx context.Context) (bool, error) {
 	var connected bool
 	err := row.Scan(&connected)
 	return connected, err
+}
+
+const registryCleaning = `-- name: RegistryCleaning :one
+SELECT EXISTS (SELECT 1 FROM installations WHERE registry_cleanup_since >= ?1) AS cleaning
+`
+
+// The registry's garbage collection holds this lock while it runs; one
+// older than @since was left by a Mission Control that stopped.
+func (q *Queries) RegistryCleaning(ctx context.Context, since sql.NullTime) (bool, error) {
+	row := q.db.QueryRowContext(ctx, registryCleaning, since)
+	var cleaning bool
+	err := row.Scan(&cleaning)
+	return cleaning, err
 }

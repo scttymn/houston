@@ -11,6 +11,35 @@ import (
 	"time"
 )
 
+const abandonDeploy = `-- name: AbandonDeploy :exec
+UPDATE deploys SET status = 'no_go', finished_at = ?1, error = ?2, updated_at = ?1 WHERE id = ?3
+`
+
+type AbandonDeployParams struct {
+	Now   sql.NullTime
+	Error string
+	ID    int64
+}
+
+func (q *Queries) AbandonDeploy(ctx context.Context, arg AbandonDeployParams) error {
+	_, err := q.db.ExecContext(ctx, abandonDeploy, arg.Now, arg.Error, arg.ID)
+	return err
+}
+
+const appendLog = `-- name: AppendLog :exec
+UPDATE deploys SET log = log || ? WHERE id = ?
+`
+
+type AppendLogParams struct {
+	Log string
+	ID  int64
+}
+
+func (q *Queries) AppendLog(ctx context.Context, arg AppendLogParams) error {
+	_, err := q.db.ExecContext(ctx, appendLog, arg.Log, arg.ID)
+	return err
+}
+
 const createDeploy = `-- name: CreateDeploy :one
 INSERT INTO deploys (project_id, number, kind, status, sha, ref, generation, token_digest, heartbeat_at, sync_payload)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
@@ -106,6 +135,59 @@ func (q *Queries) DeployByID(ctx context.Context, id int64) (Deploy, error) {
 	return i, err
 }
 
+const deployInFlight = `-- name: DeployInFlight :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? AND status = 'in_flight'
+`
+
+func (q *Queries) DeployInFlight(ctx context.Context, projectID int64) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, deployInFlight, projectID)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const firstGo = `-- name: FirstGo :one
+SELECT NOT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND id != ? AND (status = 'go' OR switched_at IS NOT NULL)) AS is_first
+`
+
+type FirstGoParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+// Whether nothing else of the project's has served: no other GO, no other
+// switched restore.
+func (q *Queries) FirstGo(ctx context.Context, arg FirstGoParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, firstGo, arg.ProjectID, arg.ID)
+	var is_first bool
+	err := row.Scan(&is_first)
+	return is_first, err
+}
+
 const keepRestoreSync = `-- name: KeepRestoreSync :execrows
 UPDATE deploys SET sync_payload = ? WHERE id = ? AND status = 'in_flight'
 `
@@ -124,6 +206,18 @@ func (q *Queries) KeepRestoreSync(ctx context.Context, arg KeepRestoreSyncParams
 	return result.RowsAffected()
 }
 
+const logSize = `-- name: LogSize :one
+SELECT CAST(length(CAST(log AS BLOB)) AS INTEGER) AS log_size FROM deploys WHERE id = ?
+`
+
+// In bytes, without reading a log that can be megabytes.
+func (q *Queries) LogSize(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, logSize, id)
+	var log_size int64
+	err := row.Scan(&log_size)
+	return log_size, err
+}
+
 const markSwitched = `-- name: MarkSwitched :exec
 UPDATE deploys SET switched_at = ? WHERE id = ? AND switched_at IS NULL
 `
@@ -136,6 +230,17 @@ type MarkSwitchedParams struct {
 func (q *Queries) MarkSwitched(ctx context.Context, arg MarkSwitchedParams) error {
 	_, err := q.db.ExecContext(ctx, markSwitched, arg.SwitchedAt, arg.ID)
 	return err
+}
+
+const nextDeployNumber = `-- name: NextDeployNumber :one
+SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM deploys WHERE project_id = ?
+`
+
+func (q *Queries) NextDeployNumber(ctx context.Context, projectID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, nextDeployNumber, projectID)
+	var next int64
+	err := row.Scan(&next)
+	return next, err
 }
 
 const projectHasServed = `-- name: ProjectHasServed :one
@@ -208,6 +313,62 @@ type RestoreServingParams struct {
 // one whose compose.yml was kept, then the newer.
 func (q *Queries) RestoreServing(ctx context.Context, arg RestoreServingParams) (Deploy, error) {
 	row := q.db.QueryRowContext(ctx, restoreServing, arg.ProjectID, arg.Generation, arg.Sha)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const saveProgress = `-- name: SaveProgress :one
+UPDATE deploys SET step = ?, error = ?, proposed_name = ?, status = ?, finished_at = ?, heartbeat_at = ?, updated_at = ?
+WHERE id = ? RETURNING id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+`
+
+type SaveProgressParams struct {
+	Step         string
+	Error        string
+	ProposedName string
+	Status       string
+	FinishedAt   sql.NullTime
+	HeartbeatAt  time.Time
+	UpdatedAt    time.Time
+	ID           int64
+}
+
+func (q *Queries) SaveProgress(ctx context.Context, arg SaveProgressParams) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, saveProgress,
+		arg.Step,
+		arg.Error,
+		arg.ProposedName,
+		arg.Status,
+		arg.FinishedAt,
+		arg.HeartbeatAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	var i Deploy
 	err := row.Scan(
 		&i.ID,
