@@ -29,6 +29,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
 	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
+	"github.com/scttymn/houston/mission-control-go/app/settings"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -120,7 +121,7 @@ func (a *App) Router() *web.Router {
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
 		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git,
 		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Updater: a.Updater, FollowUpdate: a.ServerUpdate, Port: a.Port, Release: a.Release, Stats: a.Stats,
-		CloudflareSettings: a.CloudflareSettings}
+		CloudflareSettings: a.CloudflareSettings, SystemStatus: a.SystemStatus}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -208,6 +209,9 @@ func (a *App) Router() *web.Router {
 		Refs: a.Refs, Git: a.Git, Backup: a.Backup,
 		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare},
 		Snapshots:   a.Snapshots, Docker: a.DockerCLI, Cloudflare: a.Cloudflare, Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Log: a.Log}
+	settingsPages := settings.Controller{DB: a.DB, Signer: a.Signer, Live: a.Live, Board: projects.FlightBoard, Version: a.Version, Docker: a.DockerCLI,
+		Status: a.SystemStatus, Cloudflare: a.CloudflareSettings, Port: a.Port, Release: a.Release, Updater: a.Updater, Follow: a.ServerUpdate,
+		MissionControl: a.Services.MissionControl}
 	addProject := links.Controller{DB: a.DB, Signer: a.Signer, Git: a.Git, Live: a.Live, Refs: a.Refs, Board: projects.FlightBoard}
 	deployPages := deploys.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
@@ -238,6 +242,26 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}/deletion/new", pages.NewDeletion)
 		s.Handle("POST /projects/{name}/deletion", pages.CreateDeletion)
 		s.Handle("GET /deletions/{id}", pages.ShowDeletion)
+		s.Handle("GET /settings", settingsPages.Show)
+		s.Handle("GET /settings/general", settings.General)
+		s.Handle("PATCH /settings/general", settingsPages.SetTimeZone)
+		s.Handle("GET /settings/tokens", settings.Tokens)
+		s.Handle("POST /settings/tokens", settingsPages.NewToken)
+		s.Handle("DELETE /settings/tokens/{id}", settingsPages.RevokeToken)
+		s.Handle("GET /settings/cloudflare", settingsPages.CloudflareLive)
+		s.Handle("PATCH /settings/cloudflare/token", settingsPages.CloudflareToken)
+		s.Handle("POST /settings/cloudflare/repair", settingsPages.RepairCloudflare)
+		s.Handle("PATCH /settings/port", settingsPages.SetPort)
+		s.Handle("POST /settings/updates/check", settingsPages.CheckRelease)
+		s.Handle("POST /settings/updates", settingsPages.StartUpdate)
+		s.Handle("GET /settings/updates/{id}", settingsPages.ShowUpdate)
+		s.Handle("GET /settings/storage", settings.Storage)
+		s.Handle("GET /settings/storage/new", settingsPages.NewStorage)
+		s.Handle("POST /settings/storage", settingsPages.CreateStorage)
+		s.Handle("GET /settings/storage/{name}", settingsPages.ShowStorage)
+		s.Handle("GET /settings/storage/{name}/password.txt", settingsPages.StoragePassword)
+		s.Handle("POST /settings/storage/{name}/acknowledge", settingsPages.AcknowledgeStorage)
+		s.Handle("POST /settings/storage/{name}/default", settingsPages.MakeDefault)
 		s.Handle("GET /link", addProject.New)
 		s.Handle("POST /link/access", addProject.Access)
 		s.Handle("POST /link/read", addProject.Read)

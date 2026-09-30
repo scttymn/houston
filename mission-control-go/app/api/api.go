@@ -20,6 +20,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/port"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/app/services/volumes"
 )
 
@@ -72,8 +73,10 @@ type Controller struct {
 	Release release.Checker
 	// Stats are the apps' CPU, memory and disk, read while someone looks.
 	Stats *appstats.Stats
-	// CloudflareSettings reads, re-tokens and repairs Cloudflare.
+	// CloudflareSettings reads, re-tokens and repairs Cloudflare;
+	// SystemStatus is the top bar's (a new token asks the tunnel again).
 	CloudflareSettings *cfsettings.Settings
+	SystemStatus       *systemstatus.Status
 }
 
 func (c Controller) placement() volumes.Placement {

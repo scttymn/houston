@@ -28,6 +28,75 @@ func (q *Queries) APITokenByDigest(ctx context.Context, tokenDigest string) (Api
 	return i, err
 }
 
+const allTokens = `-- name: AllTokens :many
+SELECT id, name, token_digest, last_used_at, created_at, updated_at FROM api_tokens ORDER BY name
+`
+
+func (q *Queries) AllTokens(ctx context.Context) ([]ApiToken, error) {
+	rows, err := q.db.QueryContext(ctx, allTokens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiToken{}
+	for rows.Next() {
+		var i ApiToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.TokenDigest,
+			&i.LastUsedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const createToken = `-- name: CreateToken :one
+INSERT INTO api_tokens (name, token_digest) VALUES (?, ?) RETURNING id, name, token_digest, last_used_at, created_at, updated_at
+`
+
+type CreateTokenParams struct {
+	Name        string
+	TokenDigest string
+}
+
+func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (ApiToken, error) {
+	row := q.db.QueryRowContext(ctx, createToken, arg.Name, arg.TokenDigest)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.TokenDigest,
+		&i.LastUsedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteToken = `-- name: DeleteToken :execrows
+DELETE FROM api_tokens WHERE id = ?
+`
+
+func (q *Queries) DeleteToken(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteToken, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const markTokenUsed = `-- name: MarkTokenUsed :exec
 UPDATE api_tokens SET last_used_at = ?1 WHERE id = ?2 AND (last_used_at IS NULL OR last_used_at < ?3)
 `
@@ -42,4 +111,15 @@ type MarkTokenUsedParams struct {
 func (q *Queries) MarkTokenUsed(ctx context.Context, arg MarkTokenUsedParams) error {
 	_, err := q.db.ExecContext(ctx, markTokenUsed, arg.Now, arg.ID, arg.Before)
 	return err
+}
+
+const tokenNameTaken = `-- name: TokenNameTaken :one
+SELECT EXISTS (SELECT 1 FROM api_tokens WHERE name = ?) AS taken
+`
+
+func (q *Queries) TokenNameTaken(ctx context.Context, name string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, tokenNameTaken, name)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
 }

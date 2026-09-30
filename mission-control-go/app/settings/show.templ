@@ -1,0 +1,373 @@
+// Package settings is Settings (Rails' Settings controllers): one page of
+// sections, adding storage, a server update's page.
+package settings
+
+import (
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/projects"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
+	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
+)
+
+// Show is what the Settings page shows.
+type Show struct {
+	Page          layout.Page
+	Inst          models.Installation
+	Version       string
+	Newer         string
+	Notice, Alert string
+	Tokens        []models.ApiToken
+	NewToken      string // a token just made: shown this once
+	CreatedName   string
+	TokenError    string
+	Tunnel        systemstatus.Tunnel
+	Cloudflare    *cfsettings.View // the last complete answer, shown at once
+	TokenChecks   []cfsettings.Check
+	Repair        []cfsettings.Result
+	Updates       []models.ServerUpdate
+	Address       string // what port 3000 is bound to ("": unknown)
+	Locations     []location
+	ZoneError     string
+	Now           time.Time
+	// MissionControl is the tunnel's address for it.
+	MissionControl string
+}
+
+type location struct {
+	L         models.StorageLocation
+	UsedBy    int
+	LastWrite *time.Time
+}
+
+var sections = [][2]string{{"API tokens", "tokens"}, {"Cloudflare", "cloudflare"}, {"Releases", "releases"}, {"Security", "security"}, {"Storage", "storage"}, {"Time zone", "time-zone"}}
+
+// nav is the title and the menu: on a desktop a column on the left; on
+// tablets and phones pinned at the top. base is the page's path when this
+// isn't it.
+templ nav(base string) {
+	<div class="settings__side">
+		<h1 class="disp settings__title">Settings</h1>
+		<nav class="section-nav" aria-label="Settings sections" data-controller="section-nav">
+			for _, item := range sections {
+				<a data-action="section-nav#choose" href={ templ.SafeURL(base + "#" + item[1]) }>{ item[0] }</a>
+			}
+		</nav>
+	</div>
+}
+
+templ ShowPage(s Show) {
+	{{ base := s.Inst.BaseDomain }}
+	@layout.Layout(s.Page) {
+		<main class="settings">
+			@nav("")
+			<div class="settings__body">
+				if s.Notice != "" {
+					<div class="notice notice--go"><span class="mono">OK</span><span class="notice__text">{ s.Notice }</span></div>
+				}
+				if s.Alert != "" {
+					<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ s.Alert }</span></div>
+				}
+				@tokens(s)
+				@cloudflare(s, base)
+				@releases(s)
+				@security(s, base)
+				@storageSection(s)
+				<section class="settings-section" id="time-zone">
+					<div class="panel__head"><h2 class="disp panel__title">Time zone</h2></div>
+					<p class="panel__row">Backup schedules run in it: <span class="mono">daily 03:00</span> means 03:00 here.</p>
+					<form class="panel__row inline-form" action="/settings/general" method="post">
+						<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+						<select class="mono" aria-label="Time zone" name="time_zone" id="time_zone">
+							for _, zone := range Zones {
+								<option value={ zone } selected?={ zone == s.Inst.TimeZone }>{ zone }</option>
+							}
+						</select>
+						<input type="submit" name="commit" value="Save" class="button button--small"/>
+					</form>
+					if s.ZoneError != "" {
+						<p class="panel__row"><span class="field__error">{ s.ZoneError }</span></p>
+					}
+				</section>
+			</div>
+		</main>
+	}
+}
+
+templ tokens(s Show) {
+	<section class="settings-section" id="tokens">
+		<div class="panel__head"><h2 class="disp panel__title">API tokens</h2></div>
+		if s.NewToken != "" {
+			<div class="new-token-box" data-controller="clipboard">
+				<div class="panel__head"><h2 class="disp panel__title">Token "{ s.CreatedName }"</h2><span class="mono panel__meta eyebrow eyebrow--signal">SHOWN ONCE</span></div>
+				<p class="panel__row">Copy it now: Houston shows it only this once.</p>
+				<pre class="mono deploy-key new-token" data-clipboard-target="source">{ s.NewToken }</pre>
+				<p class="panel__row">
+					<button type="button" class="button button--small" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+					<span class="mono">{ "houston login https://admin." + s.Inst.BaseDomain }</span>, then paste it. Agents can set <span class="mono">HOUSTON_SERVER</span> and <span class="mono">HOUSTON_API_TOKEN</span> instead.
+				</p>
+			</div>
+		}
+		<p class="panel__row panel__row--muted">For the houston CLI with <span class="mono">--server</span>, and for agents. A token can see and change projects and write secrets; it can never read a secret's value.</p>
+		if len(s.Tokens) == 0 {
+			<p class="panel__row panel__row--muted">No tokens yet.</p>
+		}
+		<ul class="rows">
+			for _, t := range s.Tokens {
+				<li data-token={ t.Name } class="token-row">
+					<span class="mono">{ t.Name }</span>
+					<span>{ "created " + t.CreatedAt.In(s.Now.Location()).Format("Jan 02") }</span>
+					<span>
+						if t.LastUsedAt.Valid {
+							{ "last used " + projects.Ago(t.LastUsedAt.Time, s.Now) + " ago" }
+						} else {
+							never used
+						}
+					</span>
+					<form class="button_to" method="post" action={ templ.SafeURL("/settings/tokens/" + strconv.FormatInt(t.ID, 10)) }><input type="hidden" name="_method" value="delete" autocomplete="off"/><button class="button button--small" type="submit">Revoke</button></form>
+				</li>
+			}
+		</ul>
+		<form class="panel__row inline-form token-new" data-turbo="false" action="/settings/tokens" method="post">
+			<input placeholder="Name, e.g. laptop or ci-agent" class="mono" maxlength="50" aria-label="Token name" type="text" name="name" id="name"/>
+			<input type="submit" name="commit" value="New CLI token" class="button button--primary button--small"/>
+			if s.TokenError != "" {
+				<span class="field__error">{ s.TokenError }</span>
+			}
+		</form>
+	</section>
+}
+
+templ cloudflare(s Show, base string) {
+	<section class="settings-section" id="cloudflare">
+		<div class="panel__head"><h2 class="disp panel__title">Cloudflare</h2></div>
+		<div class="settings-facts">
+			<div>
+				<span class="mono facts-strip__label">BASE DOMAIN</span>
+				<span>{ orWords(base, "not set yet") }</span>
+			</div>
+			<div>
+				<span class="mono facts-strip__label">DNS</span>
+				<span>
+					if s.Inst.DnsMode == "per_host" {
+						Host by host
+					} else {
+						{ "Wildcard *." + base }
+					}
+				</span>
+			</div>
+			<div>
+				<span class="mono facts-strip__label">TUNNEL</span>
+				<span>
+					@goWord(s.Tunnel.Go())
+					if s.Tunnel.Connections > 0 {
+						{ " " }<span class="mono muted">{ "· " + strconv.Itoa(s.Tunnel.Connections) + " CONN" }</span>
+					}
+				</span>
+			</div>
+		</div>
+		if s.Inst.TunnelID != "" {
+			if s.Cloudflare != nil {
+				@Live(*s.Cloudflare, s.Now, s.MissionControl)
+			} else {
+				<turbo-frame id="cloudflare-live" src="/settings/cloudflare" loading="lazy">
+					<p class="panel__row panel__row--muted">Asking Cloudflare for the tunnel, its routes and Houston's records…</p>
+				</turbo-frame>
+			}
+			<div class="cf-row cf-token-row">
+				<div class="cf-row__text">
+					<h3 class="cf-row__title">API token</h3>
+					<p>Houston's Cloudflare API token needs Account · Cloudflare Tunnel · Edit, and Zone · DNS · Edit on the zones Houston serves. A new one is checked before it's saved, and the old one stays in use until the new one passes.</p>
+					<details class="cf-token-help">
+						<summary>More</summary>
+						<ul>
+							<li><strong>Account · Cloudflare Tunnel · Edit</strong>: to run this server's tunnel and set its routes (which names go to Mission Control, which to your apps).</li>
+							<li><strong>Zone · DNS · Edit</strong>: to point names at the tunnel. It's needed on the zone of your base domain, <span class="mono">{ base }</span>, and on the zone of every custom domain your projects use. <strong>All zones</strong> is simplest, and covers domains you add later.</li>
+							<li>Houston changes only DNS records it made, which it comments <span class="mono">managed-by:houston</span>, and never any other record.</li>
+						</ul>
+						<p>Make one in Cloudflare under <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">My Profile › API Tokens ↗</a>: Create Token, then Create Custom Token, with the permissions above.</p>
+					</details>
+					<form class="inline-form cf-token" data-turbo="false" action="/settings/cloudflare/token" method="post">
+						<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+						<input autocomplete="off" class="mono" placeholder="New API token" aria-label="New API token" type="password" name="api_token" id="api_token"/>
+						<button name="button" type="submit" class="button button--small">Check and replace</button>
+					</form>
+					if s.TokenChecks != nil {
+						for _, c := range s.TokenChecks {
+							<p class="check">
+								if c.OK {
+									<span class="mono check__state check__state--go">GO</span>
+								} else {
+									<span class="mono check__state check__state--nogo">NO-GO</span>
+								}
+								<span>{ c.Label }</span>
+							</p>
+						}
+						<p class="muted">The old token is still in use.</p>
+					}
+				</div>
+			</div>
+			<div class="cf-row cf-repair-row">
+				<div class="cf-row__text">
+					<h3 class="cf-row__title">Repair</h3>
+					<p>If someone changed the tunnel or Houston's DNS records in Cloudflare, this puts Houston's routes and records back. Anything else is left alone.</p>
+					if s.Repair != nil {
+						<table class="cf-table cf-repair">
+							<thead><tr><th>Item</th><th>Result</th><th>Details</th></tr></thead>
+							<tbody>
+								for _, r := range s.Repair {
+									<tr><td class="mono" data-label="Item">{ r.Item }</td><td data-label="Result"><span class={ "mono state state--" + repairState(r.State) }>{ r.State }</span></td><td class="muted" data-label="Details">{ deref(r.Reason) }</td></tr>
+								}
+							</tbody>
+						</table>
+					}
+				</div>
+				<form class="cf-row__action" data-turbo="false" method="post" action="/settings/cloudflare/repair"><button class="button button--small" type="submit">Repair routes and records</button></form>
+			</div>
+		}
+	</section>
+}
+
+templ goWord(ok bool) {
+	if ok {
+		<span class="status__go">GO</span>
+	} else {
+		<span class="status__nogo">NO-GO</span>
+	}
+}
+
+templ releases(s Show) {
+	{{ var running *models.ServerUpdate }}
+	if len(s.Updates) > 0 && s.Updates[0].Status == "running" {
+		{{ running = &s.Updates[0] }}
+	}
+	<section class="settings-section" id="releases">
+		<div class="panel__head">
+			<h2 class="disp panel__title">Releases</h2>
+			<span class="panel__meta">
+				<span class="mono eyebrow">{ strings.ToUpper(s.Version) }</span>
+				<form data-turbo-action="replace" class="button_to" method="post" action="/settings/updates/check"><button class="button button--small" type="submit">Check for updates</button></form>
+				if s.Newer != "" && running == nil {
+					<form action="/settings/updates" method="post">
+						<input type="hidden" name="version" value={ s.Newer } autocomplete="off"/>
+						<button type="submit" class="button button--primary button--small" data-turbo-confirm={ "Update this server to " + s.Newer + "? Mission Control restarts on the way, and deploys and backups wait until it's done. If " + s.Newer + " doesn't install, the server goes back to " + s.Version + "." }>{ "Update to " + s.Newer }</button>
+					</form>
+				}
+			</span>
+		</div>
+		if running != nil {
+			<p class="panel__row" data-controller="refresh" data-refresh-every-value="10000">{ "Updating to " + running.ToVersion + stepWords(running.Step) + ". Mission Control restarts on the way; deploys and backups wait." }</p>
+		} else if s.Newer != "" {
+			<p class="panel__row"><span>{ s.Newer + " is out" + checkedWords(s) + ". " }<a target="_blank" rel="noopener noreferrer" href={ templ.SafeURL(s.Inst.LatestReleaseUrl) }>Release notes ↗</a></span></p>
+		} else if s.Inst.LatestRelease != "" {
+			<p class="panel__row">{ s.Inst.LatestRelease + " is the latest release" + checkedWords(s) + "." }</p>
+		}
+		if len(s.Updates) == 0 {
+			<p class="panel__row panel__row--muted">No updates from Mission Control yet. When a newer Houston is out, update to it here; its log shows here too. <span class="mono">houston update</span> does the same from anywhere.</p>
+		}
+		for _, u := range s.Updates {
+			<div class={ "history__row", templ.KV("history__row--no-go", u.Status == "rolled_back" || u.Status == "no_go") }>
+				<span class="mono muted">{ "#" + strconv.FormatInt(u.ID, 10) }</span>
+				<span class="mono">{ u.ToVersion }</span>
+				<span class="history__what">
+					<span>from <span class="mono">{ u.FromVersion }</span></span>
+					switch u.Status {
+						case "rolled_back":
+							<small class="history__error">{ "failed; went back to " + u.FromVersion }</small>
+						case "no_go":
+							<small class="history__error">failed</small>
+						default:
+							<small>{ projects.Ago(u.StartedAt, s.Now) + " ago · " + projects.ShortTime(u.StartedAt.In(s.Now.Location())) }</small>
+					}
+				</span>
+				switch u.Status {
+					case "running":
+						<span class="mono state state--in-flight">UPDATING</span>
+					case "go":
+						@projects.StateChip("go")
+					default:
+						@projects.StateChip("no_go")
+				}
+				<span class="mono muted">{ updateTime(u, s.Now) }</span>
+				<a href={ templ.SafeURL("/settings/updates/" + strconv.FormatInt(u.ID, 10)) }>Log</a>
+			</div>
+		}
+	</section>
+}
+
+templ security(s Show, base string) {
+	<section class="settings-section" id="security">
+		<div class="panel__head"><h2 class="disp panel__title">Security</h2></div>
+		<div class="settings-subsection" id="port">
+			<h3 class="mono eyebrow settings-subhead">PORT 3000</h3>
+			<p class="panel__row">
+				switch s.Address {
+					case "":
+						Houston can't tell what port 3000 is bound to right now (it asks Docker).
+					case "127.0.0.1":
+						<span class="mono state state-pill state--go"><span class="state-pill__dot"></span>CLOSED</span>{ " only on this server (127.0.0.1). Reach it with " }<span class="mono">ssh -L 3000:127.0.0.1:3000</span>, then <span class="mono">http://localhost:3000</span>.
+					case "0.0.0.0":
+						<span class="mono state state-pill state--hold"><span class="state-pill__dot"></span>OPEN</span>{ " to your network, over plain HTTP, at " }<span class="mono">{ "http://<server address>:3000" }</span>.
+					default:
+						<span class="mono state state-pill state--hold"><span class="state-pill__dot"></span>OPEN</span>{ " on " }<span class="mono">{ s.Address }</span>, over plain HTTP (the installer's HOUSTON_BIND).
+				}
+			</p>
+			if s.Address != "" {
+				<form class="panel__row inline-form" action="/settings/port" method="post">
+					<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+					if s.Address == "127.0.0.1" {
+						<input type="hidden" name="open" id="open" value="1" autocomplete="off"/>
+						<button name="button" type="submit" class="button button--small">Open port 3000 to the network</button>
+					} else {
+						<input type="hidden" name="open" id="open" value="0" autocomplete="off"/>
+						<button name="button" type="submit" class="button button--small">Close port 3000</button>
+					}
+				</form>
+			}
+			<p class="panel__row panel__row--muted">Mission Control is always at <span class="mono">{ "https://admin." + base }</span>. Port 3000 is for first-run setup and your own network. On a server with a public address, close it: Docker publishes it straight past the server's firewall. Changing it restarts Mission Control for a few seconds. The installer keeps your choice.</p>
+		</div>
+	</section>
+}
+
+templ storageSection(s Show) {
+	<section class="settings-section" id="storage">
+		<div class="panel__head">
+			<h2 class="disp panel__title">Storage locations</h2>
+			<a class="button button--primary button--small" href="/settings/storage/new"><span class="add__long">Add storage location</span><span class="add__short">Add</span></a>
+		</div>
+		<div class="mono storage-head"><span>NAME</span><span>TYPE</span><span>LOCATION</span><span>HOLDS</span><span>USED BY</span><span>LAST WRITE</span><span></span></div>
+		<ul class="rows storage-rows">
+			for _, row := range s.Locations {
+				{{ l := row.L }}
+				<li data-location={ l.Name } class="storage-row">
+					<span class="mono">
+						{ l.Name }
+						if l.IsDefault {
+							<small class="mono badge">DEFAULT</small>
+						}
+					</span>
+					<span class="mono">{ l.Kind }</span>
+					<span class="mono" data-kind={ l.Kind }>{ models.WhereItIs(l) }</span>
+					<span data-label="HOLDS">{ holdsWords(l) }</span>
+					<span data-label="USED BY">{ usedWords(row.UsedBy) }</span>
+					<span data-label="LAST WRITE">{ lastWrite(row.LastWrite, s.Now) }</span>
+					<span>
+						if !l.AcknowledgedAt.Valid {
+							<a href={ templ.SafeURL("/settings/storage/" + l.Name) }>Save its password</a>
+						} else if !l.IsDefault {
+							<form class="button_to" method="post" action={ templ.SafeURL("/settings/storage/" + l.Name + "/default") }><button class="button button--small" type="submit">Make default</button></form>
+						}
+					</span>
+					if l.PruneError != "" {
+						<small class="field__error">{ "Last prune failed: " + l.PruneError }</small>
+					}
+				</li>
+			}
+		</ul>
+		<p class="panel__row panel__row--muted">Where backups go, and where live volumes can live. Each location has its own restic password, shown once when it's added.</p>
+	</section>
+}

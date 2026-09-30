@@ -36,6 +36,8 @@ func (c V1) CloudflareToken(w http.ResponseWriter, r *http.Request) error {
 	status := http.StatusOK
 	if !replaced {
 		status = http.StatusUnprocessableEntity
+	} else if c.SystemStatus != nil {
+		c.SystemStatus.Forget()
 	}
 	return web.JSON(w, status, map[string]any{"replaced": replaced, "checks": checks})
 }
