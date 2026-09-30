@@ -13,6 +13,7 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/test"
 	"github.com/scttymn/houston/mission-control-go/test/fakedocker"
 )
@@ -30,14 +31,14 @@ func New(t testing.TB) *app.App {
 	}
 	t.Cleanup(func() { crypt.Use() })
 	d := test.DB(t)
-	q, err := jobs.New(t.Context(), d, jobs.Options{})
+	q, err := jobs.New(t.Context(), d, jobs.Options{Queues: app.Queues})
 	if err != nil {
 		t.Fatal(err)
 	}
 	signer := sign.Signer{Key: []byte("test-key")}
 	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q,
 		Live: live.New(signer, live.Options{}), Identity: app.Identity("test-secret-key-base"), RunnerToken: RunnerToken, Version: "dev",
-		Docker: &fakedocker.Docker{}, Tools: "houston/mission-control:test",
+		Docker: &fakedocker.Docker{}, DockerCLI: &dockercmdtest.Fake{}, Tools: "houston/mission-control:test", ToolsBin: "/app",
 		Services: dns.Services{MissionControl: "http://mission-control:8080", Apps: "http://kamal-proxy:80"}}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)

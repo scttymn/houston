@@ -88,7 +88,7 @@ func (c Controller) RequestSnapshot(w http.ResponseWriter, r *http.Request) erro
 	}
 	var run models.BackupRun
 	err = c.DB.Tx(ctx, func(tx *db.Tx) (err error) {
-		run, err = models.RequestSnapshot(ctx, tx, c.Backup, project, d, now)
+		run, err = models.RequestSnapshot(ctx, tx, c.Snapshot, project, d, now)
 		return err
 	})
 	var refused models.Refused
@@ -105,8 +105,8 @@ func (c Controller) RequestSnapshot(w http.ResponseWriter, r *http.Request) erro
 	return web.JSON(w, http.StatusAccepted, viewBackup(run, now))
 }
 
-// Snapshot is GET /api/deploys/{id}/snapshot: where it stands.
-func (c Controller) Snapshot(w http.ResponseWriter, r *http.Request) error {
+// ShowSnapshot is GET /api/deploys/{id}/snapshot: where it stands.
+func (c Controller) ShowSnapshot(w http.ResponseWriter, r *http.Request) error {
 	d, err := c.ownDeploy(r, "deploy", nil)
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func (c Controller) RequestRestoreData(w http.ResponseWriter, r *http.Request) e
 	ctx, now := r.Context(), time.Now()
 	var run models.BackupRun
 	err = c.DB.Tx(ctx, func(tx *db.Tx) (err error) {
-		run, err = models.RequestRestoreData(ctx, tx, c.Backup, d, now)
+		run, err = models.RequestRestoreData(ctx, tx, c.Snapshot, d, now)
 		return err
 	})
 	if err != nil {
@@ -151,8 +151,8 @@ func (c Controller) RequestRestoreData(w http.ResponseWriter, r *http.Request) e
 	return web.JSON(w, http.StatusAccepted, viewBackup(run, now))
 }
 
-// RestoreData is GET /api/deploys/{id}/restore_data: where it stands.
-func (c Controller) RestoreData(w http.ResponseWriter, r *http.Request) error {
+// ShowRestoreData is GET /api/deploys/{id}/restore_data: where it stands.
+func (c Controller) ShowRestoreData(w http.ResponseWriter, r *http.Request) error {
 	d, err := c.ownDeploy(r, "restore", isRestore)
 	if err != nil {
 		return err

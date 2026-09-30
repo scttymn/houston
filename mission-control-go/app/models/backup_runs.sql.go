@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+const abandonRun = `-- name: AbandonRun :exec
+UPDATE backup_runs SET status = 'no_go', finished_at = ?1, error = ?2, updated_at = ?1 WHERE id = ?3
+`
+
+type AbandonRunParams struct {
+	Now   sql.NullTime
+	Error string
+	ID    int64
+}
+
+func (q *Queries) AbandonRun(ctx context.Context, arg AbandonRunParams) error {
+	_, err := q.db.ExecContext(ctx, abandonRun, arg.Now, arg.Error, arg.ID)
+	return err
+}
+
 const backupLocationFor = `-- name: BackupLocationFor :one
 SELECT location.id, location.name, location.kind, location.settings, location.credentials, location.restic_password, location.is_default, location.acknowledged_at, location.verified_at, location.pruned_at, location.prune_error, location.created_at, location.updated_at FROM storage_locations location
 WHERE location.acknowledged_at IS NOT NULL AND (location.id = ?1 OR (location.is_default AND NOT EXISTS (
@@ -39,6 +54,104 @@ func (q *Queries) BackupLocationFor(ctx context.Context, chosen int64) (StorageL
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const backupRunByID = `-- name: BackupRunByID :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE id = ?
+`
+
+func (q *Queries) BackupRunByID(ctx context.Context, id int64) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, backupRunByID, id)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const beatRun = `-- name: BeatRun :execrows
+
+UPDATE backup_runs SET heartbeat_at = ?1 WHERE id = ?2 AND status = 'running' AND token_digest = ?3
+`
+
+type BeatRunParams struct {
+	Now         time.Time
+	ID          int64
+	TokenDigest string
+}
+
+// Writes below go through the token: only the job holding it may write,
+// and only while the run is running (one abandoned and taken over stays).
+func (q *Queries) BeatRun(ctx context.Context, arg BeatRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, beatRun, arg.Now, arg.ID, arg.TokenDigest)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const beginRun = `-- name: BeginRun :execrows
+UPDATE backup_runs SET sha = ?1, updated_at = ?2 WHERE id = ?3 AND status = 'running' AND token_digest = ?4
+`
+
+type BeginRunParams struct {
+	Sha         string
+	Now         time.Time
+	ID          int64
+	TokenDigest string
+}
+
+func (q *Queries) BeginRun(ctx context.Context, arg BeginRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, beginRun,
+		arg.Sha,
+		arg.Now,
+		arg.ID,
+		arg.TokenDigest,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const claimRun = `-- name: ClaimRun :execrows
+UPDATE backup_runs SET status = 'running', token_digest = ?1, heartbeat_at = ?2, started_at = ?2, updated_at = ?2
+WHERE id = ?3 AND status = 'queued'
+`
+
+type ClaimRunParams struct {
+	TokenDigest string
+	Now         time.Time
+	ID          int64
+}
+
+func (q *Queries) ClaimRun(ctx context.Context, arg ClaimRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimRun, arg.TokenDigest, arg.Now, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const createBackupRun = `-- name: CreateBackupRun :one
@@ -138,6 +251,61 @@ func (q *Queries) DeploySnapshot(ctx context.Context, arg DeploySnapshotParams) 
 	return i, err
 }
 
+const finishRun = `-- name: FinishRun :execrows
+UPDATE backup_runs SET status = ?1, error = ?2, snapshot_id = ?3, bytes = ?4, found = ?5, log = ?6,
+  finished_at = ?7, updated_at = ?7
+WHERE id = ?8 AND status = 'running' AND token_digest = ?9
+`
+
+type FinishRunParams struct {
+	Status      string
+	Error       string
+	SnapshotID  string
+	Bytes       sql.NullInt64
+	Found       string
+	Log         string
+	Now         sql.NullTime
+	ID          int64
+	TokenDigest string
+}
+
+func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, finishRun,
+		arg.Status,
+		arg.Error,
+		arg.SnapshotID,
+		arg.Bytes,
+		arg.Found,
+		arg.Log,
+		arg.Now,
+		arg.ID,
+		arg.TokenDigest,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const giveUpRun = `-- name: GiveUpRun :execrows
+UPDATE backup_runs SET status = 'no_go', error = ?1, finished_at = ?2, updated_at = ?2 WHERE id = ?3 AND status = 'queued'
+`
+
+type GiveUpRunParams struct {
+	Error string
+	Now   sql.NullTime
+	ID    int64
+}
+
+// A queued run that will never start (its job gave up waiting).
+func (q *Queries) GiveUpRun(ctx context.Context, arg GiveUpRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, giveUpRun, arg.Error, arg.Now, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const lastBackup = `-- name: LastBackup :one
 SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND operation = 'backup' ORDER BY id DESC LIMIT 1
 `
@@ -217,6 +385,22 @@ func (q *Queries) LocationLastWrite(ctx context.Context, locationID int64) (sql.
 	var finished_at sql.NullTime
 	err := row.Scan(&finished_at)
 	return finished_at, err
+}
+
+const otherRunning = `-- name: OtherRunning :one
+SELECT EXISTS (SELECT 1 FROM backup_runs WHERE project_id = ? AND status = 'running' AND id != ?) AS running
+`
+
+type OtherRunningParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+func (q *Queries) OtherRunning(ctx context.Context, arg OtherRunningParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, otherRunning, arg.ProjectID, arg.ID)
+	var running bool
+	err := row.Scan(&running)
+	return running, err
 }
 
 const projectBackupRun = `-- name: ProjectBackupRun :one
@@ -364,6 +548,72 @@ func (q *Queries) RestoreRun(ctx context.Context, arg RestoreRunParams) (BackupR
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const restoreUnderway = `-- name: RestoreUnderway :one
+SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND kind = 'restore' AND status IN ('queued', 'in_flight')) AS underway
+`
+
+func (q *Queries) RestoreUnderway(ctx context.Context, projectID int64) (bool, error) {
+	row := q.db.QueryRowContext(ctx, restoreUnderway, projectID)
+	var underway bool
+	err := row.Scan(&underway)
+	return underway, err
+}
+
+const staleRunning = `-- name: StaleRunning :many
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND status = 'running' AND heartbeat_at < ?
+`
+
+type StaleRunningParams struct {
+	ProjectID   int64
+	HeartbeatAt time.Time
+}
+
+func (q *Queries) StaleRunning(ctx context.Context, arg StaleRunningParams) ([]BackupRun, error) {
+	rows, err := q.db.QueryContext(ctx, staleRunning, arg.ProjectID, arg.HeartbeatAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BackupRun{}
+	for rows.Next() {
+		var i BackupRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.LocationID,
+			&i.Operation,
+			&i.Kind,
+			&i.Reason,
+			&i.Status,
+			&i.DeployNumber,
+			&i.ScheduledFor,
+			&i.Sha,
+			&i.SnapshotID,
+			&i.SourceSnapshotID,
+			&i.Bytes,
+			&i.Found,
+			&i.Error,
+			&i.Log,
+			&i.TokenDigest,
+			&i.HeartbeatAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const verifiedLocations = `-- name: VerifiedLocations :many

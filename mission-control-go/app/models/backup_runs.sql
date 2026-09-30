@@ -41,3 +41,40 @@ SELECT finished_at FROM backup_runs WHERE location_id = ? AND status = 'go' AND 
 
 -- name: QueuedManualBackup :one
 SELECT * FROM backup_runs WHERE project_id = ? AND status = 'queued' AND reason = 'manual';
+
+-- name: BackupRunByID :one
+SELECT * FROM backup_runs WHERE id = ?;
+
+-- name: StaleRunning :many
+SELECT * FROM backup_runs WHERE project_id = ? AND status = 'running' AND heartbeat_at < ?;
+
+-- name: AbandonRun :exec
+UPDATE backup_runs SET status = 'no_go', finished_at = @now, error = @error, updated_at = @now WHERE id = @id;
+
+-- name: OtherRunning :one
+SELECT EXISTS (SELECT 1 FROM backup_runs WHERE project_id = ? AND status = 'running' AND id != ?) AS running;
+
+-- name: RestoreUnderway :one
+SELECT EXISTS (SELECT 1 FROM deploys WHERE project_id = ? AND kind = 'restore' AND status IN ('queued', 'in_flight')) AS underway;
+
+-- name: ClaimRun :execrows
+UPDATE backup_runs SET status = 'running', token_digest = @token_digest, heartbeat_at = @now, started_at = @now, updated_at = @now
+WHERE id = @id AND status = 'queued';
+
+-- Writes below go through the token: only the job holding it may write,
+-- and only while the run is running (one abandoned and taken over stays).
+
+-- name: BeatRun :execrows
+UPDATE backup_runs SET heartbeat_at = @now WHERE id = @id AND status = 'running' AND token_digest = @token_digest;
+
+-- name: BeginRun :execrows
+UPDATE backup_runs SET sha = @sha, updated_at = @now WHERE id = @id AND status = 'running' AND token_digest = @token_digest;
+
+-- name: FinishRun :execrows
+UPDATE backup_runs SET status = @status, error = @error, snapshot_id = @snapshot_id, bytes = @bytes, found = @found, log = @log,
+  finished_at = @now, updated_at = @now
+WHERE id = @id AND status = 'running' AND token_digest = @token_digest;
+
+-- name: GiveUpRun :execrows
+-- A queued run that will never start (its job gave up waiting).
+UPDATE backup_runs SET status = 'no_go', error = @error, finished_at = @now, updated_at = @now WHERE id = @id AND status = 'queued';

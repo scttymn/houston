@@ -31,8 +31,9 @@ type Controller struct {
 	Live *live.Hub
 	// KnownHosts is the file of git hosts' keys (HOUSTON_KNOWN_HOSTS).
 	KnownHosts string
-	// Backup is the backup job, for the runs a deploy asks for.
-	Backup models.Enqueuer[models.BackupArgs]
+	// Backup and Snapshot are the backup job on its queues: backups, and
+	// snapshots for the runs a deploy waits on.
+	Backup, Snapshot models.Enqueuer[models.BackupArgs]
 	// Check is the change check, which a verified webhook queues.
 	Check interface {
 		Enqueue(ctx context.Context, a models.CheckArgs) (int64, error)

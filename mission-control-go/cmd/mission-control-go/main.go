@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +28,9 @@ import (
 
 	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/move"
 	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
@@ -47,6 +50,7 @@ const usage = `usage:
   mission-control-go jobs                   run the background jobs alone
   mission-control-go assets [DIR]           the assets precompiled, into DIR (assets/built; the build runs it)
   mission-control-go db migrate|rollback [N]|status|seed|reset|console
+  mission-control-go backup-sqlite DATA OUT a backup's SQLite copies (its helper container runs it)
   mission-control-go move RAILS_DB          the one-time move from the Rails app's database into this one (new)
   mission-control-go tasks                  the app's own tasks (app/tasks.go)
   mission-control-go task NAME [ARGS...]    run one
@@ -82,6 +86,20 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 		}
 	case "db":
 		return dbCommand(ctx, cfg, args, in, out, errOut)
+	case "backup-sqlite":
+		// In a backup's helper container (this image, as its tools): the
+		// app's SQLite databases copied into the staging volume. Its last
+		// line is the report; it fails when a database couldn't be copied.
+		if len(args) != 2 {
+			fmt.Fprint(errOut, usage)
+			return 2
+		}
+		report := backup.CopySQLite(args[0], args[1])
+		json.NewEncoder(out).Encode(report)
+		if len(report.Errors) > 0 {
+			return 1
+		}
+		return 0
 	case "move":
 		if len(args) != 1 {
 			fmt.Fprint(errOut, usage)
@@ -131,7 +149,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	if err != nil {
 		return nil, nil, err
 	}
-	queue, err := jobs.New(ctx, database, jobs.Options{Log: logger})
+	queue, err := jobs.New(ctx, database, jobs.Options{Log: logger, Queues: app.Queues})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -144,7 +162,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
 		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
-		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), Tools: cfg.ToolsImage, KnownHosts: cfg.KnownHosts,
+		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), DockerCLI: dockercmd.Docker, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts,
 		Version: app.HoustonVersion(os.Getenv("HOUSTON_VERSION"), os.Getenv("HOUSTON_SOURCE_SHA"))}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err

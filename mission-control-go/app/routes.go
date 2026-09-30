@@ -17,6 +17,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -42,16 +43,20 @@ type App struct {
 	// Services are where the tunnel sends what it routes: Mission Control,
 	// and kamal-proxy.
 	Services dns.Services
-	// Docker is the docker CLI; Tools, the image that makes volumes'
-	// directories (HOUSTON_TOOLS_IMAGE).
-	Docker docker.Runner
-	Tools  string
+	// Docker is the docker CLI (DockerCLI, for the work that needs its
+	// environment, input and deadlines); Tools, Mission Control's own image
+	// for helper containers (HOUSTON_TOOLS_IMAGE), its binary at ToolsBin.
+	Docker    docker.Runner
+	DockerCLI dockercmd.Runner
+	Tools     string
+	ToolsBin  string
 	// KnownHosts is the file of git hosts' keys Mission Control recorded.
 	KnownHosts string
 	// Backup runs a backup or a restore's data; Check looks at a project's
 	// repo for changes (app/jobs.go).
-	Backup *jobs.Job[models.BackupArgs]
-	Check  *jobs.Job[models.CheckArgs]
+	Backup   *jobs.Job[models.BackupArgs]
+	Snapshot *jobs.Job[models.BackupArgs] // a backup a deploy waits on
+	Check    *jobs.Job[models.CheckArgs]
 	// Limits counts requests for rate limits, in this process.
 	Limits web.Limits
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
@@ -73,7 +78,7 @@ func (a *App) Router() *web.Router {
 
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
-		Check: a.Check, Limits: &a.Limits}
+		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -91,9 +96,9 @@ func (a *App) Router() *web.Router {
 		s.Handle("PATCH /deploys/{id}", runner.Report)
 		s.Handle("POST /runner/jobs/claim", runner.Claim)
 		s.Handle("POST /deploys/{id}/snapshot", runner.RequestSnapshot)
-		s.Handle("GET /deploys/{id}/snapshot", runner.Snapshot)
+		s.Handle("GET /deploys/{id}/snapshot", runner.ShowSnapshot)
 		s.Handle("POST /deploys/{id}/restore_data", runner.RequestRestoreData)
-		s.Handle("GET /deploys/{id}/restore_data", runner.RestoreData)
+		s.Handle("GET /deploys/{id}/restore_data", runner.ShowRestoreData)
 	})
 
 	// The personal API: the houston CLI with --server, and agents.
