@@ -38,3 +38,6 @@ SELECT id FROM projects WHERE backup_location_id = @location
 
 -- name: LocationLastWrite :one
 SELECT finished_at FROM backup_runs WHERE location_id = ? AND status = 'go' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1;
+
+-- name: QueuedManualBackup :one
+SELECT * FROM backup_runs WHERE project_id = ? AND status = 'queued' AND reason = 'manual';

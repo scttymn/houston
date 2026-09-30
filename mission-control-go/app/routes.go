@@ -106,10 +106,22 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}", remote.Project)
 		s.Handle("GET /projects/{name}/deploys", remote.Deploys)
 		s.Handle("GET /projects/{name}/deploys/{number}", remote.Deploy)
-		s.Handle("GET /projects/{name}/backups/{id}", remote.Backup)
+		s.Handle("GET /projects/{name}/backups/{id}", remote.ShowBackup)
 		s.Handle("GET /projects/{name}/volumes", remote.Volumes)
 		s.Handle("GET /projects/{name}/webhook", remote.Webhook)
 		s.Handle("GET /projects/{name}/secrets", remote.Secrets)
+		for _, method := range []string{"PATCH", "PUT"} { // Rails' update is both
+			s.Handle(method+" /settings", remote.UpdateSettings)
+			s.Handle(method+" /storage/{location}", remote.DefaultStorage)
+			s.Handle(method+" /projects/{name}/secrets/{key}", remote.SetSecret)
+			s.Handle(method+" /projects/{name}/maintenance", remote.Maintenance)
+			s.Handle(method+" /projects/{name}/volumes/{volume}", remote.ChooseVolume)
+			s.Handle(method+" /projects/{name}/backup_target", remote.BackupTarget)
+		}
+		s.Handle("POST /projects/{name}/secrets/{key}/generate", remote.GenerateSecret)
+		s.Handle("DELETE /projects/{name}/secrets/{key}", remote.RemoveSecret)
+		s.Handle("POST /projects/{name}/webhook/rotate", remote.RotateWebhook)
+		s.Handle("POST /projects/{name}/backups", remote.BackupNow)
 	})
 
 	homePage := home.Controller{DB: a.DB}

@@ -113,8 +113,8 @@ func (c V1) Deploy(w http.ResponseWriter, r *http.Request) error {
 	return web.JSON(w, http.StatusOK, viewDeployWithLog(d, from, time.Now()))
 }
 
-// Backup is GET /api/v1/projects/{name}/backups/{id} (or latest).
-func (c V1) Backup(w http.ResponseWriter, r *http.Request) error {
+// ShowBackup is GET /api/v1/projects/{name}/backups/{id} (or latest).
+func (c V1) ShowBackup(w http.ResponseWriter, r *http.Request) error {
 	p, err := c.project(r)
 	if err != nil {
 		return err

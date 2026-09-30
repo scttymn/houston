@@ -107,6 +107,25 @@ var steps = []step{
 	{name: "v1 volumes", method: "GET", path: "/api/v1/projects/shop/volumes", header: personal},
 	{name: "v1 a webhook, no repo", method: "GET", path: "/api/v1/projects/shop/webhook", header: personal},
 	{name: "v1 secrets", method: "GET", path: "/api/v1/projects/shop/secrets", header: personal},
+
+	// The personal API: Mission Control's own writes. (Maintenance isn't
+	// here: both would push the tunnel's routes to Cloudflare itself.)
+	{name: "v1 the time zone", method: "PUT", path: "/api/v1/settings", header: personal, body: `{"time_zone":"Europe/Berlin"}`},
+	{name: "v1 not a time zone", method: "PATCH", path: "/api/v1/settings", header: personal, body: `{"time_zone":"Mars/Base"}`},
+	{name: "v1 a secret set", method: "PUT", path: "/api/v1/projects/shop/secrets/SECRET_KEY_BASE", header: personal, body: `{"value":"new"}`},
+	{name: "v1 a secret Kamal can't carry", method: "PUT", path: "/api/v1/projects/shop/secrets/SECRET_KEY_BASE", header: personal, body: `{"value":"a\\b"}`},
+	{name: "v1 a secret generated", method: "POST", path: "/api/v1/projects/shop/secrets/SECRET_KEY_BASE/generate", header: personal},
+	{name: "v1 a secret removed", method: "DELETE", path: "/api/v1/projects/shop/secrets/SECRET_KEY_BASE", header: personal},
+	{name: "v1 a secret not referenced", method: "PUT", path: "/api/v1/projects/shop/secrets/NOPE", header: personal, body: `{"value":"x"}`},
+	{name: "v1 the webhook rotated, no repo", method: "POST", path: "/api/v1/projects/shop/webhook/rotate", header: personal},
+	{name: "v1 no such volume", method: "PUT", path: "/api/v1/projects/shop/volumes/data", header: personal, body: `{"location":"nas"}`},
+	{name: "v1 the backup target", method: "PUT", path: "/api/v1/projects/shop/backup_target", header: personal, body: `{"location":"nas"}`},
+	{name: "v1 no such target", method: "PUT", path: "/api/v1/projects/shop/backup_target", header: personal, body: `{"location":"nope"}`},
+	{name: "v1 the default storage", method: "PUT", path: "/api/v1/storage/nas", header: personal, body: `{"default":true}`},
+	{name: "v1 the default, not asked right", method: "PUT", path: "/api/v1/storage/nas", header: personal, body: `{"default":"yes"}`},
+	{name: "v1 a backup now", method: "POST", path: "/api/v1/projects/shop/backups", header: personal},
+	{name: "v1 settings, after", method: "GET", path: "/api/v1/settings", header: personal},
+	{name: "v1 secrets, after", method: "GET", path: "/api/v1/projects/shop/secrets", header: personal},
 }
 
 // personal is the fixture's personal token, for the /api/v1 steps.

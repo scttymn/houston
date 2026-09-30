@@ -3,6 +3,8 @@ package models
 import (
 	"regexp"
 	"strconv"
+	"time"
+	_ "time/tzdata" // every zone, whatever the image has
 )
 
 var release = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
@@ -26,4 +28,14 @@ func NewerRelease(current, latest string) string {
 		}
 	}
 	return ""
+}
+
+// ValidTimeZone is whether zone is an IANA time zone's name (not "" or
+// "Local", which Go's time package also takes).
+func ValidTimeZone(zone string) bool {
+	if zone == "" || zone == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(zone)
+	return err == nil
 }

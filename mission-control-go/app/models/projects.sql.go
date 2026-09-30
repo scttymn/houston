@@ -44,6 +44,34 @@ func (q *Queries) CreateSecret(ctx context.Context, arg CreateSecretParams) erro
 	return err
 }
 
+const deleteSecret = `-- name: DeleteSecret :exec
+DELETE FROM secrets WHERE project_id = ? AND key = ?
+`
+
+type DeleteSecretParams struct {
+	ProjectID int64
+	Key       string
+}
+
+func (q *Queries) DeleteSecret(ctx context.Context, arg DeleteSecretParams) error {
+	_, err := q.db.ExecContext(ctx, deleteSecret, arg.ProjectID, arg.Key)
+	return err
+}
+
+const makeDefaultLocation = `-- name: MakeDefaultLocation :exec
+UPDATE storage_locations SET is_default = (id = ?1), updated_at = ?2
+`
+
+type MakeDefaultLocationParams struct {
+	ID  int64
+	Now time.Time
+}
+
+func (q *Queries) MakeDefaultLocation(ctx context.Context, arg MakeDefaultLocationParams) error {
+	_, err := q.db.ExecContext(ctx, makeDefaultLocation, arg.ID, arg.Now)
+	return err
+}
+
 const markWebhookVerified = `-- name: MarkWebhookVerified :exec
 UPDATE projects SET webhook_verified_at = ? WHERE id = ? AND webhook_verified_at IS NULL
 `
@@ -497,6 +525,81 @@ func (q *Queries) ReleaseProjectHosts(ctx context.Context, arg ReleaseProjectHos
 	return err
 }
 
+const rotateWebhookSecret = `-- name: RotateWebhookSecret :one
+UPDATE projects SET webhook_secret = ?, webhook_verified_at = NULL, updated_at = ? WHERE id = ? RETURNING id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at
+`
+
+type RotateWebhookSecretParams struct {
+	WebhookSecret crypt.String
+	UpdatedAt     time.Time
+	ID            int64
+}
+
+func (q *Queries) RotateWebhookSecret(ctx context.Context, arg RotateWebhookSecretParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, rotateWebhookSecret, arg.WebhookSecret, arg.UpdatedAt, arg.ID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.AppService,
+		&i.Services,
+		&i.Domains,
+		&i.DomainStates,
+		&i.Variables,
+		&i.Volumes,
+		&i.Databases,
+		&i.Details,
+		&i.DeployRule,
+		&i.Health,
+		&i.Port,
+		&i.DataGeneration,
+		&i.KeepAuto,
+		&i.KeepDeploy,
+		&i.BackupSchedule,
+		&i.BackupLocationID,
+		&i.RepoUrl,
+		&i.Branch,
+		&i.ComposePath,
+		&i.DeployKeyPrivate,
+		&i.DeployKeyPublic,
+		&i.WebhookSecret,
+		&i.WebhookVerifiedAt,
+		&i.SeenRefs,
+		&i.LastCheckedAt,
+		&i.LastCheckError,
+		&i.MaintenanceSince,
+		&i.MaintenanceBy,
+		&i.MaintenanceMessage,
+		&i.MaintenancePage,
+		&i.SyncedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const saveSecret = `-- name: SaveSecret :exec
+INSERT INTO secrets (project_id, key, value, updated_at) VALUES (?1, ?2, ?3, ?4)
+ON CONFLICT (project_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+`
+
+type SaveSecretParams struct {
+	ProjectID int64
+	Key       string
+	Value     crypt.String
+	Now       time.Time
+}
+
+func (q *Queries) SaveSecret(ctx context.Context, arg SaveSecretParams) error {
+	_, err := q.db.ExecContext(ctx, saveSecret,
+		arg.ProjectID,
+		arg.Key,
+		arg.Value,
+		arg.Now,
+	)
+	return err
+}
+
 const saveSynced = `-- name: SaveSynced :one
 INSERT INTO projects (name, app_service, services, domains, variables, health, port, deploy_rule, volumes, databases,
   keep_auto, keep_deploy, backup_schedule, maintenance_page, details, synced_at, updated_at)
@@ -591,6 +694,21 @@ func (q *Queries) SaveSynced(ctx context.Context, arg SaveSyncedParams) (Project
 	return i, err
 }
 
+const setBackupLocation = `-- name: SetBackupLocation :exec
+UPDATE projects SET backup_location_id = ?, updated_at = ? WHERE id = ?
+`
+
+type SetBackupLocationParams struct {
+	BackupLocationID sql.NullInt64
+	UpdatedAt        time.Time
+	ID               int64
+}
+
+func (q *Queries) SetBackupLocation(ctx context.Context, arg SetBackupLocationParams) error {
+	_, err := q.db.ExecContext(ctx, setBackupLocation, arg.BackupLocationID, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const setDomainStates = `-- name: SetDomainStates :exec
 UPDATE projects SET domain_states = ?, updated_at = ? WHERE id = ?
 `
@@ -604,4 +722,81 @@ type SetDomainStatesParams struct {
 func (q *Queries) SetDomainStates(ctx context.Context, arg SetDomainStatesParams) error {
 	_, err := q.db.ExecContext(ctx, setDomainStates, arg.DomainStates, arg.UpdatedAt, arg.ID)
 	return err
+}
+
+const setMaintenance = `-- name: SetMaintenance :exec
+UPDATE projects SET maintenance_since = ?, maintenance_by = ?, maintenance_message = ?, updated_at = ? WHERE id = ?
+`
+
+type SetMaintenanceParams struct {
+	MaintenanceSince   sql.NullTime
+	MaintenanceBy      string
+	MaintenanceMessage string
+	UpdatedAt          time.Time
+	ID                 int64
+}
+
+func (q *Queries) SetMaintenance(ctx context.Context, arg SetMaintenanceParams) error {
+	_, err := q.db.ExecContext(ctx, setMaintenance,
+		arg.MaintenanceSince,
+		arg.MaintenanceBy,
+		arg.MaintenanceMessage,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
+const setTimeZone = `-- name: SetTimeZone :exec
+UPDATE installations SET time_zone = ?, updated_at = ? WHERE id = 1
+`
+
+type SetTimeZoneParams struct {
+	TimeZone  string
+	UpdatedAt time.Time
+}
+
+func (q *Queries) SetTimeZone(ctx context.Context, arg SetTimeZoneParams) error {
+	_, err := q.db.ExecContext(ctx, setTimeZone, arg.TimeZone, arg.UpdatedAt)
+	return err
+}
+
+const setVolumeLocation = `-- name: SetVolumeLocation :exec
+UPDATE project_volumes SET location_id = ?, updated_at = ? WHERE id = ?
+`
+
+type SetVolumeLocationParams struct {
+	LocationID sql.NullInt64
+	UpdatedAt  time.Time
+	ID         int64
+}
+
+func (q *Queries) SetVolumeLocation(ctx context.Context, arg SetVolumeLocationParams) error {
+	_, err := q.db.ExecContext(ctx, setVolumeLocation, arg.LocationID, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const storageLocationByName = `-- name: StorageLocationByName :one
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE name = ?
+`
+
+func (q *Queries) StorageLocationByName(ctx context.Context, name string) (StorageLocation, error) {
+	row := q.db.QueryRowContext(ctx, storageLocationByName, name)
+	var i StorageLocation
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Kind,
+		&i.Settings,
+		&i.Credentials,
+		&i.ResticPassword,
+		&i.IsDefault,
+		&i.AcknowledgedAt,
+		&i.VerifiedAt,
+		&i.PrunedAt,
+		&i.PruneError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

@@ -293,6 +293,40 @@ func (q *Queries) ProjectsUsingLocation(ctx context.Context, arg ProjectsUsingLo
 	return items, nil
 }
 
+const queuedManualBackup = `-- name: QueuedManualBackup :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND status = 'queued' AND reason = 'manual'
+`
+
+func (q *Queries) QueuedManualBackup(ctx context.Context, projectID int64) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, queuedManualBackup, projectID)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const restoreRun = `-- name: RestoreRun :one
 SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND operation = 'restore' AND deploy_number = ?
 `

@@ -68,3 +68,31 @@ SELECT key, value, updated_at FROM secrets WHERE project_id = ?;
 SELECT project_volumes.name, project_volumes.placed_at, storage_locations.name AS location
 FROM project_volumes LEFT JOIN storage_locations ON storage_locations.id = project_volumes.location_id
 WHERE project_volumes.project_id = ?;
+
+-- name: SetTimeZone :exec
+UPDATE installations SET time_zone = ?, updated_at = ? WHERE id = 1;
+
+-- name: SaveSecret :exec
+INSERT INTO secrets (project_id, key, value, updated_at) VALUES (@project_id, @key, @value, @now)
+ON CONFLICT (project_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+
+-- name: DeleteSecret :exec
+DELETE FROM secrets WHERE project_id = ? AND key = ?;
+
+-- name: RotateWebhookSecret :one
+UPDATE projects SET webhook_secret = ?, webhook_verified_at = NULL, updated_at = ? WHERE id = ? RETURNING *;
+
+-- name: SetMaintenance :exec
+UPDATE projects SET maintenance_since = ?, maintenance_by = ?, maintenance_message = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetBackupLocation :exec
+UPDATE projects SET backup_location_id = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetVolumeLocation :exec
+UPDATE project_volumes SET location_id = ?, updated_at = ? WHERE id = ?;
+
+-- name: StorageLocationByName :one
+SELECT * FROM storage_locations WHERE name = ?;
+
+-- name: MakeDefaultLocation :exec
+UPDATE storage_locations SET is_default = (id = @id), updated_at = @now;
