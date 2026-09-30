@@ -5,6 +5,7 @@ package dockercmdtest
 
 import (
 	"context"
+	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -15,10 +16,11 @@ import (
 
 // Call is a command run: args (for a pipe, "from | to"), what it was given.
 type Call struct {
-	Args  []string
-	To    []string // a pipe's second command
-	Env   map[string]string
-	Stdin []byte
+	Args    []string
+	To      []string // a pipe's second command
+	Env     map[string]string
+	Stdin   []byte
+	Timeout time.Duration
 }
 
 // String is the call as one line: its args, and a pipe's second command.
@@ -113,11 +115,19 @@ func (f *Fake) answer(ctx context.Context, c Call, o dockercmd.Opts) dockercmd.R
 }
 
 func (f *Fake) Run(ctx context.Context, args []string, o dockercmd.Opts) dockercmd.Result {
-	return f.answer(ctx, Call{Args: args, Env: o.Env, Stdin: o.Stdin}, o)
+	return f.answer(ctx, Call{Args: args, Env: o.Env, Stdin: o.Stdin, Timeout: o.Timeout}, o)
 }
 
 func (f *Fake) Pipe(ctx context.Context, from, to []string, o dockercmd.Opts) dockercmd.Result {
 	return f.answer(ctx, Call{Args: from, To: to, Env: o.Env}, o)
+}
+
+// Stream answers as Run does, writing the answer's output to w.
+func (f *Fake) Stream(ctx context.Context, args []string, o dockercmd.Opts, w io.Writer) dockercmd.Result {
+	r := f.answer(ctx, Call{Args: args, Env: o.Env, Timeout: o.Timeout}, o)
+	io.WriteString(w, r.Output)
+	r.Output = ""
+	return r
 }
 
 type download struct {

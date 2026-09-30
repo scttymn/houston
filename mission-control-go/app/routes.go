@@ -15,7 +15,9 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
@@ -77,6 +79,10 @@ type App struct {
 	Updater      serverupdate.Updater
 	ServerUpdate *jobs.Job[models.UpdateArgs]
 	Port         *port.Port
+	// Stats are the apps' CPU, memory and disk.
+	Stats *appstats.Stats
+	// CloudflareSettings is Cloudflare in Settings: its view, token, repair.
+	CloudflareSettings *cfsettings.Settings
 	// Registry is Houston's image registry; KamalHome, where Kamal keeps
 	// its files on the host (HOUSTON_KAMAL_HOME).
 	Registry  registry.Registry
@@ -105,7 +111,8 @@ func (a *App) Router() *web.Router {
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
 		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git,
-		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Updater: a.Updater, FollowUpdate: a.ServerUpdate, Port: a.Port, Release: a.Release}
+		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Updater: a.Updater, FollowUpdate: a.ServerUpdate, Port: a.Port, Release: a.Release, Stats: a.Stats,
+		CloudflareSettings: a.CloudflareSettings}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -140,6 +147,9 @@ func (a *App) Router() *web.Router {
 		s.Handle("POST /update", remote.StartUpdate)
 		s.Handle("POST /update/check", remote.CheckRelease)
 		s.Handle("GET /port", remote.ShowPort)
+		s.Handle("GET /cloudflare", remote.CloudflareView)
+		s.Handle("PUT /cloudflare/token", remote.CloudflareToken)
+		s.Handle("POST /cloudflare/repair", remote.RepairCloudflare)
 		s.Handle("GET /storage", remote.Storage)
 		s.Handle("GET /projects", remote.Projects)
 		s.Handle("GET /projects/{name}", remote.Project)
@@ -174,6 +184,7 @@ func (a *App) Router() *web.Router {
 		s.Handle("POST /projects/{name}/copy", remote.RequestCopy)
 		s.Handle("POST /projects/{name}/copy/cancel", remote.CancelCopy)
 		s.Handle("POST /projects/{name}/copy/undo", remote.UndoCopy)
+		s.Handle("GET /projects/{name}/logs", remote.Logs)
 		s.Handle("GET /projects/{name}/snapshots", remote.Snapshots)
 		s.Handle("GET /projects/{name}/snapshots/{id}/download", remote.DownloadSnapshot)
 	})

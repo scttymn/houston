@@ -177,13 +177,39 @@ func (d *Download) Close() {
 	d.done <- err // for a Wait after
 }
 
-// Downloader is a Runner that can also run a download.
+// Downloader is a Runner that can also run a download, or stream.
 type Downloader interface {
 	Runner
+	// Stream runs a command whose output (stdout and stderr, as they come)
+	// is written to w: a page's live output. Its Result has no output. It
+	// stops when ctx ends: the reader went away.
+	Stream(ctx context.Context, args []string, o Opts, w io.Writer) Result
 	// Download starts a command whose stdout is a file: a Download once its
 	// first bytes are in, or the Result of a command that ended before
 	// writing any (its stderr as the output).
 	Download(ctx context.Context, args []string, o Opts) (*Download, Result)
+}
+
+// Stream runs docker with args, its output to w as it comes.
+func (c CLI) Stream(ctx context.Context, args []string, o Opts, w io.Writer) Result {
+	ctx, cancel := deadline(ctx, o)
+	defer cancel()
+	cmd := c.command(ctx, args, o)
+	out := &lockedWriter{w: w}
+	cmd.Stdout, cmd.Stderr = out, out
+	return result(ctx, cmd.Run(), "")
+}
+
+// lockedWriter is a writer two pipes share.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // Download starts docker with args, stdout apart from stderr.

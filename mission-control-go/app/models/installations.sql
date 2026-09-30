@@ -19,3 +19,6 @@ UPDATE installations SET latest_release = ?, latest_release_url = ?, latest_rele
 
 -- name: SetPortOpen :exec
 UPDATE installations SET port_open = ?, updated_at = ?;
+
+-- name: SetCloudflareToken :exec
+UPDATE installations SET cloudflare_api_token = ?, updated_at = ?;

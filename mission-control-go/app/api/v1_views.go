@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 )
 
 // What the personal API shows of projects and deploys (the Rails app's
@@ -108,9 +109,9 @@ type projectView struct {
 	Domains      map[string]models.DomainState `json:"domains"`
 	LastDeploy   *deployView                   `json:"last_deploy"`
 	Maintenance  maintenanceView               `json:"maintenance"`
-	Deleting     any                           `json:"deleting"` // with deletions, batch 3
+	Deleting     any                           `json:"deleting"`
 	CopyProposal *copyProposalView             `json:"copy_proposal"`
-	Stats        any                           `json:"stats"` // with app stats, batch 3
+	Stats        *appstats.Reading             `json:"stats"`
 }
 
 type secretState struct {
@@ -159,6 +160,9 @@ func (c Controller) viewProject(ctx context.Context, p models.Project, inst mode
 		v.Deleting = c.viewDeletion(ctx, deletion, false)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return v, err
+	}
+	if c.Stats != nil {
+		v.Stats = c.Stats.For(p.Name)
 	}
 	running, err := q.RunningDeploySummary(ctx, p.ID)
 	if err == nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,8 +23,11 @@ type Fake struct {
 	zones   []cloudflare.Zone
 	records map[string][]cloudflare.Record // zone id → records
 	nextID  int
-	// Tunnels are each tunnel's last configuration, by "account/tunnel".
-	tunnels map[string]json.RawMessage
+	// Tunnels are each tunnel's last configuration, by "account/tunnel";
+	// details, what GET says of each; accounts, the token's.
+	tunnels  map[string]json.RawMessage
+	details  map[string]any
+	accounts []map[string]string
 	// Fail, when set, is the error every call answers; failCalls, the
 	// error one call answers ("PATCH /zones/z/dns_records/rec1").
 	fail      string
@@ -37,7 +41,7 @@ type Fake struct {
 
 // New is a fake, stopped when the test ends.
 func New(t testing.TB) *Fake {
-	f := &Fake{records: map[string][]cloudflare.Record{}, tunnels: map[string]json.RawMessage{}}
+	f := &Fake{records: map[string][]cloudflare.Record{}, tunnels: map[string]json.RawMessage{}, details: map[string]any{}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	f.URL = srv.URL
@@ -76,6 +80,28 @@ func (f *Fake) Tunnel(account, tunnel string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return string(f.tunnels[account+"/"+tunnel])
+}
+
+// Account adds an account the token sees.
+func (f *Fake) Account(id, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accounts = append(f.accounts, map[string]string{"id": id, "name": name})
+}
+
+// TunnelDetails is what GET says of a tunnel (its name, status,
+// connections...); a tunnel without is 404.
+func (f *Fake) TunnelDetails(account, tunnel string, details any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.details[account+"/"+tunnel] = details
+}
+
+// Configure sets a tunnel's configuration, as a PUT would.
+func (f *Fake) Configure(account, tunnel, config string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tunnels[account+"/"+tunnel] = json.RawMessage(config)
 }
 
 // Fail makes every call answer Cloudflare's error msg ("" for none).
@@ -128,13 +154,23 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET" && len(parts) == 1 && parts[0] == "zones":
 		found := []cloudflare.Zone{}
 		for _, z := range f.zones {
-			if z.Name == r.URL.Query().Get("name") {
+			if !r.URL.Query().Has("name") || z.Name == r.URL.Query().Get("name") {
 				found = append(found, z)
 			}
 		}
 		answer(w, 200, found, "")
 	case len(parts) >= 3 && parts[0] == "zones" && parts[2] == "dns_records":
 		f.dnsRecords(w, r, parts[1], parts[3:])
+	case r.Method == "GET" && len(parts) == 1 && parts[0] == "accounts":
+		answer(w, 200, append([]map[string]string{}, f.accounts...), "")
+	case r.Method == "GET" && len(parts) == 4 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		if d, ok := f.details[parts[1]+"/"+parts[3]]; ok {
+			answer(w, 200, d, "")
+		} else {
+			answer(w, 404, nil, "Tunnel not found")
+		}
+	case r.Method == "GET" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "configurations":
+		answer(w, 200, f.tunnels[parts[1]+"/"+parts[3]], "")
 	case r.Method == "PUT" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "configurations":
 		var body json.RawMessage
 		json.NewDecoder(r.Body).Decode(&body)
@@ -155,6 +191,12 @@ func (f *Fake) dnsRecords(w http.ResponseWriter, r *http.Request, zone string, r
 			if (!q.Has("name") || rec.Name == q.Get("name")) && (f.Loose || !q.Has("comment.exact") || rec.Comment == q.Get("comment.exact")) {
 				found = append(found, rec)
 			}
+		}
+		if q.Has("per_page") { // a page of them
+			per, _ := strconv.Atoi(q.Get("per_page"))
+			n, _ := strconv.Atoi(q.Get("page"))
+			start := min(per*(max(n, 1)-1), len(found))
+			found = found[start:min(start+per, len(found))]
 		}
 		answer(w, 200, found, "")
 	case r.Method == "POST" && len(rest) == 0:

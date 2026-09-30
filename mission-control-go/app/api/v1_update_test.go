@@ -193,3 +193,46 @@ func TestV1Port(t *testing.T) {
 	a.Port = &port.Port{DB: a.DB, Own: owncontainer.Own{Docker: unknown, Hostname: "mc"}}
 	is(t, v1(a.Handler(), "GET", "/port", personal, "", nil), 200, `{"open":null,"address":null,"saved":"open"}`)
 }
+
+// A project's logs: its running app container's, the last lines, or
+// followed.
+func TestV1Logs(t *testing.T) {
+	_, h, fake := updatable(t)
+	ps := []string{"ps", "--filter", "label=service=shop", "--filter", "label=role=web", "--format", "{{.Names}}"}
+	is(t, v1(h, "GET", "/projects/shop/logs", personal, "", nil), 404, `{"error":"shop isn't running"}`)
+	fake.On(dockercmdtest.OK("shop-web-abc123\nshop-web-old\n"), ps...)
+	fake.On(dockercmdtest.OK("2026-09-30T10:00:00Z started\n"), "logs")
+	w := v1(h, "GET", "/projects/shop/logs", personal, "", nil)
+	if w.Code != 200 || w.Body.String() != "2026-09-30T10:00:00Z started\n" || w.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Errorf("= %d %q %v", w.Code, w.Body.String(), w.Header())
+	}
+	v1(h, "GET", "/projects/shop/logs?tail=5&follow=1", personal, "", nil)
+	ran := fake.Ran()
+	if ran[len(ran)-3] != "logs --timestamps --tail 200 shop-web-abc123" || ran[len(ran)-1] != "logs --timestamps --tail 5 --follow shop-web-abc123" {
+		t.Errorf("ran %q", ran)
+	}
+	calls := fake.Calls()
+	if calls[len(calls)-1].Timeout != time.Hour || calls[len(calls)-3].Timeout != 0 {
+		t.Errorf("timeouts %v %v", calls[len(calls)-1].Timeout, calls[len(calls)-3].Timeout)
+	}
+	for _, tail := range []string{"0", "10001", "x", "-1", "1e3", "%2B5"} {
+		is(t, v1(h, "GET", "/projects/shop/logs?tail="+tail, personal, "", nil), 422, `{"error":"tail must be 1–10000"}`)
+	}
+	is(t, v1(h, "GET", "/projects/nope/logs", personal, "", nil), 404, `{"error":"no project nope"}`)
+}
+
+// A project's view has its app's stats, read while someone looks.
+func TestV1ProjectStats(t *testing.T) {
+	_, h, fake := updatable(t)
+	fake.On(dockercmdtest.OK(`{"ID":"w1","Name":"shop-web-`+sha1+`","CPUPerc":"12.50%","MemUsage":"300MiB / 1GiB"}`), "stats")
+	fake.On(dockercmdtest.OK("w1 0 0"), "inspect", "--format", "{{slice .Id 0 12}} {{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}")
+	fake.On(dockercmdtest.OK(`[{"Name":"shop_data","Size":"1kB"}]`), "system")
+	got := answer(t, v1(h, "GET", "/projects/shop", personal, "", nil))["stats"].(map[string]any)
+	if got["cpu_cores"] != 0.125 || got["memory_bytes"] != float64(300<<20) || got["disk_bytes"] != float64(1000) || got["cpu_limit"] != nil {
+		t.Errorf("stats %v", got)
+	}
+	list := answer(t, v1(h, "GET", "/projects", personal, "", nil))["projects"].([]any)
+	if list[0].(map[string]any)["stats"] == nil {
+		t.Errorf("list %v", list)
+	}
+}

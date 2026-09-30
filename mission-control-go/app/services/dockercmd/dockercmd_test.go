@@ -93,3 +93,35 @@ func TestDownload(t *testing.T) {
 		t.Errorf("broken: %v", err)
 	}
 }
+
+// A stream's output (stdout and stderr) goes to its writer as it comes,
+// and it stops when its reader goes away.
+func TestStream(t *testing.T) {
+	var out strings.Builder
+	r := sh.Stream(context.Background(), []string{"-c", `echo out; echo err >&2; exit 3`}, Opts{}, &out)
+	if r.OK || r.Code != 3 || r.Output != "" || out.String() != "out\nerr\n" {
+		t.Errorf("= %+v, %q", r, out.String())
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	done := make(chan Result)
+	go func() { done <- sh.Stream(ctx, []string{"-c", `echo first; sleep 30 & sleep 30`}, Opts{}, pw) }()
+	line := make([]byte, 6)
+	if _, err := io.ReadFull(pr, line); err != nil || string(line) != "first\n" {
+		t.Fatalf("= %q %v", line, err)
+	}
+	began := time.Now()
+	cancel()
+	go io.Copy(io.Discard, pr)
+	select {
+	case r := <-done:
+		if r.OK {
+			t.Errorf("= %+v", r)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("didn't stop")
+	}
+	if time.Since(began) > 7*time.Second {
+		t.Errorf("stopped after %v", time.Since(began))
+	}
+}

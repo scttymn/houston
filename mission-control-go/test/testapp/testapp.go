@@ -12,7 +12,9 @@ import (
 	"github.com/scttymn/gantry/sign"
 
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/app/services/owncontainer"
@@ -47,6 +49,8 @@ func New(t testing.TB) *app.App {
 	own := owncontainer.Own{Docker: fake, Hostname: "mc"}
 	a.Updater = serverupdate.Updater{DB: d, Docker: fake, Own: own, Version: a.Version, Repo: "scttymn/houston", Log: a.Log}
 	a.Port = &port.Port{DB: d, Own: own}
+	a.CloudflareSettings = &cfsettings.Settings{DB: d, Services: a.Services}
+	a.Stats = &appstats.Stats{Docker: fake, Log: a.Log, DiskSize: func() int64 { return 100 << 30 }}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)
 	}

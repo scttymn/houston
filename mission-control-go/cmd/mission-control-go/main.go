@@ -27,7 +27,9 @@ import (
 	"github.com/scttymn/gantry/sign"
 
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
@@ -175,7 +177,8 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		KamalHome: cfg.KamalHome, Registry: registry.Registry{URL: cfg.RegistryURL, ComposeProject: cfg.ComposeProject, Docker: dockercmd.Docker},
 		Updater: serverupdate.Updater{DB: database, Docker: dockercmd.Docker, Own: own, Version: version, Repo: cfg.Repo, RunnerImage: cfg.RunnerImage,
 			Runners: cfg.Runners, Log: logger},
-		Port: &port.Port{DB: database, Own: own, RunnerImage: cfg.RunnerImage}}
+		Port: &port.Port{DB: database, Own: own, RunnerImage: cfg.RunnerImage}, Stats: &appstats.Stats{Docker: dockercmd.Docker, Log: logger},
+		CloudflareSettings: &cfsettings.Settings{DB: database, Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}}}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}

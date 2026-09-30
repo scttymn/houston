@@ -9,6 +9,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/scttymn/gantry/crypt"
 )
 
 const currentInstallation = `-- name: CurrentInstallation :one
@@ -75,6 +77,20 @@ func (q *Queries) RegistryCleaning(ctx context.Context, since sql.NullTime) (boo
 	var cleaning bool
 	err := row.Scan(&cleaning)
 	return cleaning, err
+}
+
+const setCloudflareToken = `-- name: SetCloudflareToken :exec
+UPDATE installations SET cloudflare_api_token = ?, updated_at = ?
+`
+
+type SetCloudflareTokenParams struct {
+	CloudflareApiToken crypt.String
+	UpdatedAt          time.Time
+}
+
+func (q *Queries) SetCloudflareToken(ctx context.Context, arg SetCloudflareTokenParams) error {
+	_, err := q.db.ExecContext(ctx, setCloudflareToken, arg.CloudflareApiToken, arg.UpdatedAt)
+	return err
 }
 
 const setLatestRelease = `-- name: SetLatestRelease :exec

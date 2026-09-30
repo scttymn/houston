@@ -11,7 +11,9 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/cfsettings"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
@@ -68,6 +70,10 @@ type Controller struct {
 	}
 	Port    *port.Port
 	Release release.Checker
+	// Stats are the apps' CPU, memory and disk, read while someone looks.
+	Stats *appstats.Stats
+	// CloudflareSettings reads, re-tokens and repairs Cloudflare.
+	CloudflareSettings *cfsettings.Settings
 }
 
 func (c Controller) placement() volumes.Placement {

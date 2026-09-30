@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -35,6 +36,7 @@ func (c V1) Projects(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	c.freshStats(ctx, now)
 	views := []projectView{}
 	for _, p := range projects {
 		v, err := c.viewProject(ctx, p, inst, now)
@@ -56,6 +58,7 @@ func (c V1) Project(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	c.freshStats(r.Context(), time.Now())
 	v, err := c.viewProjectDetail(r.Context(), p, inst, time.Now())
 	if err != nil {
 		return err
@@ -261,4 +264,15 @@ func (c V1) Secrets(w http.ResponseWriter, r *http.Request) error {
 		list = append(list, s)
 	}
 	return web.JSON(w, http.StatusOK, map[string]any{"secrets": list})
+}
+
+// freshStats reads the apps' stats when the last reading is old: someone's
+// looking.
+func (c V1) freshStats(ctx context.Context, now time.Time) {
+	if c.Stats == nil {
+		return
+	}
+	if projects, err := models.New(c.DB.Read).Projects(ctx); err == nil {
+		c.Stats.Fresh(ctx, projects, now)
+	}
 }
