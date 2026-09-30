@@ -9,6 +9,35 @@ import (
 	"context"
 )
 
+const currentInstallation = `-- name: CurrentInstallation :one
+SELECT id, base_domain, time_zone, dns_mode, port_open, cloudflare_account_id, cloudflare_zone_id, cloudflare_api_token, cloudflare_connected_at, tunnel_id, tunnel_token, latest_release, latest_release_url, latest_release_checked_at, registry_cleanup_since, created_at, updated_at FROM installations WHERE id = 1
+`
+
+func (q *Queries) CurrentInstallation(ctx context.Context) (Installation, error) {
+	row := q.db.QueryRowContext(ctx, currentInstallation)
+	var i Installation
+	err := row.Scan(
+		&i.ID,
+		&i.BaseDomain,
+		&i.TimeZone,
+		&i.DnsMode,
+		&i.PortOpen,
+		&i.CloudflareAccountID,
+		&i.CloudflareZoneID,
+		&i.CloudflareApiToken,
+		&i.CloudflareConnectedAt,
+		&i.TunnelID,
+		&i.TunnelToken,
+		&i.LatestRelease,
+		&i.LatestReleaseUrl,
+		&i.LatestReleaseCheckedAt,
+		&i.RegistryCleanupSince,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const installationBaseDomain = `-- name: InstallationBaseDomain :one
 SELECT base_domain FROM installations WHERE id = 1
 `

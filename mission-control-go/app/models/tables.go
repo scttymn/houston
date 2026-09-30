@@ -11,6 +11,32 @@ import (
 	"github.com/scttymn/gantry/crypt"
 )
 
+type Deploy struct {
+	ID               int64
+	ProjectID        int64
+	Number           int64
+	Kind             string
+	Status           string
+	Sha              string
+	Ref              string
+	Fresh            bool
+	Generation       int64
+	Step             string
+	Error            string
+	Log              string
+	Runner           string
+	ProposedName     string
+	TokenDigest      string
+	HeartbeatAt      time.Time
+	FinishedAt       sql.NullTime
+	SwitchedAt       sql.NullTime
+	SourceLocationID sql.NullInt64
+	SourceSnapshotID string
+	SyncPayload      sql.NullString
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Installation struct {
 	ID                     int64
 	BaseDomain             string
@@ -29,4 +55,93 @@ type Installation struct {
 	RegistryCleanupSince   sql.NullTime
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+}
+
+type Project struct {
+	ID                 int64
+	Name               string
+	AppService         string
+	Services           Names
+	Domains            Names
+	DomainStates       DomainStates
+	Variables          Variables
+	Volumes            Volumes
+	Databases          Databases
+	Details            ProjectDetails
+	DeployRule         Object
+	Health             string
+	Port               int64
+	DataGeneration     int64
+	KeepAuto           int64
+	KeepDeploy         int64
+	BackupSchedule     string
+	BackupLocationID   sql.NullInt64
+	RepoUrl            string
+	Branch             string
+	ComposePath        string
+	DeployKeyPrivate   crypt.String
+	DeployKeyPublic    string
+	WebhookSecret      crypt.String
+	WebhookVerifiedAt  sql.NullTime
+	SeenRefs           Refs
+	LastCheckedAt      sql.NullTime
+	LastCheckError     string
+	MaintenanceSince   sql.NullTime
+	MaintenanceBy      string
+	MaintenanceMessage string
+	MaintenancePage    string
+	SyncedAt           sql.NullTime
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type ProjectHost struct {
+	ID        int64
+	ProjectID int64
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type ProjectVolume struct {
+	ID         int64
+	ProjectID  int64
+	Name       string
+	LocationID sql.NullInt64
+	PlacedAt   sql.NullTime
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type Runner struct {
+	ID         int64
+	Name       string
+	LastSeenAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type Secret struct {
+	ID        int64
+	ProjectID int64
+	Key       string
+	Value     crypt.String
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type StorageLocation struct {
+	ID             int64
+	Name           string
+	Kind           string
+	Settings       Settings
+	Credentials    crypt.String
+	ResticPassword crypt.String
+	IsDefault      bool
+	AcknowledgedAt sql.NullTime
+	VerifiedAt     sql.NullTime
+	PrunedAt       sql.NullTime
+	PruneError     string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }

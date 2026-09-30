@@ -12,6 +12,7 @@ import (
 	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/web"
 
+	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
@@ -29,6 +30,8 @@ type App struct {
 	Live *live.Hub
 	// Identity names this installation on /ping (Identity(SECRET_KEY_BASE)).
 	Identity string
+	// RunnerToken is HOUSTON_RUNNER_TOKEN, the runner API's bearer token.
+	RunnerToken string
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
 	// trusted (proxies); "" trusts none.
 	TunnelHost string
@@ -54,6 +57,12 @@ func (a *App) Router() *web.Router {
 	})
 
 	rt.Handle("GET /ping", a.ping)
+
+	// The runner API: houston deploy on the server, and the runners.
+	runner := api.Controller{DB: a.DB, Log: a.Log}
+	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
+		s.Handle("POST /projects/sync", runner.Sync)
+	})
 
 	homePage := home.Controller{DB: a.DB}
 	rt.Handle("GET /{$}", homePage.Show)

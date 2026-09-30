@@ -14,6 +14,8 @@ type Config struct {
 	// SecretKeyBase is the Rails app's SECRET_KEY_BASE, from the server's
 	// .env: /ping's identity is derived from it.
 	SecretKeyBase string
+	// RunnerToken is HOUSTON_RUNNER_TOKEN: the runner API's bearer token.
+	RunnerToken string
 	// TunnelHost is cloudflared's name on the Docker network
 	// (HOUSTON_TUNNEL_HOST, default cloudflared).
 	TunnelHost string
@@ -41,6 +43,7 @@ func Load(getenv func(string) string) Config {
 		DataDir:       or("DATA_DIR", "/data"),
 		SecretKey:     or("SECRET_KEY", getenv("SECRET_KEY_BASE")),
 		SecretKeyBase: getenv("SECRET_KEY_BASE"),
+		RunnerToken:   getenv("HOUSTON_RUNNER_TOKEN"),
 		TunnelHost:    or("HOUSTON_TUNNEL_HOST", "cloudflared"),
 		JobsInServer:  getenv("JOBS_IN_SERVER") != "false",
 	}

@@ -128,7 +128,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		identity = string(key)
 	}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
-		Identity: app.Identity(identity), TunnelHost: cfg.TunnelHost}
+		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}

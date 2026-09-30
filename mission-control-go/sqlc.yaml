@@ -21,3 +21,34 @@ sql:
             go_type: github.com/scttymn/gantry/crypt.String
           - column: installations.tunnel_token
             go_type: github.com/scttymn/gantry/crypt.String
+          - column: projects.deploy_key_private
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: projects.webhook_secret
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: secrets.value
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: storage_locations.credentials
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: storage_locations.restic_password
+            go_type: github.com/scttymn/gantry/crypt.String
+          # JSON (app/models/project.go names each).
+          - column: projects.services
+            go_type: { type: Names }
+          - column: projects.domains
+            go_type: { type: Names }
+          - column: projects.domain_states
+            go_type: { type: DomainStates }
+          - column: projects.variables
+            go_type: { type: Variables }
+          - column: projects.volumes
+            go_type: { type: Volumes }
+          - column: projects.databases
+            go_type: { type: Databases }
+          - column: projects.details
+            go_type: { type: ProjectDetails }
+          - column: projects.deploy_rule
+            go_type: { type: Object }
+          - column: projects.seen_refs
+            go_type: { type: Refs }
+          - column: storage_locations.settings
+            go_type: { type: Settings }
