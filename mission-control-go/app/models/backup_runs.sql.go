@@ -209,6 +209,53 @@ func (q *Queries) CreateBackupRun(ctx context.Context, arg CreateBackupRunParams
 	return i, err
 }
 
+const createScheduledRun = `-- name: CreateScheduledRun :one
+INSERT INTO backup_runs (project_id, location_id, operation, kind, reason, scheduled_for, heartbeat_at)
+VALUES (?, ?, 'backup', 'auto', 'schedule', ?, ?) RETURNING id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at
+`
+
+type CreateScheduledRunParams struct {
+	ProjectID    int64
+	LocationID   int64
+	ScheduledFor sql.NullString
+	HeartbeatAt  time.Time
+}
+
+func (q *Queries) CreateScheduledRun(ctx context.Context, arg CreateScheduledRunParams) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, createScheduledRun,
+		arg.ProjectID,
+		arg.LocationID,
+		arg.ScheduledFor,
+		arg.HeartbeatAt,
+	)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deploySnapshot = `-- name: DeploySnapshot :one
 
 SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND operation = 'backup' AND reason = ? AND deploy_number = ?
@@ -520,6 +567,48 @@ func (q *Queries) ProjectsUsingLocation(ctx context.Context, arg ProjectsUsingLo
 	return items, nil
 }
 
+const prunedLocations = `-- name: PrunedLocations :many
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE acknowledged_at IS NOT NULL AND id IN (SELECT DISTINCT location_id FROM backup_runs) ORDER BY id
+`
+
+// The set-up locations any backup went to: what prune cleans.
+func (q *Queries) PrunedLocations(ctx context.Context) ([]StorageLocation, error) {
+	rows, err := q.db.QueryContext(ctx, prunedLocations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StorageLocation{}
+	for rows.Next() {
+		var i StorageLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Settings,
+			&i.Credentials,
+			&i.ResticPassword,
+			&i.IsDefault,
+			&i.AcknowledgedAt,
+			&i.VerifiedAt,
+			&i.PrunedAt,
+			&i.PruneError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queuedManualBackup = `-- name: QueuedManualBackup :one
 SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND status = 'queued' AND reason = 'manual'
 `
@@ -602,6 +691,75 @@ func (q *Queries) RestoreUnderway(ctx context.Context, projectID int64) (bool, e
 	var underway bool
 	err := row.Scan(&underway)
 	return underway, err
+}
+
+const scheduledRun = `-- name: ScheduledRun :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND scheduled_for = ?
+`
+
+type ScheduledRunParams struct {
+	ProjectID    int64
+	ScheduledFor sql.NullString
+}
+
+func (q *Queries) ScheduledRun(ctx context.Context, arg ScheduledRunParams) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, scheduledRun, arg.ProjectID, arg.ScheduledFor)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setPruneError = `-- name: SetPruneError :exec
+UPDATE storage_locations SET prune_error = ?, updated_at = ? WHERE id = ?
+`
+
+type SetPruneErrorParams struct {
+	PruneError string
+	UpdatedAt  time.Time
+	ID         int64
+}
+
+func (q *Queries) SetPruneError(ctx context.Context, arg SetPruneErrorParams) error {
+	_, err := q.db.ExecContext(ctx, setPruneError, arg.PruneError, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const setPruned = `-- name: SetPruned :exec
+UPDATE storage_locations SET pruned_at = ?, prune_error = '', updated_at = ? WHERE id = ?
+`
+
+type SetPrunedParams struct {
+	PrunedAt  sql.NullTime
+	UpdatedAt time.Time
+	ID        int64
+}
+
+func (q *Queries) SetPruned(ctx context.Context, arg SetPrunedParams) error {
+	_, err := q.db.ExecContext(ctx, setPruned, arg.PrunedAt, arg.UpdatedAt, arg.ID)
+	return err
 }
 
 const staleRunning = `-- name: StaleRunning :many

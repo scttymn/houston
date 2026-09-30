@@ -83,3 +83,20 @@ UPDATE backup_runs SET status = 'no_go', error = @error, finished_at = @now, upd
 -- The set-up locations a project's backups went to.
 SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL
   AND id IN (SELECT location_id FROM backup_runs WHERE project_id = ? AND operation = 'backup') ORDER BY name;
+
+-- name: ScheduledRun :one
+SELECT * FROM backup_runs WHERE project_id = ? AND scheduled_for = ?;
+
+-- name: CreateScheduledRun :one
+INSERT INTO backup_runs (project_id, location_id, operation, kind, reason, scheduled_for, heartbeat_at)
+VALUES (?, ?, 'backup', 'auto', 'schedule', ?, ?) RETURNING *;
+
+-- name: PrunedLocations :many
+-- The set-up locations any backup went to: what prune cleans.
+SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL AND id IN (SELECT DISTINCT location_id FROM backup_runs) ORDER BY id;
+
+-- name: SetPruned :exec
+UPDATE storage_locations SET pruned_at = ?, prune_error = '', updated_at = ? WHERE id = ?;
+
+-- name: SetPruneError :exec
+UPDATE storage_locations SET prune_error = ?, updated_at = ? WHERE id = ?;

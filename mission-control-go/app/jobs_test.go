@@ -2,6 +2,9 @@ package app_test
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/release"
 )
 
 // A deploy's snapshot goes on the snapshots queue and runs; a busy one
@@ -79,5 +83,97 @@ func TestCheckJobs(t *testing.T) {
 	a.DB.Read.QueryRow(`SELECT group_concat(projects.name || ':' || deploys.ref) FROM deploys JOIN projects ON projects.id = project_id WHERE status = 'queued'`).Scan(&queued)
 	if queued != "shop:refs/heads/main" {
 		t.Errorf("queued %q", queued)
+	}
+}
+
+// The schedule queues each due project's daily backup once: one with
+// something to back up, that has served, with storage.
+func TestScheduleBackups(t *testing.T) {
+	a := newApp(t)
+	must := func(q string, args ...any) {
+		if _, err := a.DB.Write.Exec(q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	must(`INSERT INTO installations (id, base_domain, time_zone) VALUES (1, 'svnmns.com', 'America/Denver')`)
+	must(`INSERT INTO storage_locations (id, name, kind, is_default, acknowledged_at) VALUES (1, 'nas', 'nfs', TRUE, CURRENT_TIMESTAMP)`)
+	for i, p := range []struct{ name, volumes string }{{"shop", `[{"name":"data","path":"/d"}]`}, {"bare", `[]`}, {"new", `[{"name":"data","path":"/d"}]`}} {
+		must(`INSERT INTO projects (id, name, app_service, services, volumes, health, port, backup_schedule) VALUES (?, ?, 'web', '["web"]', ?, '/', 80, 'daily 00:00')`, i+1, p.name, p.volumes)
+		if p.name != "new" {
+			must(`INSERT INTO deploys (project_id, number, status, sha, ref, heartbeat_at) VALUES (?, 1, 'go', 'abc', 'main', CURRENT_TIMESTAMP)`, i+1)
+		}
+	}
+	for range 2 {
+		if _, err := a.Schedule.Enqueue(t.Context(), struct{}{}); err != nil {
+			t.Fatal(err)
+		}
+		a.Jobs.Drain(t.Context())
+	}
+	denver, _ := time.LoadLocation("America/Denver")
+	var runs string
+	a.DB.Read.QueryRow(`SELECT group_concat(projects.name || ' ' || scheduled_for || ' ' || kind || ' ' || reason) FROM backup_runs JOIN projects ON projects.id = project_id`).Scan(&runs)
+	if want := "shop " + time.Now().In(denver).Format(time.DateOnly) + " auto schedule"; runs != want {
+		t.Errorf("runs %q, want %q", runs, want)
+	}
+}
+
+// Prune: each location in use; a failure is kept on the location.
+func TestPrune(t *testing.T) {
+	a := newApp(t)
+	docker := &dockercmdtest.Fake{}
+	a.DockerCLI = docker
+	for _, q := range []string{
+		`INSERT INTO storage_locations (id, name, kind, settings, acknowledged_at) VALUES
+			(1, 'nas', 'local', '{"path":"/srv"}', CURRENT_TIMESTAMP), (2, 'offsite', 'local', '{"path":"/off"}', CURRENT_TIMESTAMP), (3, 'unused', 'local', '{}', CURRENT_TIMESTAMP)`,
+		`INSERT INTO projects (id, name, app_service, services, health, port) VALUES (1, 'shop', 'web', '["web"]', '/', 80)`,
+		`INSERT INTO backup_runs (project_id, location_id, kind, reason, status, heartbeat_at) VALUES (1, 1, 'auto', 'manual', 'go', CURRENT_TIMESTAMP), (1, 2, 'auto', 'schedule', 'go', CURRENT_TIMESTAMP)`,
+	} {
+		if _, err := a.DB.Write.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	docker.On(dockercmdtest.Fail(1, "repository is locked\nFatal: unable to prune\n"), "run", "--rm", "-e", "RESTIC_PASSWORD", "-e", "RESTIC_REPOSITORY", "-v", "houston-restic-cache:/root/.cache/restic", "-v", "/off:/repo")
+	a.Prune.Enqueue(t.Context(), struct{}{})
+	a.Jobs.Drain(t.Context())
+	var got string
+	a.DB.Read.QueryRow(`SELECT group_concat(name || ':' || (pruned_at IS NOT NULL) || ':' || prune_error, '|') FROM storage_locations`).Scan(&got)
+	if got != "nas:1:|offsite:0:repository is locked\nFatal: unable to prune|unused:0:" || len(docker.Calls()) != 2 {
+		t.Errorf("= %q, ran %v", got, docker.Ran())
+	}
+}
+
+// The latest release: kept when GitHub's answer is Houston's; otherwise
+// left as it was.
+func TestLatestRelease(t *testing.T) {
+	answer := `{"tag_name":"v0.4.28","html_url":"https://github.com/scttymn/houston/releases/tag/v0.4.28"}`
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/scttymn/houston/releases/latest" || r.Header.Get("User-Agent") != "houston/dev" {
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, answer)
+	}))
+	defer github.Close()
+	a := newApp(t)
+	a.Release = release.Checker{API: github.URL, Repo: "scttymn/houston", Version: "dev"}
+	a.DB.Write.Exec(`INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
+	latest := func() string {
+		var tag, url string
+		a.DB.Read.QueryRow(`SELECT latest_release, latest_release_url FROM installations`).Scan(&tag, &url)
+		return tag + " " + url
+	}
+	a.LatestRelease.Enqueue(t.Context(), struct{}{})
+	a.Jobs.Drain(t.Context())
+	if got := latest(); got != "v0.4.28 https://github.com/scttymn/houston/releases/tag/v0.4.28" {
+		t.Errorf("= %q", got)
+	}
+	for _, bad := range []string{`{"tag_name":"latest","html_url":"https://github.com/scttymn/houston/releases/tag/latest"}`,
+		`{"tag_name":"v9.9.9","html_url":"https://evil.example/releases/v9.9.9"}`} {
+		answer = bad
+		a.LatestRelease.Enqueue(t.Context(), struct{}{})
+		a.Jobs.Drain(t.Context())
+		if got := latest(); got != "v0.4.28 https://github.com/scttymn/houston/releases/tag/v0.4.28" {
+			t.Errorf("after %s: %q", bad, got)
+		}
 	}
 }

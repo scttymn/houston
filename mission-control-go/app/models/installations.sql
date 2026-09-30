@@ -13,3 +13,6 @@ SELECT * FROM installations WHERE id = 1;
 -- The registry's garbage collection holds this lock while it runs; one
 -- older than @since was left by a Mission Control that stopped.
 SELECT EXISTS (SELECT 1 FROM installations WHERE registry_cleanup_since >= @since) AS cleaning;
+
+-- name: SetLatestRelease :exec
+UPDATE installations SET latest_release = ?, latest_release_url = ?, latest_release_checked_at = ?, updated_at = ? WHERE id = 1;

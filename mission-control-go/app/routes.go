@@ -19,6 +19,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -59,6 +60,10 @@ type App struct {
 	Snapshot *jobs.Job[models.BackupArgs] // a backup a deploy waits on
 	Check    *jobs.Job[models.CheckArgs]
 	Poll     *jobs.Job[struct{}]
+	// The recurring upkeep: the backup schedule, prune, the latest release.
+	Schedule, Prune, LatestRelease *jobs.Job[struct{}]
+	// Release asks GitHub for Houston's latest release.
+	Release release.Checker
 	// Git reads projects' repos.
 	Git gitremote.Git
 	// Limits counts requests for rate limits, in this process.

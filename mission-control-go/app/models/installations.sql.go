@@ -8,6 +8,7 @@ package models
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const currentInstallation = `-- name: CurrentInstallation :one
@@ -74,4 +75,25 @@ func (q *Queries) RegistryCleaning(ctx context.Context, since sql.NullTime) (boo
 	var cleaning bool
 	err := row.Scan(&cleaning)
 	return cleaning, err
+}
+
+const setLatestRelease = `-- name: SetLatestRelease :exec
+UPDATE installations SET latest_release = ?, latest_release_url = ?, latest_release_checked_at = ?, updated_at = ? WHERE id = 1
+`
+
+type SetLatestReleaseParams struct {
+	LatestRelease          string
+	LatestReleaseUrl       string
+	LatestReleaseCheckedAt sql.NullTime
+	UpdatedAt              time.Time
+}
+
+func (q *Queries) SetLatestRelease(ctx context.Context, arg SetLatestReleaseParams) error {
+	_, err := q.db.ExecContext(ctx, setLatestRelease,
+		arg.LatestRelease,
+		arg.LatestReleaseUrl,
+		arg.LatestReleaseCheckedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }

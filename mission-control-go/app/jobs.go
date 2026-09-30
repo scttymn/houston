@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/jobs"
 
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 )
 
@@ -45,6 +48,127 @@ func (a *App) DefineJobs() error {
 	// or refused: every ten minutes, the projects that deploy on push.
 	a.Poll = jobs.Define(a.Jobs, "poll_for_changes", a.pollForChanges, jobs.Opts[struct{}]{})
 	a.Poll.Every(10*time.Minute, struct{}{})
+	// Each project's daily backup, when it's due: looked at every minute.
+	a.Schedule = jobs.Define(a.Jobs, "schedule_backups", a.scheduleBackups, jobs.Opts[struct{}]{})
+	a.Schedule.Every(time.Minute, struct{}{})
+	// restic's prune of every location in use, daily, when little else runs.
+	a.Prune = jobs.Define(a.Jobs, "prune_backups", a.prune, jobs.Opts[struct{}]{Queue: "backups"})
+	if err := a.Prune.Cron("30 4 * * *", time.UTC, struct{}{}); err != nil {
+		return err
+	}
+	a.LatestRelease = jobs.Define(a.Jobs, "check_latest_release", a.checkLatestRelease, jobs.Opts[struct{}]{})
+	a.LatestRelease.Every(6*time.Hour, struct{}{})
+	return nil
+}
+
+// scheduleBackups queues each project's daily backup when it's due: a
+// project with something to back up, that has served, with storage to
+// back up to.
+func (a *App) scheduleBackups(ctx context.Context, _ struct{}) error {
+	q := models.New(a.DB.Read)
+	inst, err := q.CurrentInstallation(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	projects, err := q.Projects(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, p := range projects {
+		if len(p.Volumes.V) == 0 && len(p.Databases.V) == 0 {
+			continue
+		}
+		served, err := q.ProjectHasServed(ctx, p.ID)
+		if err != nil || !served {
+			continue
+		}
+		location, err := q.BackupLocationFor(ctx, p.BackupLocationID.Int64)
+		if err != nil {
+			continue
+		}
+		schedule, err := models.ParseSchedule(p.BackupSchedule, inst.Zone())
+		if err != nil {
+			continue
+		}
+		if due, err := schedule.Due(ctx, q, p.ID, now); err != nil || !due {
+			continue
+		}
+		err = a.DB.Tx(ctx, func(tx *db.Tx) error {
+			_, err := models.RequestScheduledBackup(ctx, tx, a.Backup, p, location, schedule.Today(now), now)
+			return err
+		})
+		if err != nil && !db.IsUnique(err) { // another look queued it first
+			return err
+		}
+	}
+	return nil
+}
+
+// pruneTimeout is how long one location's prune may take.
+const pruneTimeout = 3 * time.Hour
+
+// prune runs restic's prune on each location in use; a failure is kept on
+// the location for its page, and the next day tries again.
+func (a *App) prune(ctx context.Context, _ struct{}) error {
+	locations, err := models.New(a.DB.Read).PrunedLocations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, l := range locations {
+		env := backup.ResticEnv(l)
+		ran := a.DockerCLI.Run(ctx, backup.ResticArgs(l, env, []string{"prune", "--retry-lock", "30m"}, "", nil), dockercmd.Opts{Env: env, Timeout: pruneTimeout})
+		now := time.Now()
+		q := models.New(a.DB.Write)
+		if ran.OK {
+			err = q.SetPruned(ctx, models.SetPrunedParams{PrunedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: l.ID})
+		} else {
+			problem := lastLines(ran.Output, 5)
+			if len(problem) > 2000 {
+				problem = problem[:1997] + "..."
+			}
+			a.Log.Error("prune failed", "location", l.Name, "err", problem)
+			err = q.SetPruneError(ctx, models.SetPruneErrorParams{PruneError: problem, UpdatedAt: now, ID: l.ID})
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(strings.Join(lines[max(0, len(lines)-n):], "\n"))
+}
+
+// checkLatestRelease asks GitHub for Houston's latest release, for the
+// flight board's note; a failure is logged, and the next check tries again.
+func (a *App) checkLatestRelease(ctx context.Context, _ struct{}) error {
+	q := models.New(a.DB.Read)
+	inst, err := q.CurrentInstallation(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	tag, url, err := a.Release.Latest(ctx)
+	if err != nil {
+		a.Log.Warn("couldn't check the latest release", "err", err)
+		return nil
+	}
+	now := time.Now()
+	if err := models.New(a.DB.Write).SetLatestRelease(ctx, models.SetLatestReleaseParams{LatestRelease: tag, LatestReleaseUrl: url,
+		LatestReleaseCheckedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now}); err != nil {
+		return err
+	}
+	if tag != inst.LatestRelease {
+		a.Live.Refresh(api.FlightBoard, "")
+	}
 	return nil
 }
 

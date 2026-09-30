@@ -24,6 +24,9 @@ type Config struct {
 	// KnownHosts is the git hosts' keys Mission Control records
 	// (HOUSTON_KNOWN_HOSTS, default DATA_DIR/known_hosts).
 	KnownHosts string
+	// Repo is Houston's own on GitHub, for its latest release
+	// (HOUSTON_REPO, default scttymn/houston).
+	Repo string
 	// ToolsImage makes volumes' directories (HOUSTON_TOOLS_IMAGE).
 	ToolsImage string
 	// TunnelHost is cloudflared's name on the Docker network
@@ -69,6 +72,7 @@ func Load(getenv func(string) string) Config {
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	c.KnownHosts = or("HOUSTON_KNOWN_HOSTS", c.DataDir+"/known_hosts")
+	c.Repo = or("HOUSTON_REPO", "scttymn/houston")
 	c.EncryptionKeys = getenv("ENCRYPTION_KEYS")
 	if c.EncryptionKeys == "" && c.Env != "production" {
 		c.EncryptionKeys = devEncryptionKey
