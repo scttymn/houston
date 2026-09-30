@@ -12,8 +12,10 @@ import (
 	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/web"
 
+	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
+	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -32,6 +34,15 @@ type App struct {
 	Identity string
 	// RunnerToken is HOUSTON_RUNNER_TOKEN, the runner API's bearer token.
 	RunnerToken string
+	// Cloudflare is its API's address: "" is Cloudflare's own (a test's fake).
+	Cloudflare string
+	// Services are where the tunnel sends what it routes: Mission Control,
+	// and kamal-proxy.
+	Services dns.Services
+	// Docker is the docker CLI; Tools, the image that makes volumes'
+	// directories (HOUSTON_TOOLS_IMAGE).
+	Docker docker.Runner
+	Tools  string
 	// TunnelHost is cloudflared's name on the Docker network, the one proxy
 	// trusted (proxies); "" trusts none.
 	TunnelHost string
@@ -59,7 +70,7 @@ func (a *App) Router() *web.Router {
 	rt.Handle("GET /ping", a.ping)
 
 	// The runner API: houston deploy on the server, and the runners.
-	runner := api.Controller{DB: a.DB, Log: a.Log}
+	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools}
 	rt.Scope("/api", api.Door{DB: a.DB, RunnerToken: a.RunnerToken}.Pipeline(), func(s *web.Scope) {
 		s.Handle("POST /projects/sync", runner.Sync)
 		s.Handle("GET /projects/{name}/secrets/{key}", runner.Secret)

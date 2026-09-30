@@ -16,6 +16,13 @@ type Config struct {
 	SecretKeyBase string
 	// RunnerToken is HOUSTON_RUNNER_TOKEN: the runner API's bearer token.
 	RunnerToken string
+	// MissionControlURL and AppsURL are where the tunnel sends Mission
+	// Control's hosts and everything else (HOUSTON_MISSION_CONTROL_URL,
+	// default http://mission-control:8080; HOUSTON_APPS_URL, default
+	// http://kamal-proxy:80).
+	MissionControlURL, AppsURL string
+	// ToolsImage makes volumes' directories (HOUSTON_TOOLS_IMAGE).
+	ToolsImage string
 	// TunnelHost is cloudflared's name on the Docker network
 	// (HOUSTON_TUNNEL_HOST, default cloudflared).
 	TunnelHost string
@@ -38,14 +45,17 @@ func Load(getenv func(string) string) Config {
 		return fallback
 	}
 	c := Config{
-		Env:           or("GANTRY_ENV", "production"),
-		Addr:          or("ADDR", ":8080"),
-		DataDir:       or("DATA_DIR", "/data"),
-		SecretKey:     or("SECRET_KEY", getenv("SECRET_KEY_BASE")),
-		SecretKeyBase: getenv("SECRET_KEY_BASE"),
-		RunnerToken:   getenv("HOUSTON_RUNNER_TOKEN"),
-		TunnelHost:    or("HOUSTON_TUNNEL_HOST", "cloudflared"),
-		JobsInServer:  getenv("JOBS_IN_SERVER") != "false",
+		Env:               or("GANTRY_ENV", "production"),
+		Addr:              or("ADDR", ":8080"),
+		DataDir:           or("DATA_DIR", "/data"),
+		SecretKey:         or("SECRET_KEY", getenv("SECRET_KEY_BASE")),
+		SecretKeyBase:     getenv("SECRET_KEY_BASE"),
+		RunnerToken:       getenv("HOUSTON_RUNNER_TOKEN"),
+		TunnelHost:        or("HOUSTON_TUNNEL_HOST", "cloudflared"),
+		ToolsImage:        or("HOUSTON_TOOLS_IMAGE", "houston/mission-control:local"),
+		MissionControlURL: or("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:8080"),
+		AppsURL:           or("HOUSTON_APPS_URL", "http://kamal-proxy:80"),
+		JobsInServer:      getenv("JOBS_IN_SERVER") != "false",
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	return c

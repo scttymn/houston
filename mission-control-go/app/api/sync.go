@@ -99,6 +99,12 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	dns, err := c.pointDNS(ctx, inst, project)
+	if errors.As(err, &refused) {
+		return web.Status(http.StatusUnprocessableEntity, refused)
+	}
+	if answered, err := answerBadGateway(w, err); answered {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -106,8 +112,16 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	c.pushMaintenanceRoutes(ctx, inst, project)
 	if missing, err := c.missingSecrets(ctx, project.ID, s.Variables); err != nil || len(missing) > 0 {
 		return hold(w, missing, err)
+	}
+	// Only a sync that goes on to deploy makes volumes: until then (a HOLD,
+	// say) where they live can still be chosen.
+	if err := c.placement().Place(ctx, project, project.DataGeneration, project.Volumes.V); errors.As(err, &refused) {
+		return web.Status(http.StatusUnprocessableEntity, refused)
+	} else if err != nil {
+		return err
 	}
 	return web.JSON(w, http.StatusOK, syncAnswer{Project: project.Name, Host: project.Host(inst.BaseDomain), DNS: dns, Domains: domains, Generation: project.DataGeneration})
 }
@@ -158,11 +172,18 @@ func (c Controller) check(w http.ResponseWriter, r *http.Request, s models.Sync,
 	if !restore.OwnedBy(token) {
 		return web.Status(http.StatusForbidden, errors.New("that token isn't this restore's"))
 	}
-	if _, adoptErr, err := models.CatchUp(ctx, c.DB, project, s.ServingGeneration, s.ServingSHA, now); err != nil {
+	inst, err := q.CurrentInstallation(ctx)
+	if err != nil {
 		return err
-	} else if adoptErr != nil {
+	}
+	adopted, adoptErr, err := models.CatchUp(ctx, c.DB, project, s.ServingGeneration, s.ServingSHA, now)
+	if err != nil {
+		return err
+	}
+	if adoptErr != nil {
 		c.Log.Warn("a restore's compose.yml wasn't applied as its project caught up", "project", s.Name, "err", adoptErr)
 	}
+	c.pointBestEffort(ctx, inst, adopted, now)
 	for _, k := range []string{"restore_deploy", "serving_generation", "serving_sha"} {
 		delete(body, k)
 	}
@@ -180,10 +201,6 @@ func (c Controller) check(w http.ResponseWriter, r *http.Request, s models.Sync,
 	}
 	if missing, err := c.missingSecrets(ctx, project.ID, s.Variables); err != nil || len(missing) > 0 {
 		return hold(w, missing, err)
-	}
-	inst, err := q.CurrentInstallation(ctx)
-	if err != nil {
-		return err
 	}
 	if project, err = q.ProjectByID(ctx, project.ID); err != nil {
 		return err

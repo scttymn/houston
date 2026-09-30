@@ -21,9 +21,9 @@ func TestSecret(t *testing.T) {
 		t.Errorf("= %d %q %q", w.Code, w.Body.String(), w.Header().Get("Content-Type"))
 	}
 	for path, key := range map[string]string{
-		"/api/projects/shop/secrets/NOT_REFERENCED": "NOT_REFERENCED",
-		"/api/projects/shop/secrets/OPTIONAL":       "OPTIONAL",
-		"/api/projects/shop/secrets/BLANK":          "BLANK",
+		"/api/projects/shop/secrets/NOT_REFERENCED":  "NOT_REFERENCED",
+		"/api/projects/shop/secrets/OPTIONAL":        "OPTIONAL",
+		"/api/projects/shop/secrets/BLANK":           "BLANK",
 		"/api/projects/nope/secrets/SECRET_KEY_BASE": "SECRET_KEY_BASE",
 	} {
 		is(t, get(path), 404, `{"error":"no value for `+key+`"}`)

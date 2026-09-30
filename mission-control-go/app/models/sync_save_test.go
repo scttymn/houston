@@ -48,7 +48,7 @@ func TestCatchUp(t *testing.T) {
 		VALUES (?, 2, 'restore', 'no_go', 2, 'abc', 'refs/restore/x', ?, ?)`, p.ID, time.Now(), kept)
 
 	adopted, adoptErr, err := models.CatchUp(ctx, d, p, 2, "abc", time.Now())
-	if err != nil || adoptErr != nil || adopted == nil || adopted.Port != 4000 {
+	if err != nil || adoptErr != nil || adopted == nil || adopted.Project.Port != 4000 {
 		t.Fatalf("= %+v, %v, %v", adopted, adoptErr, err)
 	}
 	var port, generation int

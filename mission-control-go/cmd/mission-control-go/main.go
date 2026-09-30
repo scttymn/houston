@@ -23,7 +23,9 @@ import (
 	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 
+	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app"
+	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
 	"github.com/scttymn/houston/mission-control-go/db/migrations"
@@ -128,7 +130,8 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		identity = string(key)
 	}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
-		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost}
+		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
+		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), Tools: cfg.ToolsImage}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err
 	}

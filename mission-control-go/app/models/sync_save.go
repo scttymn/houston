@@ -69,12 +69,19 @@ func (s Sync) Save(ctx context.Context, tx *db.Tx, now time.Time) (Project, []st
 	return p, dropped, nil
 }
 
+// Adopted is a restore's kept compose.yml, applied: the project as it
+// saved it, and the domains it dropped, for DNS after the commit.
+type Adopted struct {
+	Project Project
+	Dropped []string
+}
+
 // Adopt applies the compose.yml a restore's check sync kept (the project's
 // config and container names), in a savepoint of tx: one that can't be
 // applied (another project took one of its names) is its error, and leaves
 // tx as it was, for it's applied past the switch and a failed report would
 // leave the restore to go stale while it serves. Nil without one.
-func Adopt(ctx context.Context, tx *db.Tx, d Deploy, now time.Time) (*Sync, error) {
+func Adopt(ctx context.Context, tx *db.Tx, d Deploy, now time.Time) (*Adopted, error) {
 	if !d.SyncPayload.Valid {
 		return nil, nil
 	}
@@ -89,22 +96,23 @@ func Adopt(ctx context.Context, tx *db.Tx, d Deploy, now time.Time) (*Sync, erro
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT adopt"); err != nil {
 		return nil, err
 	}
-	if _, _, err := s.Save(ctx, tx, now); err != nil {
+	p, dropped, err := s.Save(ctx, tx, now)
+	if err != nil {
 		if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO adopt"); rollbackErr != nil {
 			return nil, rollbackErr
 		}
 		return nil, err
 	}
-	_, err := tx.ExecContext(ctx, "RELEASE adopt")
-	return &s, err
+	_, err = tx.ExecContext(ctx, "RELEASE adopt")
+	return &Adopted{Project: p, Dropped: dropped}, err
 }
 
 // CatchUp moves p forward to the generation kamal-proxy serves (observed,
 // at commit sha, as a runner read it) after a restore that switched but
 // never said so: the restore that built it is marked switched, and its
-// kept compose.yml applied. It's the Sync it applied, or nil; adoptErr is
-// why a kept one wasn't, for the log.
-func CatchUp(ctx context.Context, d *db.DB, p Project, observed int, sha string, now time.Time) (adopted *Sync, adoptErr error, err error) {
+// kept compose.yml applied. It's what it applied, or nil; adoptErr is why
+// a kept one wasn't, for the log.
+func CatchUp(ctx context.Context, d *db.DB, p Project, observed int, sha string, now time.Time) (adopted *Adopted, adoptErr error, err error) {
 	if observed == 0 || sha == "" {
 		return nil, nil, nil
 	}
