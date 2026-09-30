@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -175,5 +176,22 @@ func TestClaimRefuses(t *testing.T) {
 	for _, body := range []string{`{"runner":"bob"}`, `{"runner":"houston-runner-1","wait":26}`, `{"runner":"houston-runner-1","wait":-1}`,
 		`{"runner":"houston-runner-1","wait":"5"}`, `{"wait":5}`, `{"runner":"houston-runner-x"}`} {
 		is(t, claim(h, body), 422, `{"error":"runner must be houston-runner-N and wait 0–25 seconds"}`)
+	}
+}
+
+// A claim tells the deploy's page: in flight now, on its runner.
+func TestClaimTellsThePage(t *testing.T) {
+	a, h := synced(t)
+	id := queue(t, a, "shop", 1, "deploy", time.Now())
+	page, stop := a.Live.Listen(fmt.Sprintf("deploy:%d", id))
+	defer stop()
+	claimed(t, claim(h, `{"runner":"houston-runner-1","wait":0}`))
+	select {
+	case m := <-page:
+		if !strings.Contains(m, `<turbo-stream action="replace" target="deploy_status">`) || !strings.Contains(m, `runner <span class="mono">houston-runner-1</span>`) {
+			t.Errorf("the page got %q", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the page wasn't told")
 	}
 }

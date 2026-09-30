@@ -13,6 +13,7 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/api"
+	"github.com/scttymn/houston/mission-control-go/app/deploys"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/projects"
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
@@ -205,10 +206,12 @@ func (a *App) Router() *web.Router {
 	pages := projects.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer, Stats: a.Stats, Status: a.SystemStatus, Version: a.Version,
 		Refs: a.Refs, Git: a.Git, Backup: a.Backup,
 		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare}}
+	deployPages := deploys.Controller{DB: a.DB, Live: a.Live}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
 		s.Handle("GET /{$}", pages.Index)
 		s.Handle("GET /resources", pages.Resources)
 		s.Handle("GET /projects/{name}", pages.ShowProject)
+		s.Handle("GET /projects/{name}/deploys/{number}", deployPages.Show)
 		s.Handle("POST /projects/{name}/check", pages.Check)
 		s.Handle("POST /projects/{name}/rotate_webhook", pages.RotateWebhook)
 		s.Handle("POST /projects/{name}/deploys", pages.Deploy)

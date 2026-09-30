@@ -5,23 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"net/http"
 	"regexp"
-	"strconv"
 	"time"
 	"unicode/utf8"
 
-	"github.com/a-h/templ"
 	"github.com/scttymn/gantry/db"
-	"github.com/scttymn/gantry/turbo"
 	"github.com/scttymn/gantry/web"
 
+	"github.com/scttymn/houston/mission-control-go/app/deploys"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 )
-
-// DeployStream is a deploy page's live stream.
-func DeployStream(id int64) string { return "deploy:" + strconv.FormatInt(id, 10) }
 
 var projectName = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -64,8 +58,9 @@ func (c Controller) Report(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	d := reported.Deploy
-	if reported.Appended != "" {
-		c.Live.Broadcast(ctx, DeployStream(d.ID), turbo.Append("deploy_log", templ.Raw(html.EscapeString(reported.Appended))))
+	changed := progress.Step != nil || progress.Status != nil || progress.Error != nil || progress.ProposedName != nil
+	if err := deploys.Progress(ctx, c.Live, c.DB, d, reported.Appended, changed); err != nil {
+		c.Log.Warn("the deploy's page wasn't told", "deploy", d.ID, "err", err)
 	}
 	if progress.Step != nil || progress.Status != nil {
 		c.Live.Refresh(FlightBoard, "")

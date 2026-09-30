@@ -12,6 +12,7 @@ import (
 	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/web"
 
+	"github.com/scttymn/houston/mission-control-go/app/deploys"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/knownhosts"
 )
@@ -58,6 +59,9 @@ func (c Controller) Claim(w http.ResponseWriter, r *http.Request) error {
 		}
 		if claimed != nil && claimed.Deploy.ID != 0 {
 			c.Live.Refresh(FlightBoard, "")
+			if err := deploys.Progress(ctx, c.Live, c.DB, claimed.Deploy, "", true); err != nil {
+				c.Log.Warn("the deploy's page wasn't told", "deploy", claimed.Deploy.ID, "err", err)
+			}
 			job, err := c.job(ctx, *claimed)
 			if err != nil {
 				return err

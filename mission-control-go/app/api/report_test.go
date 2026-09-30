@@ -39,7 +39,10 @@ func TestReport(t *testing.T) {
 	defer stopPage()
 
 	is(t, report(h, s.ID, s.Token, `{"step":"Build","log":"<b>built</b>\n"}`), 200, `{"number":1,"status":"in_flight"}`)
-	if m := next(page); m != `<turbo-stream action="append" target="deploy_log"><template>&lt;b&gt;built&lt;/b&gt;`+"\n"+`</template></turbo-stream>` {
+	// The log appended, and the head and steps again for the new step.
+	if m := next(page); !strings.HasPrefix(m, `<turbo-stream action="append" target="deploy_log"><template>&lt;b&gt;built&lt;/b&gt;`+"\n"+`</template></turbo-stream>`) ||
+		!strings.Contains(m, `<turbo-stream action="replace" target="deploy_status"><template><div id="deploy_status"`) ||
+		!strings.Contains(m, `<li data-step="Build" data-state="current">`) {
 		t.Errorf("the page got %q", m)
 	}
 	if m := next(board); !strings.Contains(m, `action="refresh"`) {
@@ -51,7 +54,14 @@ func TestReport(t *testing.T) {
 	}
 
 	is(t, report(h, s.ID, s.Token, `{"log":"more\n"}`), 200, `{"number":1,"status":"in_flight"}`)
+	if m := next(page); m != `<turbo-stream action="append" target="deploy_log"><template>more`+"\n"+`</template></turbo-stream>` { // the log alone
+		t.Errorf("the page got %q", m)
+	}
 	is(t, report(h, s.ID, s.Token, `{"status":"no_go","error":"the health check failed"}`), 200, `{"number":1,"status":"no_go"}`)
+	if m := next(page); !strings.Contains(m, `<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">the health check failed</span></div>`) ||
+		!strings.Contains(m, `data-state="failed"`) {
+		t.Errorf("the page got %q", m)
+	}
 	if d := deployRow(t, a, s.ID); d.Log != "<b>built</b>\nmore\n" || !d.FinishedAt.Valid || d.Error != "the health check failed" {
 		t.Errorf("finished %+v", d)
 	}
