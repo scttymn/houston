@@ -86,7 +86,7 @@ printf '%s' "$out" | grep -qx "bind=127.0.0.1" && grep -q "mission-control bin/r
 : > /fake/docker.log
 out=$(LIB_CMD='IMAGE=mc:go; move_from_rails && echo moved' lib 2>&1); code=$?
 [ "$code" = 0 ] && grep -q "compose -f /opt/houston/compose.yml stop mission-control" /fake/docker.log &&
-  grep -q "docker run --rm --user 1000:1000 --env-file /opt/houston/.env -v houston_mission-control-storage:/rails/storage -v houston_mission-control-data:/data --entrypoint sh mc:go" /fake/docker.log &&
+  grep -q "docker run --rm --user 1000:1000 --env-file /opt/houston/.env -v houston_mission-control-storage:/rails/storage:ro -v houston_mission-control-data:/data --entrypoint sh mc:go" /fake/docker.log &&
   ! grep -q "compose -f /opt/houston/compose.yml start" /fake/docker.log && ok "its data moved, once it's stopped" || bad "move: $code $out $(cat /fake/docker.log)"
 : > /fake/docker.log
 out=$(LIB_CMD='IMAGE=mc:go; move_from_rails; echo "went on"' lib MOVE_FAILS=1 2>&1); code=$?

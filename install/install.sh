@@ -466,8 +466,9 @@ in_mission_control() {
 
 # move_from_rails: on a server running the Rails Mission Control, its data
 # moved into the Go one's, once (docs/plans/mission-control-go.md, decision
-# 1). The Rails one stops, its database is copied (its volume is left as
-# it was: installing the release before brings it back), the copy moved,
+# 1). The Rails one stops, its database files are copied from its volume,
+# mounted read-only (so it's left as it was: installing the release before
+# brings it back), the copy moved,
 # and the git hosts' keys it recorded carried. A Go database from before
 # (a move, then back to Rails) is set aside first. If the move fails, the
 # Rails one starts again and nothing else has changed.
@@ -476,13 +477,14 @@ move_from_rails() {
   step "Moving Mission Control's data from the Rails app to the Go one"
   docker rm -f houston-shadow >/dev/null 2>&1 || true
   compose stop mission-control >/dev/null 2>&1 || true
-  if ! in_mission_control houston_mission-control-storage:/rails/storage houston_mission-control-data:/data -- '
+  if ! in_mission_control houston_mission-control-storage:/rails/storage:ro houston_mission-control-data:/data -- '
     set -e
     stamp=$(date -u +%Y%m%d%H%M%S)
     for f in /data/mission-control-go.sqlite3*; do [ ! -e "$f" ] || mv "$f" "/data/before-$stamp-${f##*/}"; done
-    sqlite3 /rails/storage/production.sqlite3 ".backup /data/rails-$stamp.sqlite3"
-    sqlite3 "/data/rails-$stamp.sqlite3" "PRAGMA journal_mode=DELETE" >/dev/null
-    /app move "/data/rails-$stamp.sqlite3"
+    mkdir "/data/rails-$stamp"
+    for f in /rails/storage/production.sqlite3 /rails/storage/production.sqlite3-wal; do [ ! -e "$f" ] || cp "$f" "/data/rails-$stamp/"; done
+    sqlite3 "/data/rails-$stamp/production.sqlite3" "PRAGMA journal_mode=DELETE" >/dev/null
+    /app move "/data/rails-$stamp/production.sqlite3"
     [ ! -f /rails/storage/known_hosts ] || cp /rails/storage/known_hosts /data/known_hosts'; then
     compose start mission-control >/dev/null 2>&1 || true
     fail "couldn't move Mission Control's data; the Rails one is running again, as it was"
