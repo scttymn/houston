@@ -4,51 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/scttymn/houston/internal/mission"
 	"github.com/scttymn/houston/internal/project"
 )
 
-// inspection is houston inspect --json: what Mission Control is told
-// (sync), and what its Add project page shows (preview). Mission Control
-// runs this binary to read a linked repo's compose.yml, so compose is only
-// ever interpreted by one parser.
-type inspection struct {
-	Sync    mission.SyncRequest `json:"sync"`
-	Preview preview             `json:"preview"`
-}
-
-type preview struct {
-	Services []previewService `json:"services"`
-	Port     int              `json:"port"`
-	Health   string           `json:"health"`
-	CPUs     string           `json:"cpus,omitempty"`
-	Memory   string           `json:"memory,omitempty"`
-	Test     bool             `json:"test"`
-	Backups  previewBackups   `json:"backups"`
-}
-
-type previewService struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
-	App   bool   `json:"app"`
-}
-
-type previewBackups struct {
-	Schedule   string   `json:"schedule"`
-	KeepAuto   int      `json:"keep_auto"`
-	KeepDeploy int      `json:"keep_deploy"`
-	Volumes    []string `json:"volumes"`
-}
-
 func runInspect(file string, asJSON bool, stdout, stderr io.Writer) int {
 	p, ok := loadProject(file, stderr)
 	if !ok {
 		return exitUsage
 	}
-	in := inspection{Sync: mission.RequestFor(p), Preview: previewOf(p)}
+	in := mission.InspectionFor(p)
 	if asJSON {
 		out, err := json.MarshalIndent(in, "", "  ")
 		if err != nil {
@@ -62,31 +29,7 @@ func runInspect(file string, asJSON bool, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func previewOf(p *project.Project) preview {
-	pv := preview{Port: p.AppPort, Health: p.Houston.Health, Test: p.Houston.Commands.Test != "",
-		Backups: previewBackups{Schedule: p.Houston.Backups.Schedule, KeepAuto: p.Houston.Backups.KeepAuto, KeepDeploy: p.Houston.Backups.KeepDeploy, Volumes: []string{}}}
-	names := make([]string, 0, len(p.Compose.Services))
-	for name := range p.Compose.Services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		svc := p.Compose.Services[name]
-		image := svc.Image
-		if name == p.AppService {
-			image = ""
-		}
-		pv.Services = append(pv.Services, previewService{Name: name, Image: image, App: name == p.AppService})
-	}
-	pv.CPUs, pv.Memory = mission.Limits(p)
-	for name := range p.Compose.Volumes {
-		pv.Backups.Volumes = append(pv.Backups.Volumes, name)
-	}
-	sort.Strings(pv.Backups.Volumes)
-	return pv
-}
-
-func printInspection(w io.Writer, p *project.Project, in inspection) {
+func printInspection(w io.Writer, p *project.Project, in mission.Inspection) {
 	pv := in.Preview
 	app := fmt.Sprintf("%s · port %d · health %s", p.AppService, pv.Port, pv.Health)
 	if pv.CPUs != "" {

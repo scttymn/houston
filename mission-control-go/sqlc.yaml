@@ -52,3 +52,7 @@ sql:
             go_type: { type: Refs }
           - column: storage_locations.settings
             go_type: { type: Settings }
+          - column: repo_links.deploy_key_private
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: repo_links.webhook_secret
+            go_type: github.com/scttymn/gantry/crypt.String

@@ -83,6 +83,9 @@ var tables = []table{
 		c("log", text), c("token_digest", text), c("heartbeat_at", timestamp), c("started_at", timestamp), c("finished_at", timestamp)}, stamps()...)},
 	{name: "api_tokens", words: "API token", columns: append([]column{c("id", integer), c("name", text), c("token_digest", text),
 		c("last_used_at", timestamp)}, stamps()...)},
+	{name: "repo_links", words: "Add project draft", columns: append([]column{c("id", integer), c("repo_url", text), c("branch", text),
+		c("compose_path", text), c("deploy_key_private", encrypted), c("deploy_key_public", text), c("webhook_secret", encrypted),
+		c("preview", nullable), c("preview_sha", text)}, stamps()...)},
 }
 
 // report is how many rows moved, in words: "2 projects".

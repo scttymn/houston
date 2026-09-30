@@ -105,6 +105,21 @@ func (q *Queries) MoveGenerationForward(ctx context.Context, arg MoveGenerationF
 	return result.RowsAffected()
 }
 
+const moveRepo = `-- name: MoveRepo :exec
+UPDATE projects SET repo_url = ?, last_check_error = '', updated_at = ? WHERE id = ?
+`
+
+type MoveRepoParams struct {
+	RepoUrl   string
+	UpdatedAt time.Time
+	ID        int64
+}
+
+func (q *Queries) MoveRepo(ctx context.Context, arg MoveRepoParams) error {
+	_, err := q.db.ExecContext(ctx, moveRepo, arg.RepoUrl, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const polledProjects = `-- name: PolledProjects :many
 SELECT id FROM projects WHERE webhook_verified_at IS NOT NULL AND repo_url != '' ORDER BY id
 `
@@ -814,6 +829,37 @@ func (q *Queries) SetMaintenance(ctx context.Context, arg SetMaintenanceParams) 
 		arg.MaintenanceSince,
 		arg.MaintenanceBy,
 		arg.MaintenanceMessage,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
+const setRepo = `-- name: SetRepo :exec
+UPDATE projects SET repo_url = ?, branch = ?, compose_path = ?, deploy_key_private = ?, deploy_key_public = ?, webhook_secret = ?, updated_at = ?
+WHERE id = ?
+`
+
+type SetRepoParams struct {
+	RepoUrl          string
+	Branch           string
+	ComposePath      string
+	DeployKeyPrivate crypt.String
+	DeployKeyPublic  string
+	WebhookSecret    crypt.String
+	UpdatedAt        time.Time
+	ID               int64
+}
+
+// A project's repo, as Add project linked it.
+func (q *Queries) SetRepo(ctx context.Context, arg SetRepoParams) error {
+	_, err := q.db.ExecContext(ctx, setRepo,
+		arg.RepoUrl,
+		arg.Branch,
+		arg.ComposePath,
+		arg.DeployKeyPrivate,
+		arg.DeployKeyPublic,
+		arg.WebhookSecret,
 		arg.UpdatedAt,
 		arg.ID,
 	)

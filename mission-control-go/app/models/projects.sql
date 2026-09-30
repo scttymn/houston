@@ -107,3 +107,11 @@ UPDATE projects SET last_check_error = ?, last_checked_at = ?, updated_at = ? WH
 -- The projects that deploy on push: one whose webhook never arrived
 -- doesn't deploy on push yet, so it isn't polled.
 SELECT id FROM projects WHERE webhook_verified_at IS NOT NULL AND repo_url != '' ORDER BY id;
+
+-- name: SetRepo :exec
+-- A project's repo, as Add project linked it.
+UPDATE projects SET repo_url = ?, branch = ?, compose_path = ?, deploy_key_private = ?, deploy_key_public = ?, webhook_secret = ?, updated_at = ?
+WHERE id = ?;
+
+-- name: MoveRepo :exec
+UPDATE projects SET repo_url = ?, last_check_error = '', updated_at = ? WHERE id = ?;

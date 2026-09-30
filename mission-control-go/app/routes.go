@@ -116,6 +116,10 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}/deploys", remote.Deploys)
 		s.Handle("POST /projects/{name}/deploys", remote.DeployNow)
 		s.Handle("POST /projects/{name}/restores", remote.RequestRestore)
+		s.Handle("POST /links", remote.StartLink)
+		s.Handle("POST /links/{id}/access", remote.LinkAccess)
+		s.Handle("POST /links/{id}/read", remote.ReadLink)
+		s.Handle("POST /links/{id}/save", remote.SaveLink)
 		s.Handle("GET /projects/{name}/deploys/{number}", remote.Deploy)
 		s.Handle("GET /projects/{name}/backups/{id}", remote.ShowBackup)
 		s.Handle("GET /projects/{name}/volumes", remote.Volumes)
@@ -128,6 +132,7 @@ func (a *App) Router() *web.Router {
 			s.Handle(method+" /projects/{name}/maintenance", remote.Maintenance)
 			s.Handle(method+" /projects/{name}/volumes/{volume}", remote.ChooseVolume)
 			s.Handle(method+" /projects/{name}/backup_target", remote.BackupTarget)
+			s.Handle(method+" /projects/{name}/repo", remote.MoveRepo)
 		}
 		s.Handle("POST /projects/{name}/secrets/{key}/generate", remote.GenerateSecret)
 		s.Handle("DELETE /projects/{name}/secrets/{key}", remote.RemoveSecret)

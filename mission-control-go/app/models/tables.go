@@ -147,6 +147,20 @@ type ProjectVolume struct {
 	UpdatedAt  time.Time
 }
 
+type RepoLink struct {
+	ID               int64
+	RepoUrl          string
+	Branch           string
+	ComposePath      string
+	DeployKeyPrivate crypt.String
+	DeployKeyPublic  string
+	WebhookSecret    crypt.String
+	Preview          sql.NullString
+	PreviewSha       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type Runner struct {
 	ID         int64
 	Name       string

@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 Add project draft" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -311,5 +311,19 @@ func TestAPITokens(t *testing.T) {
 	token, err := models.New(to.Read).APITokenByDigest(context.Background(), models.Digest("hou_laptop-token"))
 	if err != nil || token.Name != "laptop" || !token.LastUsedAt.Time.Equal(time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)) {
 		t.Errorf("laptop's: %+v %v", token, err)
+	}
+}
+
+// An Add project draft moves with its key, decrypted and encrypted again.
+func TestRepoLinks(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	l, err := models.New(to.Read).LinkByID(context.Background(), 1)
+	if err != nil || l.DeployKeyPrivate.Reveal() != "-----NEW KEY-----" || l.WebhookSecret.Reveal() != "new-whsec" ||
+		l.Preview.String != `{"sync":{"name":"new"}}` || l.Branch != "main" {
+		t.Errorf("draft %+v %v", l, err)
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scttymn/houston/internal/mission"
+	"github.com/scttymn/houston/internal/project"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 )
 
@@ -163,4 +165,36 @@ func (g Git) Commit(ctx context.Context, link Link, sha string) string {
 		return err.Error()
 	}
 	return problem
+}
+
+// Read fetches only the compose file at the branch's head and inspects it
+// with houston's own parser (mission.InspectionFor), so Mission Control
+// never interprets compose.yml differently from the CLI. It's the head's
+// commit and what was read, or the problems in the file or in reaching it.
+func (g Git) Read(ctx context.Context, link Link) (sha string, in *mission.Inspection, problems string) {
+	err := g.withKey(link, func(env map[string]string, key, dir string) error {
+		checkout := filepath.Join(dir, "repo")
+		for _, argv := range [][]string{
+			{"git", "clone", "--depth", "1", "--single-branch", "--branch", link.Branch, "--no-tags", "--filter=blob:none", "--no-checkout", "--", link.RepoURL, checkout},
+			{"git", "-C", checkout, "checkout", "HEAD", "--", link.ComposePath},
+		} {
+			if r := g.Run(ctx, argv, env); !r.OK {
+				problems = g.explain(r.Output, key)
+				return nil
+			}
+		}
+		sha = strings.TrimSpace(g.Run(ctx, []string{"git", "-C", checkout, "rev-parse", "HEAD"}, env).Output)
+		p, err := project.Load(filepath.Join(checkout, link.ComposePath))
+		if err != nil {
+			problems = strings.TrimSpace(strings.ReplaceAll(err.Error(), checkout+"/", ""))
+			return nil
+		}
+		inspected := mission.InspectionFor(p)
+		in = &inspected
+		return nil
+	})
+	if err != nil {
+		problems = err.Error()
+	}
+	return sha, in, problems
 }
