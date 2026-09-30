@@ -95,5 +95,9 @@ ProjectCopy.create!(from_project: shop, project: blog, deploy: blog.deploys.firs
                     sha: "c" * 40, by: "token laptop", status: "go", log: "Copy data ok\nHandover ok\n",
                     handed_over: [ "shop.example.com" ], handed_over_at: Time.utc(2026, 9, 30, 8, 30))
 
+# The server's last update, put back when the new version didn't install.
+ServerUpdate.create!(to_version: "v0.4.27", from_version: "v0.4.26", status: "rolled_back", step: "v0.4.27 didn't install; putting v0.4.26 back",
+                     log: "==> houston update: installing v0.4.27\n", started_at: Time.utc(2026, 9, 20, 10), finished_at: Time.utc(2026, 9, 20, 10, 12))
+
 puts "made #{ActiveRecord::Base.connection_db_config.database}: #{Installation.count} installation, #{Project.count} projects, " \
-     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts, #{ProjectDeletion.count} deletions, #{ProjectCopy.count} copies"
+     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts, #{ProjectDeletion.count} deletions, #{ProjectCopy.count} copies, #{ServerUpdate.count} server updates"

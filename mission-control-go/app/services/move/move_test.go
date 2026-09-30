@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft, 1 copy" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft, 1 copy, 1 server update" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -353,5 +353,19 @@ func TestCopies(t *testing.T) {
 		c.ProjectID.Int64 != 2 || c.FromProjectID.Int64 != 1 || c.DeployID.Int64 != 3 || c.SnapshotRunID.Int64 != 1 ||
 		strings.Join(c.HandedOver.V, ",") != "shop.example.com" || !c.HandedOverAt.Time.Equal(time.Date(2026, 9, 30, 8, 30, 0, 0, time.UTC)) || c.UndoneAt.Valid {
 		t.Errorf("= %+v %v", c, err)
+	}
+}
+
+// The server's updates move: the last one says how it went.
+func TestServerUpdates(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	u, err := models.New(to.Read).LastUpdate(context.Background())
+	if err != nil || u.ToVersion != "v0.4.27" || u.FromVersion != "v0.4.26" || u.Status != "rolled_back" || u.Step != "v0.4.27 didn't install; putting v0.4.26 back" ||
+		u.Log != "==> houston update: installing v0.4.27\n" || !u.StartedAt.Equal(time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)) || !u.FinishedAt.Valid {
+		t.Errorf("= %+v %v", u, err)
 	}
 }

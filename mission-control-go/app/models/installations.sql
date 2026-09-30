@@ -16,3 +16,6 @@ SELECT EXISTS (SELECT 1 FROM installations WHERE registry_cleanup_since >= @sinc
 
 -- name: SetLatestRelease :exec
 UPDATE installations SET latest_release = ?, latest_release_url = ?, latest_release_checked_at = ?, updated_at = ? WHERE id = 1;
+
+-- name: SetPortOpen :exec
+UPDATE installations SET port_open = ?, updated_at = ?;

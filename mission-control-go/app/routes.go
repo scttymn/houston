@@ -19,8 +19,10 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/port"
 	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
+	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -70,6 +72,11 @@ type App struct {
 	Delete, CleanRegistry *jobs.Job[models.DeletionArgs]
 	// CopyCleanUp removes a failed copy's new project.
 	CopyCleanUp *jobs.Job[models.CopyArgs]
+	// Updater updates the server to a release, and ServerUpdate settles
+	// and follows it; Port opens port 3000 or closes it.
+	Updater      serverupdate.Updater
+	ServerUpdate *jobs.Job[models.UpdateArgs]
+	Port         *port.Port
 	// Registry is Houston's image registry; KamalHome, where Kamal keeps
 	// its files on the host (HOUSTON_KAMAL_HOME).
 	Registry  registry.Registry
@@ -98,7 +105,7 @@ func (a *App) Router() *web.Router {
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
 		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git,
-		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp}
+		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Updater: a.Updater, FollowUpdate: a.ServerUpdate, Port: a.Port, Release: a.Release}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -129,6 +136,10 @@ func (a *App) Router() *web.Router {
 	rt.Scope("/api/v1", api.V1Door{DB: a.DB}.Pipeline(), func(s *web.Scope) {
 		s.Handle("GET /me", remote.Me)
 		s.Handle("GET /settings", remote.Settings)
+		s.Handle("GET /update", remote.Update)
+		s.Handle("POST /update", remote.StartUpdate)
+		s.Handle("POST /update/check", remote.CheckRelease)
+		s.Handle("GET /port", remote.ShowPort)
 		s.Handle("GET /storage", remote.Storage)
 		s.Handle("GET /projects", remote.Projects)
 		s.Handle("GET /projects/{name}", remote.Project)
@@ -148,6 +159,7 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}/secrets", remote.Secrets)
 		for _, method := range []string{"PATCH", "PUT"} { // Rails' update is both
 			s.Handle(method+" /settings", remote.UpdateSettings)
+			s.Handle(method+" /port", remote.SetPort)
 			s.Handle(method+" /storage/{location}", remote.DefaultStorage)
 			s.Handle(method+" /projects/{name}/secrets/{key}", remote.SetSecret)
 			s.Handle(method+" /projects/{name}/maintenance", remote.Maintenance)

@@ -9,6 +9,9 @@ import (
 
 var release = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`)
 
+// IsRelease is whether version is a release's tag, vX.Y.Z.
+func IsRelease(version string) bool { return release.MatchString(version) }
+
 // NewerRelease is latest when it's a newer release than current (both
 // vX.Y.Z, compared by number), else "": a server built from a checkout, or
 // dev, is told of none.

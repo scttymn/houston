@@ -15,6 +15,9 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
+	"github.com/scttymn/houston/mission-control-go/app/services/owncontainer"
+	"github.com/scttymn/houston/mission-control-go/app/services/port"
+	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
 	"github.com/scttymn/houston/mission-control-go/test"
 )
 
@@ -41,6 +44,9 @@ func New(t testing.TB) *app.App {
 		Live: live.New(signer, live.Options{}), Identity: app.Identity("test-secret-key-base"), RunnerToken: RunnerToken, Version: "dev",
 		DockerCLI: fake, Snapshots: &backup.Snapshots{Docker: fake}, Tools: "houston/mission-control:test", ToolsBin: "/app",
 		Services: dns.Services{MissionControl: "http://mission-control:8080", Apps: "http://kamal-proxy:80"}}
+	own := owncontainer.Own{Docker: fake, Hostname: "mc"}
+	a.Updater = serverupdate.Updater{DB: d, Docker: fake, Own: own, Version: a.Version, Repo: "scttymn/houston", Log: a.Log}
+	a.Port = &port.Port{DB: d, Own: own}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)
 	}

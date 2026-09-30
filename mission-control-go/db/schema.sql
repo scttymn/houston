@@ -211,6 +211,19 @@ CREATE TABLE secrets (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (project_id, key)
 );
+CREATE TABLE server_updates (
+  id INTEGER PRIMARY KEY,
+  to_version TEXT NOT NULL,
+  from_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'go', 'rolled_back', 'no_go')),
+  -- The installer's latest step, and the helper's log (its last lines).
+  step TEXT NOT NULL DEFAULT '',
+  log TEXT NOT NULL DEFAULT '',
+  started_at DATETIME NOT NULL,
+  finished_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE storage_locations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -243,3 +256,4 @@ CREATE INDEX project_deletions_name ON project_deletions (name);
 CREATE UNIQUE INDEX project_deletions_one_active ON project_deletions (project_id) WHERE status IN ('queued', 'running');
 CREATE INDEX project_deletions_project ON project_deletions (project_id);
 CREATE INDEX project_hosts_project_id ON project_hosts (project_id);
+CREATE UNIQUE INDEX server_updates_one_running ON server_updates (status) WHERE status = 'running';

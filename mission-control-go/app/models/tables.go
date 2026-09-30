@@ -219,6 +219,19 @@ type Secret struct {
 	UpdatedAt time.Time
 }
 
+type ServerUpdate struct {
+	ID          int64
+	ToVersion   string
+	FromVersion string
+	Status      string
+	Step        string
+	Log         string
+	StartedAt   time.Time
+	FinishedAt  sql.NullTime
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type StorageLocation struct {
 	ID             int64
 	Name           string

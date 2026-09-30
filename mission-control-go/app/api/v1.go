@@ -61,9 +61,12 @@ func (c V1) Me(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	var latest, updating *string // updating: the server update's version, with server updates (batch 3)
+	var latest, updating *string
 	if newer := models.NewerRelease(c.Version, inst.LatestRelease); newer != "" {
 		latest = &newer
+	}
+	if running, err := models.New(c.DB.Read).RunningUpdate(r.Context()); err == nil {
+		updating = &running.ToVersion
 	}
 	return web.JSON(w, http.StatusOK, map[string]any{"token": token.Name, "server": inst.BaseDomain, "version": c.Version,
 		"latest": latest, "updating": updating})

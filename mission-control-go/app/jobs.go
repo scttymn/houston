@@ -78,6 +78,11 @@ func (a *App) DefineJobs() error {
 					Error: fmt.Sprintf("%s; %s wasn't removed (%v): delete it by hand", c.Error, c.ToName, err)})
 			}
 		}})
+	// The server's update: how it went, once its helper ends, looked at
+	// every minute; while one runs, it's also followed every few seconds
+	// from its start, so the board can show each step.
+	a.ServerUpdate = jobs.Define(a.Jobs, "server_update", a.settleUpdate, jobs.Opts[models.UpdateArgs]{})
+	a.ServerUpdate.Every(time.Minute, models.UpdateArgs{})
 	a.LatestRelease = jobs.Define(a.Jobs, "check_latest_release", a.checkLatestRelease, jobs.Opts[struct{}]{})
 	a.LatestRelease.Every(6*time.Hour, struct{}{})
 	return nil
@@ -185,6 +190,24 @@ func (a *App) deleteProject(ctx context.Context, args models.DeletionArgs) error
 	return nil
 }
 
+// settleUpdate records how the server's update went, and follows it.
+func (a *App) settleUpdate(ctx context.Context, args models.UpdateArgs) error {
+	changed, err := a.Updater.Settle(ctx, time.Now())
+	if err != nil {
+		return err
+	}
+	if changed {
+		a.Live.Refresh(api.FlightBoard, "")
+	}
+	if args.Follow {
+		if running, err := models.New(a.DB.Read).UpdateRunning(ctx); err != nil || !running {
+			return err
+		}
+		_, err = a.ServerUpdate.EnqueueIn(ctx, args, api.FollowEvery)
+	}
+	return err
+}
+
 // copyWait is how long a copy's clean-up waits before trying again.
 const copyWait = 30 * time.Second
 
@@ -288,25 +311,15 @@ func (a *App) noteDeletion(ctx context.Context, id int64, line string) {
 // checkLatestRelease asks GitHub for Houston's latest release, for the
 // flight board's note; a failure is logged, and the next check tries again.
 func (a *App) checkLatestRelease(ctx context.Context, _ struct{}) error {
-	q := models.New(a.DB.Read)
-	inst, err := q.CurrentInstallation(ctx)
+	_, changed, err := a.Release.Check(ctx, a.DB, time.Now())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
-		return err
-	}
-	tag, url, err := a.Release.Latest(ctx)
-	if err != nil {
 		a.Log.Warn("couldn't check the latest release", "err", err)
 		return nil
 	}
-	now := time.Now()
-	if err := models.New(a.DB.Write).SetLatestRelease(ctx, models.SetLatestReleaseParams{LatestRelease: tag, LatestReleaseUrl: url,
-		LatestReleaseCheckedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now}); err != nil {
-		return err
-	}
-	if tag != inst.LatestRelease {
+	if changed {
 		a.Live.Refresh(api.FlightBoard, "")
 	}
 	return nil

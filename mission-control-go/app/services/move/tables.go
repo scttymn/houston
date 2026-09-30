@@ -94,6 +94,8 @@ var tables = []table{
 		c("deploy_id", integer), c("snapshot_run_id", integer), renamed("from_name", `"from"`, text), renamed("to_name", `"to"`, text),
 		c("sha", text), renamed("requested_by", "by", text), c("status", text), c("error", text), c("log", text), c("handed_over", jsonText),
 		c("handed_over_at", timestamp), c("undone_at", timestamp)}, stamps()...)},
+	{name: "server_updates", words: "server update", columns: append([]column{c("id", integer), c("to_version", text), c("from_version", text),
+		c("status", text), c("step", text), c("log", text), c("started_at", timestamp), c("finished_at", timestamp)}, stamps()...)},
 }
 
 // report is how many rows moved, in words: "2 projects".

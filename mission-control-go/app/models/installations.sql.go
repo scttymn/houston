@@ -97,3 +97,17 @@ func (q *Queries) SetLatestRelease(ctx context.Context, arg SetLatestReleasePara
 	)
 	return err
 }
+
+const setPortOpen = `-- name: SetPortOpen :exec
+UPDATE installations SET port_open = ?, updated_at = ?
+`
+
+type SetPortOpenParams struct {
+	PortOpen  bool
+	UpdatedAt time.Time
+}
+
+func (q *Queries) SetPortOpen(ctx context.Context, arg SetPortOpenParams) error {
+	_, err := q.db.ExecContext(ctx, setPortOpen, arg.PortOpen, arg.UpdatedAt)
+	return err
+}

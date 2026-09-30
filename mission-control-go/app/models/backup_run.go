@@ -10,7 +10,8 @@ import (
 )
 
 // ErrBusy is a backup run that must wait: its project has another running,
-// or a restore underway that it would catch half done.
+// or a restore underway that it would catch half done, or the server is
+// updating.
 var ErrBusy = errors.New("the project is already backing up")
 
 // ClaimRun flips run from queued to running with a new token, in tx, if
@@ -19,6 +20,13 @@ var ErrBusy = errors.New("the project is already backing up")
 // (a second delivery of its job); ErrBusy when it must wait.
 func ClaimRun(ctx context.Context, tx *db.Tx, run BackupRun, now time.Time) (string, error) {
 	q := New(tx)
+	// The server's update recreates the runners and the helpers' network.
+	if updating, err := q.UpdateRunning(ctx); err != nil || updating {
+		if err == nil {
+			err = ErrBusy
+		}
+		return "", err
+	}
 	stale, err := q.StaleRunning(ctx, StaleRunningParams{ProjectID: run.ProjectID, HeartbeatAt: now.Add(-BackupStaleAfter)})
 	if err != nil {
 		return "", err

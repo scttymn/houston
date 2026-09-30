@@ -4,12 +4,17 @@ package release
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/scttymn/gantry/db"
+
+	"github.com/scttymn/houston/mission-control-go/app/models"
 )
 
 // Timeout is how long GitHub may take.
@@ -65,4 +70,21 @@ func (c Checker) Latest(ctx context.Context) (tag, url string, err error) {
 		return "", "", fmt.Errorf("%q isn't this repo's release page", release.URL)
 	}
 	return release.Tag, release.URL, nil
+}
+
+// Check asks GitHub for the latest release and keeps it on the
+// installation: its tag, and whether it's news (the flight board says so).
+// A failed check keeps what was known.
+func (c Checker) Check(ctx context.Context, d *db.DB, now time.Time) (tag string, changed bool, err error) {
+	inst, err := models.New(d.Read).CurrentInstallation(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	tag, url, err := c.Latest(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	err = models.New(d.Write).SetLatestRelease(ctx, models.SetLatestReleaseParams{LatestRelease: tag, LatestReleaseUrl: url,
+		LatestReleaseCheckedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now})
+	return tag, tag != inst.LatestRelease, err
 }

@@ -15,13 +15,18 @@ var RunnerName = regexp.MustCompile(`^houston-runner-\d+$`)
 
 // ClaimNext hands the oldest claimable queued deploy to runner, in tx, or
 // nil. Silent in-flight deploys are finished first; a project with a live
-// one keeps its queued deploy back. None while the registry is cleaned.
+// one keeps its queued deploy back. None while the registry is cleaned, or
+// the server updates.
 // Without a deploy to hand over, it's only the copies' clean-ups those
 // finished need, when there are some.
 func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*Started, error) {
 	q := New(tx)
 	cleaning, err := q.RegistryCleaning(ctx, sql.NullTime{Time: now.Add(-RegistryCleanupStale), Valid: true})
 	if err != nil || cleaning {
+		return nil, err
+	}
+	// Nor while the server updates: the installer recreates the runners.
+	if updating, err := q.UpdateRunning(ctx); err != nil || updating {
 		return nil, err
 	}
 	stale, err := q.StaleInFlight(ctx, now.Add(-StaleAfter))

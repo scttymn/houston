@@ -218,3 +218,48 @@ func TestCleanRegistry(t *testing.T) {
 		t.Errorf("log %q, locked %v", log, locked)
 	}
 }
+
+// While an update runs, it's followed every few seconds from its start; the
+// minute's look doesn't start a chain, and one that's done ends it.
+func TestServerUpdateFollows(t *testing.T) {
+	a := newApp(t)
+	fake := &dockercmdtest.Fake{}
+	a.Updater.Docker = fake
+	fake.On(dockercmdtest.OK("running 0\n"), "inspect")
+	fake.On(dockercmdtest.OK("==> Pulling Houston v0.4.3\n"), "logs")
+	a.DB.Write.Exec(`INSERT INTO server_updates (to_version, from_version, started_at) VALUES ('v0.4.3', 'v0.4.2', CURRENT_TIMESTAMP)`)
+	follows := func() int {
+		pending, _ := a.Jobs.Pending(t.Context())
+		n := 0
+		for _, p := range pending {
+			if p.Name == "server_update" && strings.Contains(string(p.Args), `"follow":true`) {
+				n++
+			}
+		}
+		return n
+	}
+	a.ServerUpdate.Enqueue(t.Context(), models.UpdateArgs{})
+	a.Jobs.Drain(t.Context())
+	if n := follows(); n != 0 {
+		t.Errorf("the minute's look followed: %d", n)
+	}
+	a.ServerUpdate.Enqueue(t.Context(), models.UpdateArgs{Follow: true})
+	a.Jobs.Drain(t.Context())
+	if n := follows(); n != 1 {
+		t.Errorf("follows %d", n)
+	}
+	var step string
+	a.DB.Read.QueryRow(`SELECT step FROM server_updates`).Scan(&step)
+	if step != "Pulling Houston v0.4.3" {
+		t.Errorf("step %q", step)
+	}
+
+	// Done: the follow that's due runs, and none comes after it (the one
+	// already scheduled is all that's left).
+	a.DB.Write.Exec(`UPDATE server_updates SET status = 'go'`)
+	a.ServerUpdate.Enqueue(t.Context(), models.UpdateArgs{Follow: true})
+	a.Jobs.Drain(t.Context())
+	if n := follows(); n != 1 {
+		t.Errorf("followed one that's done: %d", n)
+	}
+}

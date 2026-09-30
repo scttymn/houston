@@ -34,6 +34,11 @@ type Config struct {
 	// Repo is Houston's own on GitHub, for its latest release
 	// (HOUSTON_REPO, default scttymn/houston).
 	Repo string
+	// RunnerImage is the runners' image (HOUSTON_RUNNER_IMAGE, the installer
+	// sets it): it has docker compose, for the server update's helper and
+	// the port switch's. Runners is how many the installer keeps
+	// (HOUSTON_RUNNERS).
+	RunnerImage, Runners string
 	// ToolsImage makes volumes' directories (HOUSTON_TOOLS_IMAGE).
 	ToolsImage string
 	// TunnelHost is cloudflared's name on the Docker network
@@ -83,6 +88,7 @@ func Load(getenv func(string) string) Config {
 	c.KamalHome = getenv("HOUSTON_KAMAL_HOME")
 	c.RegistryURL = or("HOUSTON_REGISTRY_URL", "http://registry:5000")
 	c.ComposeProject = or("HOUSTON_COMPOSE_PROJECT", "houston")
+	c.RunnerImage, c.Runners = getenv("HOUSTON_RUNNER_IMAGE"), getenv("HOUSTON_RUNNERS")
 	c.EncryptionKeys = getenv("ENCRYPTION_KEYS")
 	if c.EncryptionKeys == "" && c.Env != "production" {
 		c.EncryptionKeys = devEncryptionKey

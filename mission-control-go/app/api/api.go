@@ -15,6 +15,9 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
+	"github.com/scttymn/houston/mission-control-go/app/services/port"
+	"github.com/scttymn/houston/mission-control-go/app/services/release"
+	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
 	"github.com/scttymn/houston/mission-control-go/app/services/volumes"
 )
 
@@ -57,6 +60,14 @@ type Controller struct {
 	CopyCleanUp interface {
 		Enqueue(ctx context.Context, a models.CopyArgs) (int64, error)
 	}
+	// Updater updates the server; FollowUpdate follows one running; Port
+	// opens or closes port 3000; Release asks GitHub for the latest one.
+	Updater      serverupdate.Updater
+	FollowUpdate interface {
+		EnqueueIn(ctx context.Context, a models.UpdateArgs, d time.Duration) (int64, error)
+	}
+	Port    *port.Port
+	Release release.Checker
 }
 
 func (c Controller) placement() volumes.Placement {
