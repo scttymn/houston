@@ -35,6 +35,8 @@ type App struct {
 	Identity string
 	// RunnerToken is HOUSTON_RUNNER_TOKEN, the runner API's bearer token.
 	RunnerToken string
+	// Version is which Houston this is (HoustonVersion).
+	Version string
 	// Cloudflare is its API's address: "" is Cloudflare's own (a test's fake).
 	Cloudflare string
 	// Services are where the tunnel sends what it routes: Mission Control,
@@ -92,6 +94,12 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /deploys/{id}/snapshot", runner.Snapshot)
 		s.Handle("POST /deploys/{id}/restore_data", runner.RequestRestoreData)
 		s.Handle("GET /deploys/{id}/restore_data", runner.RestoreData)
+	})
+
+	// The personal API: the houston CLI with --server, and agents.
+	remote := api.V1{Controller: runner, Version: a.Version}
+	rt.Scope("/api/v1", api.V1Door{DB: a.DB}.Pipeline(), func(s *web.Scope) {
+		s.Handle("GET /me", remote.Me)
 	})
 
 	homePage := home.Controller{DB: a.DB}

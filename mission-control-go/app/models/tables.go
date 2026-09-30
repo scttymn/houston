@@ -11,6 +11,15 @@ import (
 	"github.com/scttymn/gantry/crypt"
 )
 
+type ApiToken struct {
+	ID          int64
+	Name        string
+	TokenDigest string
+	LastUsedAt  sql.NullTime
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type BackupRun struct {
 	ID               int64
 	ProjectID        int64

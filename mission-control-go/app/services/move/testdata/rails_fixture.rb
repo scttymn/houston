@@ -76,5 +76,9 @@ BackupRun.create!(project: shop, location: nas, kind: "auto", reason: "schedule"
 BackupRun.create!(project: shop, location: nas, kind: "deploy", reason: "deploy", deploy_number: 1, status: "no_go",
                   error: "restic: repository is locked", heartbeat_at: Time.utc(2026, 9, 1, 10, 1))
 
+# Personal tokens: laptop's is known, so its move can be checked.
+ApiToken.create!(name: "laptop", token_digest: ApiToken.digest("hou_laptop-token"), last_used_at: Time.utc(2026, 9, 30, 9))
+ApiToken.issue!("agent")
+
 puts "made #{ActiveRecord::Base.connection_db_config.database}: #{Installation.count} installation, #{Project.count} projects, " \
-     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs"
+     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens"

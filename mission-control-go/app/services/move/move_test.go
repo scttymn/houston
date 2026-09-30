@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -298,5 +298,18 @@ func TestBackupRuns(t *testing.T) {
 	to.Read.QueryRow(`SELECT deploy_number, error, bytes, scheduled_for FROM backup_runs WHERE id = 2`).Scan(&deployNumber, &errText, &noBytes, &noDay)
 	if deployNumber != 1 || errText != "restic: repository is locked" || noBytes.Valid || noDay.Valid {
 		t.Errorf("the deploy's: %d %q %v %v", deployNumber, errText, noBytes, noDay)
+	}
+}
+
+// Personal tokens keep working: only their SHA-256 was ever kept.
+func TestAPITokens(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	token, err := models.New(to.Read).APITokenByDigest(context.Background(), models.Digest("hou_laptop-token"))
+	if err != nil || token.Name != "laptop" || !token.LastUsedAt.Time.Equal(time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("laptop's: %+v %v", token, err)
 	}
 }

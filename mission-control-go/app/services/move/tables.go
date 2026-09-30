@@ -81,6 +81,8 @@ var tables = []table{
 		c("operation", text), c("kind", text), c("reason", text), c("status", text), c("deploy_number", integer), c("scheduled_for", day),
 		c("sha", text), c("snapshot_id", text), c("source_snapshot_id", text), c("bytes", integer), c("found", jsonText), c("error", text),
 		c("log", text), c("token_digest", text), c("heartbeat_at", timestamp), c("started_at", timestamp), c("finished_at", timestamp)}, stamps()...)},
+	{name: "api_tokens", words: "API token", columns: append([]column{c("id", integer), c("name", text), c("token_digest", text),
+		c("last_used_at", timestamp)}, stamps()...)},
 }
 
 // report is how many rows moved, in words: "2 projects".

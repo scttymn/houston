@@ -36,7 +36,7 @@ func New(t testing.TB) *app.App {
 	}
 	signer := sign.Signer{Key: []byte("test-key")}
 	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q,
-		Live: live.New(signer, live.Options{}), Identity: app.Identity("test-secret-key-base"), RunnerToken: RunnerToken,
+		Live: live.New(signer, live.Options{}), Identity: app.Identity("test-secret-key-base"), RunnerToken: RunnerToken, Version: "dev",
 		Docker: &fakedocker.Docker{}, Tools: "houston/mission-control:test",
 		Services: dns.Services{MissionControl: "http://mission-control:8080", Apps: "http://kamal-proxy:80"}}
 	if err := a.DefineJobs(); err != nil {

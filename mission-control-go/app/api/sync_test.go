@@ -290,3 +290,7 @@ func TestSyncCatchesUpAGeneration(t *testing.T) {
 		t.Errorf("moved back: %s", w.Body.String())
 	}
 }
+
+func stringsReader(s string) *strings.Reader { return strings.NewReader(s) }
+
+func testRunnerToken() string { return testapp.RunnerToken }

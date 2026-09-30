@@ -72,7 +72,7 @@ In your port order (API before jobs), so an endpoint whose work is a batch 3 fea
 
 | Slice | Criterion | Test |
 | --- | --- | --- |
-| 2a | The door (`api/v1/base_controller.rb`): a `hou_` token by its SHA-256 (401 in its words otherwise), its last use recorded at most once a minute, 409 until Cloudflare is connected, and it works through the tunnel; `GET /me` (the token's name, the server, the version and a newer release, an update running) | `api.TestV1Door`, `TestMe`; `move.TestAPITokens` |
+| 2a | The door (`api/v1/base_controller.rb`): a `hou_` token by its SHA-256 (401 in its words otherwise), its last use recorded at most once a minute, 409 until Cloudflare is connected, and it works through the tunnel; `GET /me` (the token's name, the server, the version and a newer release, an update running) | `api.TestV1Door`, `TestMe`, `TestHoustonVersion`; `move.TestAPITokens` (done; "updating" with server updates, batch 3) |
 | 2b | Reads: projects (the list and one, `RemoteView.project`), deploys (20 a page; one with its steps and its log from a byte, on whole characters), settings, the port, Cloudflare, storage, a project's volumes, webhook and secrets (names, never values) | `api.TestV1Projects`, `TestV1Deploys`, … |
 | 2c | Writes that are Mission Control's own: the time zone, secrets (set, generate, remove; values Kamal can't carry refused), the webhook's secret rotated, maintenance (routes pushed), a volume's location, the backup target, a manual backup queued | `api.TestV1Secrets`, … |
 | 2d | With batch 3's features: add project and relink (git), Cloudflare's token and repair, the server update, restores, copies, deletion, logs, snapshots and their download, deploy now | with each feature |

@@ -1,6 +1,14 @@
 -- The schema as the migrations leave it, for sqlc and for reading. It's
 -- written from the migrations; don't edit it by hand.
 
+CREATE TABLE api_tokens (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 50),
+  token_digest TEXT NOT NULL UNIQUE,
+  last_used_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE backup_runs (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects (id),
