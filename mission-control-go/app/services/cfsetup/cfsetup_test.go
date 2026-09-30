@@ -226,3 +226,29 @@ func TestTunnelName(t *testing.T) {
 		}
 	}
 }
+
+// Houston on a subdomain of a zone (a second server beside another in the
+// same zone): its own tunnel, and its names under its base, nothing else.
+func TestConnectSubdomain(t *testing.T) {
+	s, fake := fresh(t)
+	fake.TunnelDetails("acct", "tun9", map[string]any{"id": "tun9", "name": "houston-svnmns"})
+	fake.Record("zbase", cloudflare.Record{Type: "CNAME", Name: "*.svnmns.com", Content: "tun9.cfargotunnel.com", Proxied: true, Comment: "managed-by:houston"})
+	ok, checks, err := s.Save(context.Background(), cfsetup.Form{BaseDomain: "next.svnmns.com", APIToken: "cf-token"}, time.Now())
+	if !ok || err != nil || !slices.Contains(labels(checks), "GO Zone · DNS on svnmns.com") {
+		t.Fatalf("connect = %v %q %v", ok, labels(checks), err)
+	}
+	inst := installation(t, s)
+	if inst.BaseDomain != "next.svnmns.com" || inst.CloudflareZoneID != "zbase" || inst.TunnelID == "tun9" || inst.DnsMode != "wildcard" {
+		t.Errorf("installation %+v", inst)
+	}
+	var names []string
+	for _, r := range fake.Records("zbase") {
+		names = append(names, r.Name+" "+r.Content)
+	}
+	if want := []string{"*.svnmns.com tun9.cfargotunnel.com", "*.next.svnmns.com " + inst.TunnelID + ".cfargotunnel.com"}; !slices.Equal(names, want) {
+		t.Errorf("records %q", names)
+	}
+	if !slices.Contains(fake.Calls(), "GET /accounts/acct/cfd_tunnel?is_deleted=false&name=houston-next") {
+		t.Errorf("tunnel looked up: %q", fake.Calls())
+	}
+}

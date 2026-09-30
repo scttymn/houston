@@ -70,7 +70,7 @@ func (d DNS) pointDomain(ctx context.Context, p models.Project, domain string) (
 		}
 	} else {
 		var err error
-		if zone, err = d.findZone(ctx, domain); err != nil {
+		if zone, err = d.client().ZoneOf(ctx, domain); err != nil {
 			return models.DomainState{}, err
 		}
 		if zone == nil {
@@ -106,7 +106,7 @@ func (d DNS) RemoveDomain(ctx context.Context, p models.Project, domain string) 
 	zone := &cloudflare.Zone{ID: d.Installation.CloudflareZoneID}
 	if !d.underBase(domain) {
 		var err error
-		if zone, err = d.findZone(ctx, domain); err != nil || zone == nil {
+		if zone, err = d.client().ZoneOf(ctx, domain); err != nil || zone == nil {
 			return err
 		}
 	}
@@ -120,19 +120,6 @@ func (d DNS) RemoveDomain(ctx context.Context, p models.Project, domain string) 
 
 func (d DNS) underBase(domain string) bool {
 	return strings.HasSuffix(domain, "."+d.Installation.BaseDomain)
-}
-
-// findZone is the zone holding domain: the domain itself or its nearest
-// parent, never a TLD alone.
-func (d DNS) findZone(ctx context.Context, domain string) (*cloudflare.Zone, error) {
-	labels := strings.Split(domain, ".")
-	for i := 0; i < len(labels)-1; i++ {
-		zone, err := d.client().FindZone(ctx, strings.Join(labels[i:], "."))
-		if err != nil || zone != nil {
-			return zone, err
-		}
-	}
-	return nil, nil
 }
 
 // Rule is one of the tunnel's ingress rules.

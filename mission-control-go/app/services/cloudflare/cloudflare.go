@@ -199,3 +199,16 @@ func (c Client) FindZone(ctx context.Context, name string) (*Zone, error) {
 	}
 	return &found[0], nil
 }
+
+// ZoneOf is the zone holding domain: the domain itself or its nearest
+// parent, never a TLD alone; nil when the token sees none.
+func (c Client) ZoneOf(ctx context.Context, domain string) (*Zone, error) {
+	labels := strings.Split(domain, ".")
+	for i := 0; i < len(labels)-1; i++ {
+		zone, err := c.FindZone(ctx, strings.Join(labels[i:], "."))
+		if err != nil || zone != nil {
+			return zone, err
+		}
+	}
+	return nil, nil
+}

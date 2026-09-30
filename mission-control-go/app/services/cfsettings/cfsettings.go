@@ -357,7 +357,7 @@ func (s *Settings) ReplaceToken(ctx context.Context, inst models.Installation, t
 	}
 	var checked []string
 	for _, domain := range domains {
-		zone, err := findZone(ctx, c, domain)
+		zone, err := c.ZoneOf(ctx, domain)
 		if err != nil {
 			fail("Zone · DNS on " + domain + ": the token needs Zone · DNS · Edit (Cloudflare: " + cfMsg(err) + ").")
 			continue
@@ -387,19 +387,6 @@ func (s *Settings) ReplaceToken(ctx context.Context, inst models.Installation, t
 	}
 	s.Forget(inst)
 	return true, checks
-}
-
-// findZone is a domain's zone: itself or its nearest parent, never a TLD
-// alone.
-func findZone(ctx context.Context, c cloudflare.Client, domain string) (*cloudflare.Zone, error) {
-	labels := strings.Split(domain, ".")
-	for i := 0; i < len(labels)-1; i++ {
-		zone, err := c.FindZone(ctx, strings.Join(labels[i:], "."))
-		if err != nil || zone != nil {
-			return zone, err
-		}
-	}
-	return nil, nil
 }
 
 // Result is one thing repair did, and where it stands.

@@ -216,21 +216,25 @@ func (r *run) checkTunnels(ctx context.Context, account string) {
 	r.pass("Account · Cloudflare Tunnel")
 }
 
-// checkZone is the base domain's zone, when the token can read its DNS.
+// checkZone is the zone holding the base domain (itself, or a parent when
+// Houston lives on a subdomain like next.example.com), when the token can
+// read its DNS.
 func (r *run) checkZone(ctx context.Context) string {
-	zone, err := r.c.FindZone(ctx, r.base)
+	zone, err := r.c.ZoneOf(ctx, r.base)
 	if err == nil && zone == nil {
-		r.fail(r.base + " isn't one of the token's zones. Give it Zone · DNS · Edit on " + r.base + " (the zone must be in this Cloudflare account).")
+		r.fail(r.base + " isn't in one of the token's zones. Give it Zone · DNS · Edit on " + r.base + "'s zone (the zone must be in this Cloudflare account).")
 		return ""
 	}
+	name := r.base
 	if err == nil {
+		name = zone.Name
 		err = r.c.Get(ctx, "/zones/"+zone.ID+"/dns_records", url.Values{"per_page": {"1"}}, nil)
 	}
 	if err != nil {
-		r.fail("Zone · DNS on " + r.base + ": the token needs Zone · DNS · Edit (Cloudflare: " + message(err) + ").")
+		r.fail("Zone · DNS on " + name + ": the token needs Zone · DNS · Edit (Cloudflare: " + message(err) + ").")
 		return ""
 	}
-	r.pass("Zone · DNS on " + r.base)
+	r.pass("Zone · DNS on " + name)
 	return zone.ID
 }
 
