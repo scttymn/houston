@@ -27,9 +27,9 @@
 ## Design
 `mission-control-go/` in Houston's module, on gantry (latest), importing `internal/` for what the CLI already has (`mission`/`server` types, `project`, `kamal`, `docker`, `humanize`).
 
-**Decisions (yours; recommended first)**
-1. **Data.** (a) The Go version opens the Rails database as it is: Rails' tables and columns, Rails' encryption format (read and written, with the same keys), Rails' session cookie; its own additions only as new tables and new columns. Switching back to Rails is starting the Rails container again. (b) Its own schema, moved once at the switch; going back is restoring a snapshot.
-2. **Side by side.** (a) Locally, both versions run on the same fixture data and a parity check sends each the same API requests and compares the answers (and the pages' structure); on the server, before the switch, the Go version runs read-only on a copy of the data (jobs off) at a LAN address, to look at. (b) Tests only, then switch.
+**Decisions** (yours, 2026-09-30)
+1. **Data: its own schema, moved once.** The Go version has Go-shaped tables and gantry's encryption (`crypt.String`); at the switch, a one-time move reads the Rails database (Rails' encryption format decrypted with the server's `AR_ENCRYPTION_*` keys) and writes the new one. Everyone signs in again. Going back to Rails is restoring the snapshot taken before the switch. Each batch that adds tables adds their part of the move, tested on a database the Rails app made (as Esther's move from Phoenix).
+2. **Side by side: parity checks and a read-only shadow.** Locally, both versions run on the same data (the Go one on the moved copy) and a parity check sends each the same API requests and compares the answers, and the pages' structure. On the server, before the switch, the Go version runs read-only on a moved copy of the data (jobs off) at a LAN address, to look at.
 
 **Batches**, each a slice that's tested (tests first, a parity row per endpoint, mutation check) and merged before the next:
 0. **Foundation**: gantry up to date; the Rails schema as sqlc's schema; Rails' encryption in Go, checked against values the Rails app encrypted; configuration from the same `.env`; `/up`, `/ping`, hosts (admin, hooks, project hostnames), the forwarded-headers rules.
@@ -41,3 +41,13 @@
 
 ## Acceptance criteria → tests
 Filled per batch when it starts (a row per endpoint or behaviour, each with its test and its parity check).
+
+### Batch 0: foundation
+| Criterion | Test |
+| --- | --- |
+| mission-control-go is on gantry's latest release, with what `gantry new` gives an app since v0.8.0 (the assets build step, the build cache) | the app's tests; `gantry test` |
+| Rails' encryption is read in Go: values the Rails app encrypted (its dev keys, short and long values, which Rails compresses) decrypt to what went in; a wrong key or a changed byte is an error, not garbage | `railsdata.TestDecrypt` on vectors made by `bin/rails runner` |
+| The move's frame: it opens a Rails-made database read-only and writes a new one through the app's migrations; the installation (base domain, time zone, Cloudflare ids, tokens re-encrypted with gantry's keys) moves | `move.TestInstallation` on a Rails-made fixture |
+| Hosts: `hooks.<base>` answers only `GET /ping` and `POST /<name>` (else an empty 404); a project's hostname answers only its maintenance page (503) or an empty 404; everything else is Mission Control | `app.TestHosts` |
+| Where a request comes from: the client's address from `Cf-Connecting-Ip` only when the peer is the tunnel (cloudflared), from `X-Forwarded-For` only when the peer is loopback (Thruster); https only through the tunnel (`Cf-Ray`); forwarding headers from anyone else ignored | `app.TestForwarded` |
+| `GET /up` 200; `GET /ping` the installation's identity, plain text, on any host but a project's | `app.TestUpAndPing` |
