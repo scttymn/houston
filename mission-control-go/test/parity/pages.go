@@ -39,13 +39,13 @@ func signIn(s *side) error {
 	jar, _ := cookiejar.New(nil)
 	s.browser = &http.Client{Jar: jar, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	path := "/session/new"
-	var form []byte
+	var page []byte
 	for range 3 {
 		resp, err := s.get(path)
 		if err != nil {
 			return err
 		}
-		form, _ = io.ReadAll(resp.Body)
+		page, _ = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode < 300 || resp.StatusCode >= 400 {
 			break
@@ -56,7 +56,9 @@ func signIn(s *side) error {
 		}
 		path = u.RequestURI()
 	}
-	action, fields := formFields(form)
+	action, fields := form(page, "")
+	fields.Set("email_address", "admin@houston.localhost")
+	fields.Set("password", "parity-password")
 	if action == "" {
 		return fmt.Errorf("no sign-in form at %s", path)
 	}
@@ -78,34 +80,27 @@ func signIn(s *side) error {
 	return nil
 }
 
-// formFields is a page's first form: where it posts, and its fields filled
-// in, the email and password with the fixture admin's.
-func formFields(page []byte) (string, url.Values) {
+// form is the page's form that posts to action ("": its first): where it
+// posts, and its hidden fields (Rails' CSRF token).
+func form(page []byte, action string) (string, url.Values) {
 	z := html.NewTokenizer(bytes.NewReader(page))
-	action, fields := "", url.Values{}
+	at, fields, in := "", url.Values{}, false
 	for {
 		switch z.Next() {
 		case html.ErrorToken:
-			return action, fields
+			return at, fields
 		case html.StartTagToken, html.SelfClosingTagToken:
 			t := z.Token()
 			a := attrs(t)
 			switch {
-			case t.Data == "form" && action == "":
-				action = a["action"]
-			case t.Data == "input" && a["name"] != "":
-				switch {
-				case a["type"] == "password":
-					fields.Set(a["name"], "parity-password")
-				case a["type"] == "email" || strings.Contains(a["name"], "email"):
-					fields.Set(a["name"], "admin@houston.localhost")
-				case a["type"] == "hidden":
-					fields.Set(a["name"], a["value"])
-				}
+			case t.Data == "form" && !in && (action == "" || a["action"] == action):
+				at, in = a["action"], true
+			case t.Data == "input" && in && a["type"] == "hidden" && a["name"] != "":
+				fields.Set(a["name"], a["value"])
 			}
 		case html.EndTagToken:
-			if z.Token().Data == "form" && action != "" {
-				return action, fields
+			if z.Token().Data == "form" && in {
+				return at, fields
 			}
 		}
 	}
@@ -142,14 +137,7 @@ func comparePage(rails, gov *side, path string) (string, error) {
 		resp.Body.Close()
 		got[i] = append([]string{fmt.Sprint("status ", resp.StatusCode)}, outline(body)...)
 	}
-	r, g := got[0], got[1]
-	for i := 0; i < len(r) || i < len(g); i++ {
-		if i < len(r) && i < len(g) && r[i] == g[i] {
-			continue
-		}
-		return "  rails " + around(r, i) + "\n  go    " + around(g, i), nil
-	}
-	return "", nil
+	return differ(got[0], got[1]), nil
 }
 
 // around is the outline's lines from i on, a few of them.
@@ -177,7 +165,8 @@ var (
 // that make how it looks and acts, and each run of text. What can't
 // match is made to: numbers (times, ids) are 0, and asset digests go.
 // The live-updates source is left out (Action Cable, or server-sent
-// events), and so are hidden fields (Rails' CSRF tokens).
+// events), and so are hidden fields (Rails' CSRF tokens) and Rails' error
+// wrappers.
 func outline(page []byte) []string {
 	z := html.NewTokenizer(bytes.NewReader(page))
 	var out []string
@@ -213,6 +202,12 @@ func outline(page []byte) []string {
 			}
 			a := attrs(t)
 			if t.Data == "turbo-cable-stream-source" || t.Data == "turbo-stream-source" || (t.Data == "input" && a["type"] == "hidden") {
+				continue
+			}
+			// Rails' form builder wraps a field with errors, its label and
+			// input, in a div no style names; as a block in the field's flex
+			// column, it narrows the input. The Go version leaves it out.
+			if t.Data == "div" && a["class"] == "field_with_errors" {
 				continue
 			}
 			line := "<" + t.Data

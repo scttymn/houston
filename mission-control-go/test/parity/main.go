@@ -145,6 +145,10 @@ func main() {
 	railsURL := flag.String("rails", "", "the Rails version's address")
 	goURL := flag.String("go", "", "the Go version's address")
 	token := flag.String("token", "", "the runner token both have")
+	firstRails := flag.String("first-rails", "", "the Rails version's address on an empty database, for first run")
+	firstGo := flag.String("first-go", "", "the Go version's address on an empty database")
+	railsDB := flag.String("first-rails-db", "", "the Rails version's empty database, a file")
+	goDB := flag.String("first-go-db", "", "the Go version's")
 	flag.Parse()
 	rails := &side{name: "rails", base: *railsURL, state: map[string]string{}}
 	gov := &side{name: "go", base: *goURL, state: map[string]string{}}
@@ -191,7 +195,12 @@ func main() {
 			fmt.Printf("ok   page %s\n", path)
 		}
 	}
-	fmt.Printf("\n%d of %d steps and pages differ (and %d as known)\n", failed, len(steps)+len(pages), known)
+	total := len(steps) + len(pages)
+	if *firstRails != "" {
+		f, n := firstRun(&side{name: "rails", base: *firstRails}, &side{name: "go", base: *firstGo}, *railsDB, *goDB)
+		failed, total = failed+f, total+n
+	}
+	fmt.Printf("\n%d of %d steps and pages differ (and %d as known)\n", failed, total, known)
 	if failed > 0 {
 		os.Exit(1)
 	}

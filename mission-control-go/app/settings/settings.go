@@ -346,10 +346,7 @@ func (c Controller) NewStorage(w http.ResponseWriter, r *http.Request) error {
 // CreateStorage is POST /settings/storage: the location tested (restic
 // writes there) and saved, then its password to save.
 func (c Controller) CreateStorage(w http.ResponseWriter, r *http.Request) error {
-	f := func(name string) string { return strings.TrimSpace(r.PostFormValue("storage[" + name + "]")) }
-	setup := storage.Setup{Kind: f("kind"), Name: f("name"), NFSServer: f("nfs_server"), NFSExport: f("nfs_export"), LocalPath: f("local_path"),
-		S3Endpoint: f("s3_endpoint"), S3Bucket: f("s3_bucket"), S3AccessKeyID: f("s3_access_key_id"), S3SecretAccess: r.PostFormValue("storage[s3_secret_access_key]"),
-		B2Bucket: f("b2_bucket"), B2KeyID: f("b2_key_id"), B2ApplicationKey: r.PostFormValue("storage[b2_application_key]")}
+	setup := StorageForm(r)
 	saved, err := setup.Save(r.Context(), c.DB, c.Docker, time.Now())
 	if err != nil {
 		return err
@@ -359,6 +356,15 @@ func (c Controller) CreateStorage(w http.ResponseWriter, r *http.Request) error 
 	}
 	http.Redirect(w, r, "/settings/storage/"+saved.Location.Name, http.StatusSeeOther)
 	return nil
+}
+
+// StorageForm is the storage form's fields (Fields'), as typed: this
+// page's and first-run setup's.
+func StorageForm(r *http.Request) storage.Setup {
+	f := func(name string) string { return strings.TrimSpace(r.PostFormValue("storage[" + name + "]")) }
+	return storage.Setup{Kind: f("kind"), Name: f("name"), NFSServer: f("nfs_server"), NFSExport: f("nfs_export"), LocalPath: f("local_path"),
+		S3Endpoint: f("s3_endpoint"), S3Bucket: f("s3_bucket"), S3AccessKeyID: f("s3_access_key_id"), S3SecretAccess: r.PostFormValue("storage[s3_secret_access_key]"),
+		B2Bucket: f("b2_bucket"), B2KeyID: f("b2_key_id"), B2ApplicationKey: r.PostFormValue("storage[b2_application_key]")}
 }
 
 // unconfirmed is the location the request names, while its password page

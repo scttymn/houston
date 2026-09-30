@@ -66,6 +66,23 @@ func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) 
 	return i, err
 }
 
+const finishStorageSetup = `-- name: FinishStorageSetup :exec
+UPDATE storage_locations SET is_default = (id = ?1),
+  acknowledged_at = CASE WHEN id = ?1 THEN ?2 ELSE acknowledged_at END,
+  updated_at = CASE WHEN id = ?1 THEN ?2 ELSE updated_at END
+`
+
+type FinishStorageSetupParams struct {
+	ID  int64
+	Now sql.NullTime
+}
+
+// Its password saved: the location confirmed, and the default.
+func (q *Queries) FinishStorageSetup(ctx context.Context, arg FinishStorageSetupParams) error {
+	_, err := q.db.ExecContext(ctx, finishStorageSetup, arg.ID, arg.Now)
+	return err
+}
+
 const recentUpdates = `-- name: RecentUpdates :many
 SELECT id, to_version, from_version, status, step, log, started_at, finished_at, created_at, updated_at FROM server_updates ORDER BY id DESC LIMIT 10
 `
@@ -157,6 +174,33 @@ type SetLocationVerifiedParams struct {
 func (q *Queries) SetLocationVerified(ctx context.Context, arg SetLocationVerifiedParams) error {
 	_, err := q.db.ExecContext(ctx, setLocationVerified, arg.Now, arg.ID)
 	return err
+}
+
+const setupCandidate = `-- name: SetupCandidate :one
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE acknowledged_at IS NULL AND verified_at IS NOT NULL ORDER BY id DESC LIMIT 1
+`
+
+// The location setup's storage step made: tested, its password not yet
+// confirmed saved.
+func (q *Queries) SetupCandidate(ctx context.Context) (StorageLocation, error) {
+	row := q.db.QueryRowContext(ctx, setupCandidate)
+	var i StorageLocation
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Kind,
+		&i.Settings,
+		&i.Credentials,
+		&i.ResticPassword,
+		&i.IsDefault,
+		&i.AcknowledgedAt,
+		&i.VerifiedAt,
+		&i.PrunedAt,
+		&i.PruneError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateByID = `-- name: UpdateByID :one

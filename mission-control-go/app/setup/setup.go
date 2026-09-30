@@ -15,6 +15,9 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/cfsetup"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
+	"github.com/scttymn/houston/mission-control-go/app/services/storage"
+	"github.com/scttymn/houston/mission-control-go/app/settings"
 	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
 )
 
@@ -23,8 +26,9 @@ type Controller struct {
 	DB     *db.DB
 	SignIn *auth.Auth
 	Limits *web.Limits
-	// Cloudflare is step 2's work.
+	// Cloudflare is step 2's work; Docker runs restic for step 3's.
 	Cloudflare cfsetup.Setup
+	Docker     dockercmd.Runner
 }
 
 // NextStep is where a signed-in admin goes until setup is done: "" once
@@ -147,4 +151,104 @@ func (c Controller) ConnectCloudflare(w http.ResponseWriter, r *http.Request) er
 
 func cloudflarePage(r *http.Request) layout.Page {
 	return layout.SetupStep(r, "Connect Cloudflare · Mission Control", 2)
+}
+
+// StorageStep is step 3's filter: Cloudflare first, closed once a default
+// storage is ready, and never kept by the browser (it shows the restic
+// password).
+func (c Controller) StorageStep(w http.ResponseWriter, r *http.Request) error {
+	q := models.New(c.DB.Read)
+	switch connected, err := q.InstallationConnected(r.Context()); {
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	case !connected:
+		http.Redirect(w, r, "/setup/cloudflare", http.StatusFound)
+		return nil
+	}
+	switch ready, err := q.DefaultStorageReady(r.Context()); {
+	case err != nil:
+		return err
+	case ready:
+		http.Redirect(w, r, "/", http.StatusFound)
+		return nil
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	return nil
+}
+
+// candidate is the location step 3 made, nil before it's made.
+func (c Controller) candidate(r *http.Request) (*models.StorageLocation, error) {
+	l, err := models.New(c.DB.Read).SetupCandidate(r.Context())
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &l, err
+}
+
+// ShowStorage is GET /setup/storage: step 3, the form, then the location
+// made with its password to save.
+func (c Controller) ShowStorage(w http.ResponseWriter, r *http.Request) error {
+	l, err := c.candidate(r)
+	if err != nil {
+		return err
+	}
+	return web.Render(w, r, http.StatusOK, StoragePage(storagePage(r), l, storage.Setup{Kind: "nfs"}, storage.Saved{}, false))
+}
+
+// CreateStorage is POST /setup/storage: the location tested (restic
+// writes there) and saved.
+func (c Controller) CreateStorage(w http.ResponseWriter, r *http.Request) error {
+	form := settings.StorageForm(r)
+	saved, err := form.Save(r.Context(), c.DB, c.Docker, time.Now())
+	if err != nil {
+		return err
+	}
+	if !saved.OK() {
+		return web.Render(w, r, http.StatusUnprocessableEntity, StoragePage(storagePage(r), nil, form, saved, false))
+	}
+	http.Redirect(w, r, "/setup/storage", http.StatusFound)
+	return nil
+}
+
+// FinishStorage is POST /setup/storage/finish {saved}: the password saved,
+// the location the default, and setup done.
+func (c Controller) FinishStorage(w http.ResponseWriter, r *http.Request) error {
+	l, err := c.candidate(r)
+	if err != nil {
+		return err
+	}
+	if l == nil {
+		w.WriteHeader(http.StatusNotFound) // as Rails' head
+		return nil
+	}
+	if r.PostFormValue("saved") != "1" {
+		return web.Render(w, r, http.StatusUnprocessableEntity, StoragePage(storagePage(r), l, storage.Setup{Kind: l.Kind}, storage.Saved{}, true))
+	}
+	err = models.New(c.DB.Write).FinishStorageSetup(r.Context(), models.FinishStorageSetupParams{ID: l.ID, Now: sql.NullTime{Time: time.Now(), Valid: true}})
+	if err != nil {
+		return err
+	}
+	http.Redirect(w, r, "/", http.StatusFound)
+	return nil
+}
+
+// StoragePassword is GET /setup/storage/password.txt: the location's
+// restic password, to keep.
+func (c Controller) StoragePassword(w http.ResponseWriter, r *http.Request) error {
+	l, err := c.candidate(r)
+	if err != nil {
+		return err
+	}
+	if l == nil {
+		w.WriteHeader(http.StatusNotFound) // as Rails' head
+		return nil
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Disposition", `attachment; filename="houston-`+l.Name+`-restic-password.txt"`)
+	_, err = w.Write([]byte(l.ResticPassword.Reveal() + "\n"))
+	return err
+}
+
+func storagePage(r *http.Request) layout.Page {
+	return layout.SetupStep(r, "Default backup storage · Mission Control", 3)
 }

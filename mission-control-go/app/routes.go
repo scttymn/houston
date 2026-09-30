@@ -212,12 +212,18 @@ func (a *App) Router() *web.Router {
 	signIn := a.signIn()
 	rt.Scope("", web.Pipeline{a.firstRun}, func(s *web.Scope) { signIn.Routes(s) })
 	firstRun := setup.Controller{DB: a.DB, SignIn: signIn, Limits: &a.Limits,
-		Cloudflare: cfsetup.Setup{DB: a.DB, API: a.Cloudflare, Services: a.Services, TokenPath: a.TunnelTokenPath}}
+		Cloudflare: cfsetup.Setup{DB: a.DB, API: a.Cloudflare, Services: a.Services, TokenPath: a.TunnelTokenPath}, Docker: a.DockerCLI}
 	rt.Handle("GET /setup", firstRun.Show)
 	rt.Handle("POST /setup", firstRun.Create)
 	rt.Scope("/setup", web.Pipeline{signIn.Required}, func(s *web.Scope) {
 		s.Handle("GET /cloudflare", firstRun.ShowCloudflare)
 		s.Handle("POST /cloudflare", firstRun.ConnectCloudflare)
+		s.Scope("", web.Pipeline{firstRun.StorageStep}, func(s *web.Scope) {
+			s.Handle("GET /storage", firstRun.ShowStorage)
+			s.Handle("POST /storage", firstRun.CreateStorage)
+			s.Handle("POST /storage/finish", firstRun.FinishStorage)
+			s.Handle("GET /storage/password.txt", firstRun.StoragePassword)
+		})
 	})
 	rt.Handle("GET /session/new", func(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The parity check (docs/plans/mission-control-go.md, decision 2): the Rails
 # and Go versions of Mission Control on the same data (made by the Rails app,
-# then moved), sent the same requests by test/parity, their answers compared.
+# then moved), sent the same requests by test/parity, their answers compared;
+# and each on an empty database, through first run's setup.
 # Needs the images built: mission-control-app (cd mission_control && docker
 # compose build) and houston-dev-cli (bin/go builds it).
 #
@@ -19,9 +20,9 @@ secret=parity-secret-key-base
 go_run=(docker run --rm -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod -v houston-dev_gocache:/root/.cache/go-build)
 
 cleanup() {
-	docker rm -f "$net-rails" "$net-go" >/dev/null 2>&1 || true
+	docker rm -f "$net-rails" "$net-go" "$net-rails-first" "$net-go-first" >/dev/null 2>&1 || true
 	docker network rm "$net" >/dev/null 2>&1 || true
-	rm -rf "$work" "$root"/mission_control/tmp/parity.sqlite3*
+	rm -rf "$work" "$root"/mission_control/tmp/parity.sqlite3* "$root"/mission_control/tmp/parity-first.sqlite3*
 }
 trap cleanup EXIT
 
@@ -48,14 +49,26 @@ docker run -d --name "$net-go" --network "$net" "${ports_go[@]}" -v "$root:$root
 	-v houston-dev_gocache:/root/.cache/go-build -v "$work:/parity" -e GANTRY_ENV=development -e DATABASE_URL=sqlite:///parity/go.sqlite3 \
 	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent -e ADDR=:8080 \
 	houston-dev-cli go run ./cmd/mission-control-go >/dev/null
+# And each on an empty database, for first run's setup.
+docker run -d --name "$net-rails-first" --network "$net" -v "$root/mission_control:/rails" -e DATABASE_URL=sqlite3:tmp/parity-first.sqlite3 \
+	-e RAILS_DEVELOPMENT_HOSTS=admin.houston.localhost,hooks.houston.localhost \
+	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent \
+	mission-control-app sh -c 'bin/rails db:schema:load >/dev/null && exec bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid' >/dev/null
+docker run -d --name "$net-go-first" --network "$net" -v "$root:$root" -w "$root/mission-control-go" -v houston-dev_gomod:/go/pkg/mod \
+	-v houston-dev_gocache:/root/.cache/go-build -v "$work:/parity" -e GANTRY_ENV=development -e DATABASE_URL=sqlite:///parity/first.sqlite3 \
+	-e HOUSTON_RUNNER_TOKEN=$token -e SECRET_KEY_BASE=$secret -e HOUSTON_KNOWN_HOSTS=/nonexistent -e ADDR=:8080 \
+	houston-dev-cli go run ./cmd/mission-control-go >/dev/null
 
 echo "== the same requests to each"
-"${go_run[@]}" --network "$net" houston-dev-cli sh -c "
+"${go_run[@]}" --network "$net" -v "$work:/parity" houston-dev-cli sh -c "
 	for i in \$(seq 120); do
-		curl -sf -o /dev/null -H 'Host: admin.houston.localhost' http://$net-rails:3000/up && curl -sf -o /dev/null http://$net-go:8080/up && break
+		curl -sf -o /dev/null -H 'Host: admin.houston.localhost' http://$net-rails:3000/up && curl -sf -o /dev/null http://$net-go:8080/up &&
+			curl -sf -o /dev/null -H 'Host: admin.houston.localhost' http://$net-rails-first:3000/up && curl -sf -o /dev/null http://$net-go-first:8080/up && break
 		sleep 1
 	done
-	go run ./test/parity -rails http://$net-rails:3000 -go http://$net-go:8080 -token $token" || {
+	go run ./test/parity -rails http://$net-rails:3000 -go http://$net-go:8080 -token $token \
+		-first-rails http://$net-rails-first:3000 -first-go http://$net-go-first:8080 \
+		-first-rails-db $root/mission_control/tmp/parity-first.sqlite3 -first-go-db /parity/first.sqlite3" || {
 	status=$?
 	echo "== the Rails app's log"; docker logs --tail 40 "$net-rails" 2>&1
 	echo "== the Go app's log"; docker logs --tail 40 "$net-go" 2>&1

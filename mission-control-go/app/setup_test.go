@@ -13,6 +13,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare/cloudflaretest"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 )
 
 // firstRun is a server fresh from the installer: no admin, a code printed,
@@ -237,5 +238,74 @@ func TestSetupCloudflare(t *testing.T) {
 	b.jar = nil
 	if w := b.do("GET", "/setup/cloudflare", nil); location(w) != "/sign-in" {
 		t.Errorf("signed out = %q", location(w))
+	}
+}
+
+// Step 3: Cloudflare first; the storage tested and saved, its password
+// shown until it's saved, then the default and setup done. Never kept by
+// the browser; closed once done.
+func TestSetupStorage(t *testing.T) {
+	a, b := signedIn(t)
+	must(t, a, `INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
+	if w := b.do("GET", "/setup/storage", nil); location(w) != "/setup/cloudflare" {
+		t.Errorf("before Cloudflare = %d %q", w.Code, location(w))
+	}
+	must(t, a, `UPDATE installations SET cloudflare_connected_at = CURRENT_TIMESTAMP`)
+	// Settings' storage, made and not confirmed, is no default.
+	must(t, a, `INSERT INTO storage_locations (name, kind, settings, is_default, acknowledged_at) VALUES ('old', 'local', '{"path":"/old"}', TRUE, NULL)`)
+	w := b.do("GET", "/setup/storage", nil)
+	contains(t, w.Body.String(), "<title>Default backup storage · Mission Control</title>", `<span class="mono eyebrow eyebrow--signal">STEP 03 OF 03</span>`,
+		`<form class="storage-form" action="/setup/storage" accept-charset="UTF-8" method="post">`, `<input type="radio" value="nfs" checked name="storage[kind]"`)
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("kept by the browser")
+	}
+	if w := b.do("POST", "/setup/storage/finish", url.Values{"saved": {"1"}}); w.Code != 404 {
+		t.Errorf("finish before storage = %d", w.Code)
+	}
+
+	fake := a.DockerCLI.(*dockercmdtest.Fake)
+	fake.On(dockercmdtest.Fail(1, "Fatal: create repository at /repo failed: permission denied"), "run")
+	w = b.do("POST", "/setup/storage", url.Values{"storage[kind]": {"local"}, "storage[name]": {"disk"}, "storage[local_path]": {"/srv/backups"}})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), "restic couldn&#39;t write there: Fatal: create repository") {
+		t.Fatalf("restic failing = %d\n%s", w.Code, w.Body.String())
+	}
+	a.DockerCLI = &dockercmdtest.Fake{}
+	b.h = a.Handler()
+	w = b.do("POST", "/setup/storage", url.Values{"storage[kind]": {"local"}, "storage[name]": {"disk"}, "storage[local_path]": {"/srv/backups"}})
+	if w.Code != 302 || location(w) != "/setup/storage" {
+		t.Fatalf("save = %d %q\n%s", w.Code, location(w), w.Body.String())
+	}
+	page := b.do("GET", "/setup/storage", nil).Body.String()
+	contains(t, page, `<dt class="mono">NAME</dt><dd class="mono">disk</dd><dt class="mono">TYPE</dt><dd class="mono">local</dd><dt class="mono">WHERE</dt><dd class="mono">/srv/backups</dd>`,
+		`<form class="finish" action="/setup/storage/finish" method="post">`, `href="/setup/storage/password.txt"`, `value="Finish setup"`)
+	if strings.Contains(page, `class="storage-form"`) {
+		t.Error("the form with the location made")
+	}
+	w = b.do("GET", "/setup/storage/password.txt", nil)
+	if !strings.Contains(page, w.Body.String()[:40]) || len(w.Body.String()) != 41 || w.Header().Get("Content-Disposition") != `attachment; filename="houston-disk-restic-password.txt"` ||
+		w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("download %q %v", w.Body.String(), w.Header())
+	}
+
+	w = b.do("POST", "/setup/storage/finish", url.Values{})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), "Tick the box once the password is saved somewhere off this server.") {
+		t.Errorf("unticked = %d", w.Code)
+	}
+	if w := b.do("POST", "/setup/storage/finish", url.Values{"saved": {"1"}}); w.Code != 302 || location(w) != "/" {
+		t.Fatalf("finish = %d %q", w.Code, location(w))
+	}
+	var defaults string
+	a.DB.Read.QueryRow(`SELECT group_concat(name || ':' || is_default || ':' || (acknowledged_at IS NOT NULL)) FROM storage_locations ORDER BY id`).Scan(&defaults)
+	if defaults != "old:0:0,disk:1:1" {
+		t.Errorf("locations %q", defaults)
+	}
+	reachable(t, a)
+	if w := b.do("GET", "/", nil); w.Code != 200 {
+		t.Errorf("the board = %d %q", w.Code, location(w))
+	}
+	for _, path := range []string{"/setup/storage", "/setup/storage/password.txt"} {
+		if w := b.do("GET", path, nil); w.Code != 302 || location(w) != "/" {
+			t.Errorf("%s once done = %d %q", path, w.Code, location(w))
+		}
 	}
 }
