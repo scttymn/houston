@@ -26,7 +26,6 @@ import (
 	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/sign"
 
-	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
@@ -162,7 +161,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
 		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
-		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, Docker: docker.New(), DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts,
+		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts,
 		Version: app.HoustonVersion(os.Getenv("HOUSTON_VERSION"), os.Getenv("HOUSTON_SOURCE_SHA"))}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err

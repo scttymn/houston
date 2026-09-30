@@ -11,7 +11,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare"
 	"github.com/scttymn/houston/mission-control-go/app/services/cloudflare/cloudflaretest"
-	"github.com/scttymn/houston/mission-control-go/test/fakedocker"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/test/testapp"
 )
 
@@ -97,9 +97,9 @@ func TestSyncPushesMaintenanceRoutes(t *testing.T) {
 // (where they live can still be chosen), and Docker's no is the sync's.
 func TestSyncPlacesVolumes(t *testing.T) {
 	a := testapp.New(t)
-	docker := &fakedocker.Docker{}
-	docker.On(1, "no such volume", "volume", "inspect")
-	a.Docker = docker
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.Fail(1, "no such volume"), "volume", "inspect")
+	a.DockerCLI = docker
 	exec(t, a, `INSERT INTO installations (id, base_domain, cloudflare_connected_at) VALUES (1, 'svnmns.com', ?)`, time.Now())
 	h := a.Handler()
 	volumes := []map[string]string{{"name": "data", "path": "/rails/storage"}}
@@ -113,7 +113,7 @@ func TestSyncPlacesVolumes(t *testing.T) {
 		t.Errorf("= %d %s, ran %v", w.Code, w.Body.String(), docker.Ran())
 	}
 
-	docker.On(1, "disk full", "volume", "create")
+	docker.On(dockercmdtest.Fail(1, "disk full"), "volume", "create")
 	post(h, "POST", "/api/projects/sync", payload(map[string]any{"volumes": []map[string]string{{"name": "logs", "path": "/logs"}}}), nil)
 	is(t, post(h, "POST", "/api/projects/sync", payload(map[string]any{"volumes": []map[string]string{{"name": "logs", "path": "/logs"}}}), nil), 422,
 		`{"error":"couldn't create shop_logs: disk full"}`)

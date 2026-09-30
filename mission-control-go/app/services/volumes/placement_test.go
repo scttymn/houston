@@ -9,9 +9,9 @@ import (
 	"github.com/scttymn/gantry/db"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/app/services/volumes"
 	"github.com/scttymn/houston/mission-control-go/test"
-	"github.com/scttymn/houston/mission-control-go/test/fakedocker"
 )
 
 // setUp is a project shop with volume data, and two storage locations: nas
@@ -51,8 +51,8 @@ func placedAt(t *testing.T, d *db.DB) bool {
 // On local disk: a plain Docker volume, made when missing.
 func TestPlaceOnLocalDisk(t *testing.T) {
 	d, p := setUp(t)
-	docker := &fakedocker.Docker{}
-	docker.On(1, "Error: no such volume", "volume", "inspect")
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.Fail(1, "Error: no such volume"), "volume", "inspect")
 	pl := volumes.Placement{DB: d, Docker: docker, Tools: "houston/mission-control:local"}
 	if err := pl.Place(context.Background(), p, p.DataGeneration, p.Volumes.V); err != nil {
 		t.Fatal(err)
@@ -68,8 +68,8 @@ func TestPlaceOnLocalDisk(t *testing.T) {
 func TestPlaceOnNFS(t *testing.T) {
 	d, p := setUp(t)
 	chosen(t, d, 1)
-	docker := &fakedocker.Docker{}
-	docker.On(1, "no such volume", "volume", "inspect")
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.Fail(1, "no such volume"), "volume", "inspect")
 	pl := volumes.Placement{DB: d, Docker: docker, Tools: "tools:1"}
 	if err := pl.Place(context.Background(), p, 2, p.Volumes.V); err != nil {
 		t.Fatal(err)
@@ -90,8 +90,8 @@ func TestPlaceOnNFS(t *testing.T) {
 func TestPlaceInAFolder(t *testing.T) {
 	d, p := setUp(t)
 	chosen(t, d, 2)
-	docker := &fakedocker.Docker{}
-	docker.On(1, "no such volume", "volume", "inspect")
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.Fail(1, "no such volume"), "volume", "inspect")
 	pl := volumes.Placement{DB: d, Docker: docker, Tools: "tools:1"}
 	if err := pl.Place(context.Background(), p, 1, p.Volumes.V); err != nil {
 		t.Fatal(err)
@@ -111,8 +111,8 @@ func TestPlaceInAFolder(t *testing.T) {
 func TestPlaceChecksWhatExists(t *testing.T) {
 	d, p := setUp(t)
 	chosen(t, d, 1)
-	docker := &fakedocker.Docker{}
-	docker.On(0, `{"device":":/volume1/houston/volumes/shop/data","o":"addr=10.0.1.20,rw,nfsvers=4","type":"nfs"}`, "volume", "inspect")
+	docker := &dockercmdtest.Fake{}
+	docker.On(dockercmdtest.OK(`{"device":":/volume1/houston/volumes/shop/data","o":"addr=10.0.1.20,rw,nfsvers=4","type":"nfs"}`), "volume", "inspect")
 	pl := volumes.Placement{DB: d, Docker: docker, Tools: "tools:1"}
 	if err := pl.Place(context.Background(), p, 1, p.Volumes.V); err != nil || len(docker.Ran()) != 1 || !placedAt(t, d) {
 		t.Errorf("where it should be: %v %v", err, docker.Ran())
@@ -121,8 +121,8 @@ func TestPlaceChecksWhatExists(t *testing.T) {
 	// On local disk, chosen for the NAS.
 	d2, p2 := setUp(t)
 	chosen(t, d2, 1)
-	local := &fakedocker.Docker{}
-	local.On(0, "null", "volume", "inspect")
+	local := &dockercmdtest.Fake{}
+	local.On(dockercmdtest.OK("null"), "volume", "inspect")
 	err := volumes.Placement{DB: d2, Docker: local, Tools: "tools:1"}.Place(context.Background(), p2, 1, p2.Volumes.V)
 	var refused models.Refused
 	if !errors.As(err, &refused) || refused.Msg != "shop_data already exists on local disk, not nas; Houston doesn't move volumes yet: choose local disk, or move it yourself" || placedAt(t, d2) {
@@ -137,8 +137,8 @@ func TestPlaceChecksWhatExists(t *testing.T) {
 	} {
 		d, p := setUp(t)
 		chosen(t, d, 1)
-		docker := &fakedocker.Docker{}
-		docker.On(0, have, "volume", "inspect")
+		docker := &dockercmdtest.Fake{}
+		docker.On(dockercmdtest.OK(have), "volume", "inspect")
 		err := volumes.Placement{DB: d, Docker: docker, Tools: "tools:1"}.Place(context.Background(), p, 1, p.Volumes.V)
 		if !errors.As(err, &refused) || !strings.HasPrefix(refused.Msg, "shop_data already exists on "+where+", not nas;") {
 			t.Errorf("%s: %v", have, err)
@@ -147,8 +147,8 @@ func TestPlaceChecksWhatExists(t *testing.T) {
 
 	// On the NAS, chosen for local disk: named by its location.
 	d3, p3 := setUp(t)
-	nas := &fakedocker.Docker{}
-	nas.On(0, `{"device":":/volume1/houston/volumes/shop/data","type":"nfs"}`, "volume", "inspect")
+	nas := &dockercmdtest.Fake{}
+	nas.On(dockercmdtest.OK(`{"device":":/volume1/houston/volumes/shop/data","type":"nfs"}`), "volume", "inspect")
 	err = volumes.Placement{DB: d3, Docker: nas, Tools: "tools:1"}.Place(context.Background(), p3, 1, p3.Volumes.V)
 	if !errors.As(err, &refused) || refused.Msg != "shop_data already exists on nas, not local disk; Houston doesn't move volumes yet: choose nas, or move it yourself" {
 		t.Errorf("on the NAS: %v", err)
@@ -171,9 +171,9 @@ func TestPlaceFails(t *testing.T) {
 		if c.location > 0 {
 			chosen(t, d, c.location)
 		}
-		docker := &fakedocker.Docker{}
-		docker.On(1, "no such volume", "volume", "inspect")
-		docker.On(1, "disk full\n", c.fail...)
+		docker := &dockercmdtest.Fake{}
+		docker.On(dockercmdtest.Fail(1, "no such volume"), "volume", "inspect")
+		docker.On(dockercmdtest.Fail(1, "disk full\n"), c.fail...)
 		err := volumes.Placement{DB: d, Docker: docker, Tools: "tools:1"}.Place(context.Background(), p, 1, p.Volumes.V)
 		var refused models.Refused
 		if !errors.As(err, &refused) || refused.Msg != c.want || placedAt(t, d) {

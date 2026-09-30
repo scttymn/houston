@@ -16,7 +16,6 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
 	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd/dockercmdtest"
 	"github.com/scttymn/houston/mission-control-go/test"
-	"github.com/scttymn/houston/mission-control-go/test/fakedocker"
 )
 
 // RunnerToken is the test app's HOUSTON_RUNNER_TOKEN.
@@ -40,7 +39,7 @@ func New(t testing.TB) *app.App {
 	fake := &dockercmdtest.Fake{}
 	a := &app.App{DB: d, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Signer: signer, Jobs: q,
 		Live: live.New(signer, live.Options{}), Identity: app.Identity("test-secret-key-base"), RunnerToken: RunnerToken, Version: "dev",
-		Docker: &fakedocker.Docker{}, DockerCLI: fake, Snapshots: &backup.Snapshots{Docker: fake}, Tools: "houston/mission-control:test", ToolsBin: "/app",
+		DockerCLI: fake, Snapshots: &backup.Snapshots{Docker: fake}, Tools: "houston/mission-control:test", ToolsBin: "/app",
 		Services: dns.Services{MissionControl: "http://mission-control:8080", Apps: "http://kamal-proxy:80"}}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)

@@ -6,7 +6,6 @@
 package volumes
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -16,14 +15,14 @@ import (
 
 	"github.com/scttymn/gantry/db"
 
-	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 )
 
 // Placement makes volumes with Docker.
 type Placement struct {
 	DB     *db.DB
-	Docker docker.Runner
+	Docker dockercmd.Runner
 	// Tools is the image whose mkdir makes a volume's directory in its
 	// location (HOUSTON_TOOLS_IMAGE: Mission Control's own).
 	Tools string
@@ -172,10 +171,12 @@ func (pl Placement) makeDirectory(ctx context.Context, l models.StorageLocation,
 
 // run is docker args' exit code and output (stdout and stderr together).
 func (pl Placement) run(ctx context.Context, args ...string) (int, string) {
-	var out bytes.Buffer
-	code, err := pl.Docker.Stream(ctx, "", nil, &out, args...)
-	if err != nil {
-		return -1, err.Error()
+	r := pl.Docker.Run(ctx, args, dockercmd.Opts{Timeout: 2 * time.Minute})
+	if r.OK {
+		return 0, r.Output
 	}
-	return code, out.String()
+	if r.Code == 0 {
+		return -1, r.Output
+	}
+	return r.Code, r.Output
 }

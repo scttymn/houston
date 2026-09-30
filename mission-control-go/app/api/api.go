@@ -10,7 +10,6 @@ import (
 	"github.com/scttymn/gantry/live"
 	"github.com/scttymn/gantry/web"
 
-	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/dns"
@@ -26,7 +25,6 @@ type Controller struct {
 	Cloudflare string
 	// Services are where the tunnel sends what it routes.
 	Services dns.Services
-	Docker   docker.Runner
 	// Tools is HOUSTON_TOOLS_IMAGE, for making volumes' directories.
 	Tools string
 	// Live tells open pages what changed.
@@ -50,7 +48,7 @@ type Controller struct {
 }
 
 func (c Controller) placement() volumes.Placement {
-	return volumes.Placement{DB: c.DB, Docker: c.Docker, Tools: c.Tools}
+	return volumes.Placement{DB: c.DB, Docker: c.DockerCLI, Tools: c.Tools}
 }
 
 func sqlNumber(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: true} }

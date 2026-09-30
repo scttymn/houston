@@ -12,7 +12,6 @@ import (
 	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/web"
 
-	"github.com/scttymn/houston/internal/docker"
 	"github.com/scttymn/houston/mission-control-go/app/api"
 	"github.com/scttymn/houston/mission-control-go/app/home"
 	"github.com/scttymn/houston/mission-control-go/app/models"
@@ -44,10 +43,8 @@ type App struct {
 	// Services are where the tunnel sends what it routes: Mission Control,
 	// and kamal-proxy.
 	Services dns.Services
-	// Docker is the docker CLI (DockerCLI, for the work that needs its
-	// environment, input and deadlines); Tools, Mission Control's own image
-	// for helper containers (HOUSTON_TOOLS_IMAGE), its binary at ToolsBin.
-	Docker    docker.Runner
+	// DockerCLI is the docker CLI; Tools, Mission Control's own image for
+	// helper containers (HOUSTON_TOOLS_IMAGE), its binary at ToolsBin.
 	DockerCLI dockercmd.Downloader
 	// Snapshots lists projects' snapshots from restic, cached a while.
 	Snapshots *backup.Snapshots
@@ -80,7 +77,7 @@ func (a *App) Router() *web.Router {
 	rt.Public = assets.All
 
 	// The runner API: houston deploy on the server, and the runners.
-	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Docker: a.Docker, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
+	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
 		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
