@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
 	"github.com/scttymn/houston/mission-control-go/app/services/appstats"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
+	"github.com/scttymn/houston/mission-control-go/app/services/dockercmd"
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 	"github.com/scttymn/houston/mission-control-go/app/services/maintenance"
 	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
@@ -41,6 +44,21 @@ type Controller struct {
 	// Backup is the backup job; Maintenance, the maintenance switch.
 	Backup      models.Enqueuer[models.BackupArgs]
 	Maintenance maintenance.Switch
+	// Snapshots lists projects' snapshots; Docker runs restic for a
+	// download and kamal-proxy for a copy's undo.
+	Snapshots *backup.Snapshots
+	Docker    dockercmd.Downloader
+	// Cloudflare is its API's address ("": Cloudflare's own).
+	Cloudflare string
+	// Delete carries out a deletion; CopyCleanUp removes a cancelled copy's
+	// new project.
+	Delete interface {
+		Enqueue(ctx context.Context, a models.DeletionArgs) (int64, error)
+	}
+	CopyCleanUp interface {
+		Enqueue(ctx context.Context, a models.CopyArgs) (int64, error)
+	}
+	Log *slog.Logger
 }
 
 // rows are the projects as the board shows them, by name.

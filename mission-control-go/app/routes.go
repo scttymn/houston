@@ -205,8 +205,9 @@ func (a *App) Router() *web.Router {
 	})
 	pages := projects.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer, Stats: a.Stats, Status: a.SystemStatus, Version: a.Version,
 		Refs: a.Refs, Git: a.Git, Backup: a.Backup,
-		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare}}
-	deployPages := deploys.Controller{DB: a.DB, Live: a.Live}
+		Maintenance: maintenance.Switch{DB: a.DB, Services: a.Services, Cloudflare: a.Cloudflare},
+		Snapshots:   a.Snapshots, Docker: a.DockerCLI, Cloudflare: a.Cloudflare, Delete: a.Delete, CopyCleanUp: a.CopyCleanUp, Log: a.Log}
+	deployPages := deploys.Controller{DB: a.DB, Live: a.Live, Signer: a.Signer}
 	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
 		s.Handle("GET /{$}", pages.Index)
 		s.Handle("GET /resources", pages.Resources)
@@ -224,6 +225,17 @@ func (a *App) Router() *web.Router {
 		s.Handle("PATCH /projects/{name}/secrets/{key}", pages.SetSecret)
 		s.Handle("DELETE /projects/{name}/secrets/{key}", pages.RemoveSecret)
 		s.Handle("POST /projects/{name}/secrets/{key}/generate", pages.GenerateSecret)
+		s.Handle("GET /projects/{name}/snapshots", pages.ShowSnapshots)
+		s.Handle("GET /projects/{name}/snapshots/{id}/download", pages.DownloadSnapshot)
+		s.Handle("GET /projects/{name}/restores/new", pages.NewRestore)
+		s.Handle("POST /projects/{name}/restores", pages.CreateRestore)
+		s.Handle("GET /projects/{name}/copy/new", pages.NewCopy)
+		s.Handle("POST /projects/{name}/copy", pages.CreateCopy)
+		s.Handle("POST /projects/{name}/copy/cancel", pages.CancelCopy)
+		s.Handle("POST /projects/{name}/copy/undo", pages.UndoCopy)
+		s.Handle("GET /projects/{name}/deletion/new", pages.NewDeletion)
+		s.Handle("POST /projects/{name}/deletion", pages.CreateDeletion)
+		s.Handle("GET /deletions/{id}", pages.ShowDeletion)
 	})
 
 	// The pages' live streams, for whoever may see the pages.

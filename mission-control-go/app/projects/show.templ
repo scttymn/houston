@@ -432,7 +432,7 @@ templ secretsPanel(s Show, path string) {
 		for _, v := range s.Variables {
 			{{ key := v.Name }}
 			{{ secret, saved := s.Secrets[key] }}
-			{{ error := s.SecretErrors[key] }}
+			{{ problem := s.SecretErrors[key] }}
 			{{ set := saved && secret.Value.Reveal() != "" }}
 			{{ formID := "secret-form-" + key }}
 			<div class={ "secret", templ.KV("secret--missing", !set && v.Required) } id={ "secret-" + key } data-secret={ key }>
@@ -442,7 +442,7 @@ templ secretsPanel(s Show, path string) {
 						<small>optional</small>
 					}
 				</span>
-				if set && s.Replace != key && error == "" {
+				if set && s.Replace != key && problem == "" {
 					<span class="muted">{ "•••••••• · set " + secret.UpdatedAt.In(s.Now.Location()).Format("Jan 02") }</span>
 					<span class="secret__actions">
 						<a href={ templ.SafeURL(path + "?replace=" + key + "#secret-" + key) }>Replace</a>
@@ -465,8 +465,8 @@ templ secretsPanel(s Show, path string) {
 						}
 					</span>
 				}
-				if error != "" {
-					<span class="field__error secret__error">{ key + " " + error }</span>
+				if problem != "" {
+					<span class="field__error secret__error">{ key + " " + problem }</span>
 				}
 			</div>
 		}

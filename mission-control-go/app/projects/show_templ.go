@@ -2015,7 +2015,7 @@ func secretsPanel(s Show, path string) templ.Component {
 		for _, v := range s.Variables {
 			key := v.Name
 			secret, saved := s.Secrets[key]
-			error := s.SecretErrors[key]
+			problem := s.SecretErrors[key]
 			set := saved && secret.Value.Reveal() != ""
 			formID := "secret-form-" + key
 			var templ_7745c5c3_Var109 = []any{"secret", templ.KV("secret--missing", !set && v.Required)}
@@ -2089,7 +2089,7 @@ func secretsPanel(s Show, path string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if set && s.Replace != key && error == "" {
+			if set && s.Replace != key && problem == "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "<span class=\"muted\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -2284,15 +2284,15 @@ func secretsPanel(s Show, path string) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			if error != "" {
+			if problem != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "<span class=\"field__error secret__error\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var127 string
-				templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinStringErrs(key + " " + error)
+				templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinStringErrs(key + " " + problem)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/projects/show.templ`, Line: 469, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `app/projects/show.templ`, Line: 469, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var127))
 				if templ_7745c5c3_Err != nil {

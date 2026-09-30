@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/scttymn/gantry/db"
@@ -16,11 +15,6 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/gitremote"
 	"github.com/scttymn/houston/mission-control-go/app/services/handover"
 )
-
-// copyLock is held by a handover, and by a copy's cancel and undo, so a
-// cancel and a handover never cross (the Rails app's copy.with_lock; one
-// Mission Control process serves them all).
-var copyLock sync.Mutex
 
 // copyView is a copy as the API shows it (the Rails app's RemoteView.copy).
 type copyView struct {
@@ -142,21 +136,21 @@ func (c Controller) Handover(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	moved, err := func() ([]string, error) {
-		copyLock.Lock()
-		defer copyLock.Unlock()
+	var moved []string
+	err = handover.Locked(func() error {
 		// A cancel may have ended the deploy since the check above.
 		if d, err := models.New(c.DB.Read).DeployByID(ctx, d.ID); err != nil || !d.InFlight() {
 			if err != nil {
-				return nil, err
+				return err
 			}
-			return nil, web.Status(http.StatusConflict, fmt.Errorf("copy #%d was cancelled", d.Number))
+			return web.Status(http.StatusConflict, fmt.Errorf("copy #%d was cancelled", d.Number))
 		}
 		if cp, err = models.New(c.DB.Read).CopyByDeploy(ctx, sqlNumber(d.ID)); err != nil {
-			return nil, err
+			return err
 		}
-		return c.handover(inst).Forward(ctx, cp, to)
-	}()
+		moved, err = c.handover(inst).Forward(ctx, cp, to)
+		return err
+	})
 	var failed handover.Failed
 	if errors.As(err, &failed) {
 		return web.Status(http.StatusUnprocessableEntity, failed)
@@ -244,19 +238,7 @@ func (c V1) CancelCopy(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ctx := r.Context()
-	var cleanUp int64
-	err = func() error {
-		copyLock.Lock()
-		defer copyLock.Unlock()
-		return c.DB.Tx(ctx, func(tx *db.Tx) error {
-			cp, err := models.New(tx).CopyByID(ctx, cp.ID)
-			if err != nil {
-				return err
-			}
-			cleanUp, err = models.CancelCopy(ctx, tx, cp, by(r), time.Now())
-			return err
-		})
-	}()
+	cleanUp, err := handover.Cancel(ctx, c.DB, cp.ID, by(r), time.Now())
 	var refused models.Refused
 	if errors.As(err, &refused) {
 		return web.Status(http.StatusUnprocessableEntity, refused)
@@ -290,44 +272,14 @@ func (c V1) UndoCopy(w http.ResponseWriter, r *http.Request) error {
 	}
 	confirm, _ := field(body, "confirm")
 	ctx := r.Context()
-	refuse := func(format string, args ...any) error {
-		return web.Status(http.StatusUnprocessableEntity, fmt.Errorf(format, args...))
-	}
-	switch {
-	case confirm != cp.ToName:
-		return refuse("type %s to confirm", cp.ToName)
-	case cp.Status != "go":
-		return refuse("the copy to %s isn't done", cp.ToName)
-	case !cp.FromProjectID.Valid:
-		return refuse("%s is deleted: there's nothing to go back to", cp.FromName)
-	case !cp.ProjectID.Valid:
-		return refuse("%s is gone already", cp.ToName)
-	}
 	inst, err := models.New(c.DB.Read).CurrentInstallation(ctx)
 	if err != nil {
 		return err
 	}
-	copyLock.Lock()
-	err = c.handover(inst).Back(ctx, cp)
-	copyLock.Unlock()
-	var failed handover.Failed
-	if errors.As(err, &failed) {
-		return refuse("the hosts didn't go back to %s: %s", cp.FromName, failed)
-	}
-	if err != nil {
-		return err
-	}
-	now := time.Now()
-	var deletion models.ProjectDeletion
-	err = c.DB.Tx(ctx, func(tx *db.Tx) (err error) {
-		if deletion, err = models.RequestDeletion(ctx, tx, p, p.Name, false, by(r), now); err != nil {
-			return err
-		}
-		return models.New(tx).MarkUndone(ctx, models.MarkUndoneParams{Now: sqlTime(now), ID: cp.ID})
-	})
+	deletion, err := c.handover(inst).Undo(ctx, p, cp, confirm, by(r), time.Now())
 	var refused models.Refused
 	if errors.As(err, &refused) {
-		return refuse("the hosts are %s's again, but %s wasn't deleted: %s", cp.FromName, cp.ToName, refused.Msg)
+		return web.Status(http.StatusUnprocessableEntity, refused)
 	}
 	if err != nil {
 		return err

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/scttymn/gantry/web"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/services/backup"
 	"github.com/scttymn/houston/mission-control-go/app/services/removal"
 	"github.com/scttymn/houston/mission-control-go/app/shared/layout"
 )
@@ -414,4 +416,134 @@ func zoneOf(page layout.Page) *time.Location {
 		return page.Zone
 	}
 	return time.UTC
+}
+
+func snapshotsTab(p models.Project, kind string) string {
+	path := "/projects/" + p.Name + "/snapshots"
+	if kind != "auto" {
+		path += "?kind=" + kind
+	}
+	return path
+}
+
+// snapshotWhy is why a snapshot was taken.
+func snapshotWhy(s backup.Snapshot) string {
+	switch s.Reason {
+	case "manual":
+		return "created by hand"
+	case "schedule":
+		return "daily"
+	case "restore":
+		return "before a restore"
+	case "delete":
+		return "before it was deleted"
+	}
+	if s.Deploy != nil {
+		return "before deploy #" + strconv.FormatInt(*s.Deploy, 10)
+	}
+	return s.Reason
+}
+
+func snapshotSize(s backup.Snapshot) string {
+	if s.Bytes == nil {
+		return "—"
+	}
+	return text.ByteSize(*s.Bytes)
+}
+
+func downloadTitle(s backup.Snapshot) string {
+	title := "Download everything in this snapshot"
+	if s.Bytes != nil {
+		title += ", about " + text.ByteSize(*s.Bytes)
+	}
+	return title
+}
+
+func defaultName(l *models.StorageLocation) string {
+	if l == nil {
+		return "none yet"
+	}
+	return l.Name
+}
+
+// notBackedUp are the services a backup doesn't hold: they start empty
+// after a restore.
+func notBackedUp(p models.Project) []string {
+	var out []string
+	for _, s := range p.Accessories() {
+		held := false
+		for _, d := range p.Databases.V {
+			held = held || d.Service == s
+		}
+		if !held {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func runningWordsOr(d *models.Deploy, none string) string {
+	if d == nil {
+		return none
+	}
+	return d.ShortSha()
+}
+
+// inWhere is where the backups are, put into format ("" without any).
+func inWhere(locations []string, format string) string {
+	if len(locations) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(format, web.Sentence(locations))
+}
+
+func repoWhere(p models.Project) string {
+	if p.RepoUrl == "" {
+		return ""
+	}
+	return " (" + p.RepoUrl + ")"
+}
+
+func backupsToo(d models.ProjectDeletion) string {
+	if d.DeleteBackups {
+		return " · backups deleted too"
+	}
+	return ""
+}
+
+func otherBackups(d models.ProjectDeletion) string {
+	if d.DeleteBackups {
+		return ""
+	}
+	return ", with its other backups"
+}
+
+var deletionStateWords = map[string]string{"done": "DONE", "current": "RUNNING", "failed": "FAILED", "pending": ""}
+
+// deletionSteps are a deletion's steps in words, each with its state, as a
+// deploy page shows them.
+func deletionSteps(d models.ProjectDeletion) [][2]string {
+	at := -1
+	for i, s := range removal.Steps {
+		if s == d.Step {
+			at = i
+		}
+	}
+	out := make([][2]string, len(removal.Steps))
+	for i, s := range removal.Steps {
+		state := "pending"
+		switch {
+		case d.Status == "go":
+			state = "done"
+		case at < 0 || i > at:
+		case i < at:
+			state = "done"
+		case d.Status == "running":
+			state = "current"
+		case d.Status == "no_go":
+			state = "failed"
+		}
+		out[i] = [2]string{removal.StepWords[s], state}
+	}
+	return out
 }

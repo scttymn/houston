@@ -188,6 +188,47 @@ func (q *Queries) LiveLocations(ctx context.Context) ([]StorageLocation, error) 
 	return items, nil
 }
 
+const readyLocations = `-- name: ReadyLocations :many
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE acknowledged_at IS NOT NULL ORDER BY name
+`
+
+func (q *Queries) ReadyLocations(ctx context.Context) ([]StorageLocation, error) {
+	rows, err := q.db.QueryContext(ctx, readyLocations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StorageLocation{}
+	for rows.Next() {
+		var i StorageLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Settings,
+			&i.Credentials,
+			&i.ResticPassword,
+			&i.IsDefault,
+			&i.AcknowledgedAt,
+			&i.VerifiedAt,
+			&i.PrunedAt,
+			&i.PruneError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recentFailedCopyFrom = `-- name: RecentFailedCopyFrom :one
 SELECT id, project_id, from_project_id, deploy_id, snapshot_run_id, from_name, to_name, sha, requested_by, status, error, log, handed_over, handed_over_at, undone_at, created_at, updated_at FROM project_copies c WHERE c.from_project_id = ?1 AND c.status = 'no_go' AND c.updated_at >= ?2
   AND NOT EXISTS (SELECT 1 FROM project_copies later WHERE later.from_project_id = ?1 AND later.status = 'go' AND later.id > c.id)
@@ -243,6 +284,57 @@ func (q *Queries) SavedSecrets(ctx context.Context, projectID int64) ([]Secret, 
 			&i.ProjectID,
 			&i.Key,
 			&i.Value,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usedLocations = `-- name: UsedLocations :many
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE acknowledged_at IS NOT NULL
+  AND (id IN (SELECT runs.location_id FROM backup_runs runs WHERE runs.project_id = ?1 AND runs.operation = 'backup')
+    OR id IN (SELECT gone.snapshot_location_id FROM project_deletions gone WHERE gone.name = ?2 AND gone.snapshot_location_id IS NOT NULL))
+ORDER BY name
+`
+
+type UsedLocationsParams struct {
+	Project int64
+	Name    string
+}
+
+// Where a project's backups are: the locations it backed up to, and where
+// a deleted project of its name left its final snapshot.
+func (q *Queries) UsedLocations(ctx context.Context, arg UsedLocationsParams) ([]StorageLocation, error) {
+	rows, err := q.db.QueryContext(ctx, usedLocations, arg.Project, arg.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StorageLocation{}
+	for rows.Next() {
+		var i StorageLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Settings,
+			&i.Credentials,
+			&i.ResticPassword,
+			&i.IsDefault,
+			&i.AcknowledgedAt,
+			&i.VerifiedAt,
+			&i.PrunedAt,
+			&i.PruneError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

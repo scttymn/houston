@@ -17,6 +17,8 @@ type Page struct {
 	Layout layout.Page
 	Live   templ.Component
 	Status Status
+	// Alert is what a form here was refused with (a copy's cancel).
+	Alert string
 }
 
 // Status is the deploy's head and what's serving meanwhile.
@@ -35,6 +37,9 @@ templ ShowPage(pg Page) {
 		@pg.Live
 		<main class="page deploy-page">
 			<nav class="mono crumbs"><a href="/">Projects</a> <span>/</span> <a href={ templ.SafeURL("/projects/" + p.Name) }>{ p.Name }</a> <span>/</span> <span class="crumbs__here">{ Word(d) + " #" + strconv.FormatInt(d.Number, 10) }</span></nav>
+			if pg.Alert != "" {
+				<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ pg.Alert }</span></div>
+			}
 			@StatusPart(pg.Status)
 			<div class="deploy-body">
 				@Steps(d)

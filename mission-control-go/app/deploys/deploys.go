@@ -12,6 +12,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/scttymn/gantry/db"
 	"github.com/scttymn/gantry/live"
+	"github.com/scttymn/gantry/sign"
 	"github.com/scttymn/gantry/turbo"
 	"github.com/scttymn/gantry/web"
 
@@ -43,8 +44,9 @@ type view struct {
 
 // Controller draws deploys' pages.
 type Controller struct {
-	DB   *db.DB
-	Live *live.Hub
+	DB     *db.DB
+	Live   *live.Hub
+	Signer sign.Signer // the flash's
 }
 
 // Show is GET /projects/{name}/deploys/{number}.
@@ -71,6 +73,9 @@ func (c Controller) Show(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	page := Page{Layout: layout.For(r, p.Name+" · "+Word(d)+" #"+strconv.FormatInt(d.Number, 10)), Live: c.Live.Source(Stream(d.ID)), Status: s}
+	if kind, msg, ok := (web.Flash{Signer: c.Signer}).Take(w, r); ok && kind == "alert" {
+		page.Alert = msg
+	}
 	return web.Render(w, r, http.StatusOK, ShowPage(page))
 }
 

@@ -27,3 +27,14 @@ SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL AND kind IN ('
 
 -- name: SavedSecrets :many
 SELECT * FROM secrets WHERE project_id = ? ORDER BY key;
+
+-- name: UsedLocations :many
+-- Where a project's backups are: the locations it backed up to, and where
+-- a deleted project of its name left its final snapshot.
+SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL
+  AND (id IN (SELECT runs.location_id FROM backup_runs runs WHERE runs.project_id = @project AND runs.operation = 'backup')
+    OR id IN (SELECT gone.snapshot_location_id FROM project_deletions gone WHERE gone.name = @name AND gone.snapshot_location_id IS NOT NULL))
+ORDER BY name;
+
+-- name: ReadyLocations :many
+SELECT * FROM storage_locations WHERE acknowledged_at IS NOT NULL ORDER BY name;
