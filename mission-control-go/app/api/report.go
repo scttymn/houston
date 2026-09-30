@@ -71,6 +71,11 @@ func (c Controller) Report(w http.ResponseWriter, r *http.Request) error {
 		c.Live.Refresh(FlightBoard, "")
 	}
 	c.afterReport(ctx, reported, now)
+	if reported.CleanUp != 0 {
+		if _, err := c.CopyCleanUp.Enqueue(ctx, models.CopyArgs{ID: reported.CleanUp}); err != nil {
+			return err
+		}
+	}
 	return web.JSON(w, http.StatusOK, map[string]any{"number": d.Number, "status": d.Status})
 }
 

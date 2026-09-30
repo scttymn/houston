@@ -49,9 +49,13 @@ type Controller struct {
 	// Refs reads a project's repo's refs; Git, anything else of a repo.
 	Refs models.RefReader
 	Git  gitremote.Git
-	// Delete is the deletion job.
+	// Delete is the deletion job; CopyCleanUp removes a failed copy's
+	// new project.
 	Delete interface {
 		Enqueue(ctx context.Context, a models.DeletionArgs) (int64, error)
+	}
+	CopyCleanUp interface {
+		Enqueue(ctx context.Context, a models.CopyArgs) (int64, error)
 	}
 }
 

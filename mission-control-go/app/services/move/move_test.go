@@ -52,7 +52,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft" {
+	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft, 1 copy" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -338,5 +338,20 @@ func TestDeletions(t *testing.T) {
 	d, err := models.New(to.Read).DeletionByID(context.Background(), 1)
 	if err != nil || d.Name != "old" || d.RequestedBy != "scotty" || d.ProjectID.Valid || d.SnapshotLocationID.Int64 != 1 || d.Status != "go" || !d.RemovingAt.Valid {
 		t.Errorf("= %+v %v", d, err)
+	}
+}
+
+// A copy moves, its names and who asked renamed, the hosts it took kept.
+func TestCopies(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	c, err := models.New(to.Read).CopyByID(context.Background(), 1)
+	if err != nil || c.FromName != "shop" || c.ToName != "blog" || c.RequestedBy != "token laptop" || c.Status != "go" ||
+		c.ProjectID.Int64 != 2 || c.FromProjectID.Int64 != 1 || c.DeployID.Int64 != 3 || c.SnapshotRunID.Int64 != 1 ||
+		strings.Join(c.HandedOver.V, ",") != "shop.example.com" || !c.HandedOverAt.Time.Equal(time.Date(2026, 9, 30, 8, 30, 0, 0, time.UTC)) || c.UndoneAt.Valid {
+		t.Errorf("= %+v %v", c, err)
 	}
 }

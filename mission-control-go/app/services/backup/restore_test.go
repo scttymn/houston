@@ -151,3 +151,52 @@ func TestRestoreDataDetails(t *testing.T) {
 		t.Errorf("absolute: %q", run.Error)
 	}
 }
+
+// copying is restoring's run as a copy's: shop is the copy of old, never
+// served, its deploy building generation 1 from old's snapshot at e…e.
+func copying(t *testing.T) (*db.DB, *dockercmdtest.Fake, backup.Runner, int64) {
+	t.Helper()
+	d, docker, r, id := restoring(t)
+	for _, q := range []string{
+		`DELETE FROM deploys WHERE number = 1`,
+		`UPDATE deploys SET kind = 'copy', generation = 1 WHERE number = 2`,
+		`INSERT INTO projects (id, name, app_service, services, health, port) VALUES (2, 'old', 'web', '["web"]', '/up', 3000)`,
+		`INSERT INTO backup_runs (id, project_id, location_id, kind, reason, status, sha, heartbeat_at) VALUES (99, 2, 1, 'deploy', 'copy', 'go', '` + strings.Repeat("e", 40) + `', CURRENT_TIMESTAMP)`,
+		`INSERT INTO project_copies (project_id, from_project_id, deploy_id, snapshot_run_id, from_name, to_name, sha, requested_by, status)
+			SELECT 1, 2, id, 99, 'old', 'shop', sha, 'admin', 'running' FROM deploys WHERE number = 2`,
+	} {
+		if _, err := d.Write.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	return d, docker, r, id
+}
+
+// A copy's data is the old project's snapshot, at the commit it was taken
+// at, restored into the generation the new project will first serve.
+func TestRestoreCopyData(t *testing.T) {
+	for _, c := range []struct {
+		name, manifest, want string
+	}{
+		{"the old project's", manifest("old", strings.Repeat("e", 40), "sqlite/1.sqlite3", "app.db"), ""},
+		{"the new project's", manifest("shop", strings.Repeat("e", 40), "sqlite/1.sqlite3", "app.db"), "the snapshot is of shop, not old"},
+		{"another commit's", manifest("old", sha, "sqlite/1.sqlite3", "app.db"), "the snapshot was taken at 5ade5ad, not the snapshot's eeeeeee"},
+	} {
+		d, docker, r, id := copying(t)
+		docker.On(dockercmdtest.OK(c.manifest), "run", "--rm", "--name", "houston-restore.shop.read")
+		r.Do(context.Background(), id)
+		if run := runRow(t, d, id); run.Error != c.want || (c.want == "") != (run.Status == "go") {
+			t.Errorf("%s: %s %q", c.name, run.Status, run.Error)
+		}
+	}
+
+	// Once the new project has served, its serving generation is never
+	// restored into.
+	d, docker, r, id := copying(t)
+	docker.On(dockercmdtest.OK(manifest("old", strings.Repeat("e", 40), "sqlite/1.sqlite3", "app.db")), "run", "--rm", "--name", "houston-restore.shop.read")
+	d.Write.Exec(`INSERT INTO deploys (project_id, number, status, sha, ref, heartbeat_at) VALUES (1, 3, 'go', 'x', 'main', CURRENT_TIMESTAMP)`)
+	r.Do(context.Background(), id)
+	if run := runRow(t, d, id); run.Error != "refusing to restore into generation 1: generation 1 is the one serving" {
+		t.Errorf("into the serving one: %q", run.Error)
+	}
+}

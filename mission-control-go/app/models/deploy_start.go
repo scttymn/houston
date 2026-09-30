@@ -81,6 +81,9 @@ type Started struct {
 	Deploy   Deploy
 	Token    string
 	TookOver int64
+	// CleanUp are the copies whose new project goes, as their deploy was
+	// abandoned (the caller queues them).
+	CleanUp []int64
 }
 
 // StartDeploy starts p's next deploy, in tx. A silent in-flight deploy (no
@@ -97,13 +100,13 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	if cleaning {
 		return Started{}, ErrRegistryBusy
 	}
-	var tookOver int64
+	var tookOver, cleanUp int64
 	current, err := q.DeployInFlight(ctx, p.ID)
 	switch {
 	case err == nil && current.HeartbeatAt.After(now.Add(-StaleAfter)):
 		return Started{}, Busy{Deploy: current}
 	case err == nil:
-		if err := abandon(ctx, q, current, now); err != nil {
+		if cleanUp, err = abandon(ctx, q, current, now); err != nil {
 			return Started{}, err
 		}
 		tookOver = current.Number
@@ -123,11 +126,19 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	if err != nil {
 		return Started{}, err
 	}
-	return Started{Deploy: d, Token: token, TookOver: tookOver}, nil
+	started := Started{Deploy: d, Token: token, TookOver: tookOver}
+	if cleanUp != 0 {
+		started.CleanUp = []int64{cleanUp}
+	}
+	return started, nil
 }
 
-// abandon finishes a silent in-flight deploy.
-func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) error {
-	return q.AbandonDeploy(ctx, AbandonDeployParams{ID: d.ID, Now: sql.NullTime{Time: now, Valid: true},
-		Error: "abandoned: no word from houston deploy since " + d.HeartbeatAt.UTC().Format(time.RFC3339)})
+// abandon finishes a silent in-flight deploy, and settles its copy when
+// it's a copy's: cleanUp is that copy when its new project goes.
+func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, err error) {
+	d.Status, d.Error = "no_go", "abandoned: no word from houston deploy since "+d.HeartbeatAt.UTC().Format(time.RFC3339)
+	if err := q.AbandonDeploy(ctx, AbandonDeployParams{ID: d.ID, Now: sql.NullTime{Time: now, Valid: true}, Error: d.Error}); err != nil {
+		return 0, err
+	}
+	return SettleCopy(ctx, q, d, now)
 }

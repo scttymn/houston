@@ -66,6 +66,18 @@ func (a *App) DefineJobs() error {
 		OnExhausted: func(ctx context.Context, args models.DeletionArgs, err error) {
 			a.noteDeletion(ctx, args.ID, "registry space wasn't freed: waited 6 hours ("+err.Error()+")")
 		}})
+	// A copy that failed or was cancelled before its handover: its new
+	// project goes. A delete is refused while its data is still being
+	// restored, so it's tried again until that's done.
+	a.CopyCleanUp = jobs.Define(a.Jobs, "copy_cleanup", a.copyCleanUp, jobs.Opts[models.CopyArgs]{Queue: "deletions",
+		Retry: jobs.Retry{Attempts: 60, Wait: copyWait},
+		OnExhausted: func(ctx context.Context, args models.CopyArgs, err error) {
+			q := models.New(a.DB.Write)
+			if c, qerr := q.CopyByID(context.WithoutCancel(ctx), args.ID); qerr == nil {
+				q.SettleCopy(context.WithoutCancel(ctx), models.SettleCopyParams{Status: c.Status, Log: c.Log, Now: time.Now(), ID: c.ID,
+					Error: fmt.Sprintf("%s; %s wasn't removed (%v): delete it by hand", c.Error, c.ToName, err)})
+			}
+		}})
 	a.LatestRelease = jobs.Define(a.Jobs, "check_latest_release", a.checkLatestRelease, jobs.Opts[struct{}]{})
 	a.LatestRelease.Every(6*time.Hour, struct{}{})
 	return nil
@@ -171,6 +183,50 @@ func (a *App) deleteProject(ctx context.Context, args models.DeletionArgs) error
 		return jobs.Discard(err) // recorded on the deletion; asking again resumes it
 	}
 	return nil
+}
+
+// copyWait is how long a copy's clean-up waits before trying again.
+const copyWait = 30 * time.Second
+
+// copyCleanUp removes a failed or cancelled copy's new project, with
+// nothing kept, since it never served.
+func (a *App) copyCleanUp(ctx context.Context, args models.CopyArgs) error {
+	q := models.New(a.DB.Read)
+	c, err := q.CopyByID(ctx, args.ID)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (!c.ProjectID.Valid || c.HandedOverAt.Valid) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	p, err := q.ProjectByID(ctx, c.ProjectID.Int64)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if deleting, err := models.Deleting(ctx, q, p.ID); err != nil || deleting {
+		return err
+	}
+	why := "failed"
+	if strings.HasPrefix(c.Error, "cancelled") {
+		why = "was cancelled"
+	}
+	var deletion models.ProjectDeletion
+	err = a.DB.Tx(ctx, func(tx *db.Tx) (err error) {
+		deletion, err = models.RequestDeletion(ctx, tx, p, p.Name, true, "Houston (the copy of "+c.FromName+" "+why+")", time.Now())
+		return err
+	})
+	var refused models.Refused
+	if errors.As(err, &refused) {
+		return errors.New(refused.Msg) // tried again: its data may still be being restored
+	}
+	if err != nil {
+		return err
+	}
+	_, err = a.Delete.Enqueue(ctx, models.DeletionArgs{ID: deletion.ID})
+	return err
 }
 
 // registryWait is how long the registry's clean-up waits before trying

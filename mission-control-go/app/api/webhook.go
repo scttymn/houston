@@ -52,7 +52,7 @@ func (c Controller) Webhook(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx := r.Context()
 	q := models.New(c.DB.Read)
-	project, err := q.ProjectByName(ctx, name)
+	project, err := models.WebhookTarget(ctx, q, name)
 	if err != nil || !models.WebhookVerified(r.Header, body, project.WebhookSecret.Reveal()) {
 		return unverified(http.StatusNotFound)
 	}

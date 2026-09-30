@@ -129,6 +129,26 @@ type Project struct {
 	UpdatedAt          time.Time
 }
 
+type ProjectCopy struct {
+	ID            int64
+	ProjectID     sql.NullInt64
+	FromProjectID sql.NullInt64
+	DeployID      sql.NullInt64
+	SnapshotRunID sql.NullInt64
+	FromName      string
+	ToName        string
+	Sha           string
+	RequestedBy   string
+	Status        string
+	Error         string
+	Log           string
+	HandedOver    Names
+	HandedOverAt  sql.NullTime
+	UndoneAt      sql.NullTime
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type ProjectDeletion struct {
 	ID                 int64
 	ProjectID          sql.NullInt64

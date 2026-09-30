@@ -24,8 +24,10 @@ type Fake struct {
 	nextID  int
 	// Tunnels are each tunnel's last configuration, by "account/tunnel".
 	tunnels map[string]json.RawMessage
-	// Fail, when set, is the error every call answers.
-	fail string
+	// Fail, when set, is the error every call answers; failCalls, the
+	// error one call answers ("PATCH /zones/z/dns_records/rec1").
+	fail      string
+	failCalls map[string]string
 	// Calls are what was asked, "GET /zones?name=x" style.
 	calls []string
 	// Loose makes it ignore a list's comment.exact filter, as an API that
@@ -83,6 +85,17 @@ func (f *Fake) Fail(msg string) {
 	f.fail = msg
 }
 
+// FailCall makes one call answer Cloudflare's error msg: call is its
+// method and path, "PATCH /zones/z/dns_records/rec1".
+func (f *Fake) FailCall(call, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failCalls == nil {
+		f.failCalls = map[string]string{}
+	}
+	f.failCalls[call] = msg
+}
+
 // Calls are the calls made so far.
 func (f *Fake) Calls() []string {
 	f.mu.Lock()
@@ -104,6 +117,10 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if f.fail != "" {
 		answer(w, 400, nil, f.fail)
+		return
+	}
+	if msg, ok := f.failCalls[r.Method+" "+r.URL.Path]; ok {
+		answer(w, 403, nil, msg)
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")

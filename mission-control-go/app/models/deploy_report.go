@@ -34,6 +34,9 @@ type Reported struct {
 	Deploy   Deploy
 	Appended string
 	Adopted  *Adopted
+	// CleanUp is a copy whose new project goes: its deploy failed before
+	// it took any host over.
+	CleanUp int64
 }
 
 // Report applies p to d, in tx; the caller has checked, in tx, that d is
@@ -60,6 +63,11 @@ func Report(ctx context.Context, tx *db.Tx, d Deploy, p Progress, now time.Time)
 		return Reported{}, err
 	}
 	out := Reported{Deploy: d}
+	if p.Status != nil {
+		if out.CleanUp, err = SettleCopy(ctx, New(tx), d, now); err != nil {
+			return Reported{}, err
+		}
+	}
 	if d.Restore() && (p.Step != nil && *p.Step == Switched || p.Status != nil && *p.Status == "go") {
 		if err := q.MarkSwitched(ctx, MarkSwitchedParams{SwitchedAt: sql.NullTime{Time: now, Valid: true}, ID: d.ID}); err != nil {
 			return Reported{}, err

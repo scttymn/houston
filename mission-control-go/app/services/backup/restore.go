@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,7 +71,8 @@ func (w *run) restore(ctx context.Context) error {
 		target := models.Generation{Project: w.project.Name, Number: d.Generation}
 		// Defense in depth: the serving generation is never emptied or
 		// dropped, whatever the restore's deploy row says.
-		if target.Number == w.project.DataGeneration {
+		// A copy's new project serves nothing yet.
+		if target.Number == w.project.DataGeneration && !(d.Kind == "copy" && !w.served(ctx)) {
 			return nil, failed(fmt.Sprintf("refusing to restore into generation %d: generation %d is the one serving", target.Number, target.Number))
 		}
 		// The restore's own compose.yml's volumes, as its check sync kept
@@ -161,11 +163,22 @@ func (w *run) readManifest(ctx context.Context, d models.Deploy, vols []models.V
 	if json.Unmarshal([]byte(read.Output), &m) != nil {
 		return m, failed("the snapshot's manifest isn't Houston's")
 	}
-	if m.Project != w.project.Name {
-		return m, failed(fmt.Sprintf("the snapshot is of %s, not %s", m.Project, w.project.Name))
+	// A copy's snapshot is of the old project, at the commit it served.
+	of, sha, whose := w.project.Name, d.Sha, "restore's"
+	if d.Kind == "copy" {
+		q := models.New(w.DB.Read)
+		if c, err := q.CopyByDeploy(ctx, sql.NullInt64{Int64: d.ID, Valid: true}); err == nil {
+			of, sha, whose = c.FromName, "", "snapshot's"
+			if snapshot, err := q.BackupRunByID(ctx, c.SnapshotRunID.Int64); err == nil {
+				sha = snapshot.Sha
+			}
+		}
 	}
-	if m.Sha != d.Sha {
-		return m, failed(fmt.Sprintf("the snapshot was taken at %s, not the restore's %s", short(m.Sha), short(d.Sha)))
+	if m.Project != of {
+		return m, failed(fmt.Sprintf("the snapshot is of %s, not %s", m.Project, of))
+	}
+	if m.Sha != sha {
+		return m, failed(fmt.Sprintf("the snapshot was taken at %s, not the %s %s", short(m.Sha), whose, short(sha)))
 	}
 	var files []json.RawMessage
 	for _, pg := range m.Postgres {
@@ -197,6 +210,13 @@ func (w *run) readManifest(ctx context.Context, d models.Deploy, vols []models.V
 		}
 	}
 	return m, nil
+}
+
+// served is whether the project has served (a copy's new project hasn't,
+// until its first GO); an error counts as served.
+func (w *run) served(ctx context.Context) bool {
+	served, err := models.New(w.DB.Read).ProjectHasServed(ctx, w.project.ID)
+	return served || err != nil
 }
 
 func short(sha string) string { return sha[:min(7, len(sha))] }

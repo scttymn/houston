@@ -83,6 +83,26 @@ CREATE TABLE installations (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE project_copies (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL,
+  from_project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL,
+  deploy_id INTEGER REFERENCES deploys (id) ON DELETE SET NULL,
+  snapshot_run_id INTEGER REFERENCES backup_runs (id) ON DELETE SET NULL,
+  from_name TEXT NOT NULL,
+  to_name TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'go', 'no_go')),
+  error TEXT NOT NULL DEFAULT '' CHECK (length(error) <= 4000),
+  log TEXT NOT NULL DEFAULT '',
+  -- The hosts the new project took over from the old, JSON.
+  handed_over TEXT NOT NULL DEFAULT '[]',
+  handed_over_at DATETIME,
+  undone_at DATETIME,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE project_deletions (
   id INTEGER PRIMARY KEY,
   project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL,
@@ -216,6 +236,9 @@ CREATE UNIQUE INDEX backup_runs_one_scheduled_per_day ON backup_runs (project_id
 CREATE INDEX backup_runs_project_created ON backup_runs (project_id, created_at);
 CREATE UNIQUE INDEX deploys_one_in_flight ON deploys (project_id) WHERE status = 'in_flight';
 CREATE UNIQUE INDEX deploys_one_queued ON deploys (project_id) WHERE status = 'queued';
+CREATE INDEX project_copies_from_name ON project_copies (from_name);
+CREATE UNIQUE INDEX project_copies_one_active ON project_copies (from_project_id) WHERE status IN ('queued', 'running');
+CREATE INDEX project_copies_project ON project_copies (project_id);
 CREATE INDEX project_deletions_name ON project_deletions (name);
 CREATE UNIQUE INDEX project_deletions_one_active ON project_deletions (project_id) WHERE status IN ('queued', 'running');
 CREATE INDEX project_deletions_project ON project_deletions (project_id);

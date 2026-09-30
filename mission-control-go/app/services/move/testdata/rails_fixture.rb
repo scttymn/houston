@@ -90,5 +90,10 @@ ProjectDeletion.create!(name: "old", repo_url: "git@github.com:scttymn/old.git",
 RepoLink.create!(repo_url: "git@github.com:scttymn/new.git", deploy_key_private: "-----NEW KEY-----", deploy_key_public: "ssh-ed25519 AAAA new",
                  webhook_secret: "new-whsec", preview: { "sync" => { "name" => "new" } }, preview_sha: "c" * 40)
 
+# A copy that went: shop's data, and a host it handed over, into blog.
+ProjectCopy.create!(from_project: shop, project: blog, deploy: blog.deploys.first, snapshot_run: BackupRun.first, from: "shop", to: "blog",
+                    sha: "c" * 40, by: "token laptop", status: "go", log: "Copy data ok\nHandover ok\n",
+                    handed_over: [ "shop.example.com" ], handed_over_at: Time.utc(2026, 9, 30, 8, 30))
+
 puts "made #{ActiveRecord::Base.connection_db_config.database}: #{Installation.count} installation, #{Project.count} projects, " \
-     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts, #{ProjectDeletion.count} deletions"
+     "#{Deploy.count} deploys, #{Secret.count} secrets, #{StorageLocation.count} storage locations, #{BackupRun.count} backup runs, #{ApiToken.count} API tokens, #{RepoLink.count} drafts, #{ProjectDeletion.count} deletions, #{ProjectCopy.count} copies"

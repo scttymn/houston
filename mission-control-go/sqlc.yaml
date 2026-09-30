@@ -56,3 +56,5 @@ sql:
             go_type: github.com/scttymn/gantry/crypt.String
           - column: repo_links.webhook_secret
             go_type: github.com/scttymn/gantry/crypt.String
+          - column: project_copies.handed_over
+            go_type: { type: Names }

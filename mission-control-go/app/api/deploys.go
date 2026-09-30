@@ -58,6 +58,7 @@ func (c Controller) StartDeploy(w http.ResponseWriter, r *http.Request) error {
 	case err != nil:
 		return err
 	}
+	c.cleanUpCopies(ctx, started.CleanUp)
 	c.Live.Refresh(FlightBoard, "")
 	var tookOver *int64
 	if started.TookOver > 0 {

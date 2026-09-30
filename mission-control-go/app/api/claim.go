@@ -54,6 +54,9 @@ func (c Controller) Claim(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		if claimed != nil {
+			c.cleanUpCopies(ctx, claimed.CleanUp)
+		}
+		if claimed != nil && claimed.Deploy.ID != 0 {
 			c.Live.Refresh(FlightBoard, "")
 			job, err := c.job(ctx, *claimed)
 			if err != nil {
@@ -88,6 +91,16 @@ type jobDeploy struct {
 	PreviousAccessories []string `json:"previous_accessories"`
 	PreviousVolumes     []string `json:"previous_volumes"`
 	PreviousDatabases   []string `json:"previous_databases"`
+	Copy                *copyJob `json:"copy,omitempty"`
+}
+
+// copyJob is a copy's deploy's: it leaves the hosts the old project serves
+// for the handover, and keeps a placeholder so its service is never
+// kamal-proxy's catch-all.
+type copyJob struct {
+	From         string   `json:"from"`
+	Placeholder  string   `json:"placeholder"`
+	ExcludeHosts []string `json:"exclude_hosts"`
 }
 
 type jobProject struct {
@@ -125,6 +138,24 @@ func (c Controller) job(ctx context.Context, claimed models.Started) (job, error
 	}
 	if claimed.TookOver > 0 {
 		out.Deploy.TookOver = &claimed.TookOver
+	}
+	if d.Kind == "copy" {
+		q := models.New(c.DB.Read)
+		if cp, err := q.CopyByDeploy(ctx, sqlNumber(d.ID)); err == nil {
+			shared := []string{}
+			if cp.FromProjectID.Valid {
+				inst, _ := q.CurrentInstallation(ctx)
+				if old, err := q.ProjectByID(ctx, cp.FromProjectID.Int64); err == nil {
+					theirs := old.Hostnames(inst.BaseDomain)
+					for _, h := range project.Hostnames(inst.BaseDomain) {
+						if slices.Contains(theirs, h) {
+							shared = append(shared, h)
+						}
+					}
+				}
+			}
+			out.Deploy.Copy = &copyJob{From: cp.FromName, Placeholder: models.Placeholder(project.Name), ExcludeHosts: shared}
+		}
 	}
 	if d.Restore() {
 		previous := d.Generation - 1

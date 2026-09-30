@@ -68,6 +68,8 @@ type App struct {
 	// Delete carries out a project's deletion; CleanRegistry frees the
 	// registry's space after one.
 	Delete, CleanRegistry *jobs.Job[models.DeletionArgs]
+	// CopyCleanUp removes a failed copy's new project.
+	CopyCleanUp *jobs.Job[models.CopyArgs]
 	// Registry is Houston's image registry; KamalHome, where Kamal keeps
 	// its files on the host (HOUSTON_KAMAL_HOME).
 	Registry  registry.Registry
@@ -96,7 +98,7 @@ func (a *App) Router() *web.Router {
 	// The runner API: houston deploy on the server, and the runners.
 	runner := api.Controller{DB: a.DB, Log: a.Log, Cloudflare: a.Cloudflare, Services: a.Services, Tools: a.Tools, Live: a.Live, KnownHosts: a.KnownHosts, Backup: a.Backup,
 		Snapshot: a.Snapshot, Check: a.Check, Limits: &a.Limits, DockerCLI: a.DockerCLI, SnapshotList: a.Snapshots, Refs: a.Refs, Git: a.Git,
-		Delete: a.Delete}
+		Delete: a.Delete, CopyCleanUp: a.CopyCleanUp}
 
 	// hooks.<base>: the webhook and the ping, else an empty 404.
 	rt.Constraint(a.hooksHost, func(s *web.Scope) {
@@ -117,6 +119,9 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /deploys/{id}/snapshot", runner.ShowSnapshot)
 		s.Handle("POST /deploys/{id}/restore_data", runner.RequestRestoreData)
 		s.Handle("GET /deploys/{id}/restore_data", runner.ShowRestoreData)
+		s.Handle("POST /deploys/{id}/copy_data", runner.CreateCopyData)
+		s.Handle("GET /deploys/{id}/copy_data", runner.ShowCopyData)
+		s.Handle("POST /deploys/{id}/handover", runner.Handover)
 	})
 
 	// The personal API: the houston CLI with --server, and agents.
@@ -154,6 +159,9 @@ func (a *App) Router() *web.Router {
 		s.Handle("DELETE /projects/{name}/secrets/{key}", remote.RemoveSecret)
 		s.Handle("POST /projects/{name}/webhook/rotate", remote.RotateWebhook)
 		s.Handle("POST /projects/{name}/backups", remote.BackupNow)
+		s.Handle("POST /projects/{name}/copy", remote.RequestCopy)
+		s.Handle("POST /projects/{name}/copy/cancel", remote.CancelCopy)
+		s.Handle("POST /projects/{name}/copy/undo", remote.UndoCopy)
 		s.Handle("GET /projects/{name}/snapshots", remote.Snapshots)
 		s.Handle("GET /projects/{name}/snapshots/{id}/download", remote.DownloadSnapshot)
 	})

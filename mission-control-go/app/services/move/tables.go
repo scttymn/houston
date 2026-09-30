@@ -90,12 +90,19 @@ var tables = []table{
 	{name: "repo_links", words: "Add project draft", columns: append([]column{c("id", integer), c("repo_url", text), c("branch", text),
 		c("compose_path", text), c("deploy_key_private", encrypted), c("deploy_key_public", text), c("webhook_secret", encrypted),
 		c("preview", nullable), c("preview_sha", text)}, stamps()...)},
+	{name: "project_copies", words: "copy", columns: append([]column{c("id", integer), c("project_id", integer), c("from_project_id", integer),
+		c("deploy_id", integer), c("snapshot_run_id", integer), renamed("from_name", `"from"`, text), renamed("to_name", `"to"`, text),
+		c("sha", text), renamed("requested_by", "by", text), c("status", text), c("error", text), c("log", text), c("handed_over", jsonText),
+		c("handed_over_at", timestamp), c("undone_at", timestamp)}, stamps()...)},
 }
 
 // report is how many rows moved, in words: "2 projects".
 func (t table) report(n int) string {
 	if n == 1 {
 		return "1 " + t.words
+	}
+	if stem, ok := strings.CutSuffix(t.words, "y"); ok && !strings.ContainsAny(stem[len(stem)-1:], "aeiou") {
+		return fmt.Sprintf("%d %sies", n, stem) // copies, not deploys
 	}
 	return fmt.Sprintf("%d %ss", n, t.words)
 }
