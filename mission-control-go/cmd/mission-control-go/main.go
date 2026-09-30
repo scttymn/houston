@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/assets"
 	"github.com/scttymn/houston/mission-control-go/config"
 	"github.com/scttymn/houston/mission-control-go/db/migrations"
@@ -169,6 +171,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	}
 	version := app.HoustonVersion(os.Getenv("HOUSTON_VERSION"), os.Getenv("HOUSTON_SOURCE_SHA"))
 	hostname, _ := os.Hostname() // the container's name on Docker
+	runners, _ := strconv.Atoi(cfg.Runners)
 	own := owncontainer.Own{Docker: dockercmd.Docker, Hostname: hostname}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
 		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost,
@@ -178,6 +181,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 		Updater: serverupdate.Updater{DB: database, Docker: dockercmd.Docker, Own: own, Version: version, Repo: cfg.Repo, RunnerImage: cfg.RunnerImage,
 			Runners: cfg.Runners, Log: logger},
 		Port: &port.Port{DB: database, Own: own, RunnerImage: cfg.RunnerImage}, Stats: &appstats.Stats{Docker: dockercmd.Docker, Log: logger},
+		SystemStatus: &systemstatus.Status{Registry: cfg.RegistryURL}, Runners: runners,
 		CloudflareSettings: &cfsettings.Settings{DB: database, Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}}}
 	if err := a.DefineJobs(); err != nil {
 		return nil, nil, err

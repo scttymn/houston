@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scttymn/gantry/auth"
 	"github.com/scttymn/gantry/crypt"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
@@ -52,7 +53,7 @@ func TestInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(report.Moved, ", "); got != "1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft, 1 copy, 1 server update" {
+	if got := strings.Join(report.Moved, ", "); got != "1 user, 1 installation, 2 storage locations, 2 projects, 3 container names, 2 secrets, 1 volume, 1 runner, 3 deploys, 2 backup runs, 2 API tokens, 1 deletion, 1 Add project draft, 1 copy, 1 server update" {
 		t.Errorf("report %q", got)
 	}
 	var (
@@ -367,5 +368,21 @@ func TestServerUpdates(t *testing.T) {
 	if err != nil || u.ToVersion != "v0.4.27" || u.FromVersion != "v0.4.26" || u.Status != "rolled_back" || u.Step != "v0.4.27 didn't install; putting v0.4.26 back" ||
 		u.Log != "==> houston update: installing v0.4.27\n" || !u.StartedAt.Equal(time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)) || !u.FinishedAt.Valid {
 		t.Errorf("= %+v %v", u, err)
+	}
+}
+
+// Users move with their bcrypt hashes: the same password signs in.
+func TestUsers(t *testing.T) {
+	useKeys(t)
+	to := test.DB(t)
+	if _, err := Run(context.Background(), railsDB(t), devKeys, to); err != nil {
+		t.Fatal(err)
+	}
+	a := auth.Auth{DB: to}
+	if u, ok := a.Authenticate(context.Background(), "scotty@example.com", "a long password, moved"); !ok || u.ID != 1 {
+		t.Errorf("= %+v %v", u, ok)
+	}
+	if _, ok := a.Authenticate(context.Background(), "scotty@example.com", "another"); ok {
+		t.Error("another password")
 	}
 }

@@ -12,7 +12,7 @@ import (
 	gantry "github.com/scttymn/gantry/assets"
 )
 
-//go:embed css js public all:built
+//go:embed css js public fonts images all:built
 var files embed.FS
 
 // All is every asset, digested once at start.

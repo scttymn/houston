@@ -91,6 +91,21 @@ gantry's jobs, the Rails app's queues (default 3 at once; backups 1; snapshots 2
 | 3g | The server update, and the port: the installer run, settling (every minute), claims and backups held meanwhile (2d: update, port) | `serverupdate.TestStart*`, `TestSettle*`, `TestStepName`; `owncontainer.Test*`; `api.TestV1Update*`, `TestV1CheckRelease`, `TestUpdateHolds`, `TestV1Port`; `app.TestServerUpdateFollows`; `move.TestServerUpdates`; parity (done: 73 steps, none differ. `update-helper.sh` is copied into `app/services/serverupdate` and embedded, so the Go image carries it; the Rails copy goes at the switch. The Settings pages' update and port controls are batch 4) |
 | 3h | Live reads: app stats (docker stats, on demand), a project's logs streamed, Cloudflare's view, token and repair (2d) | `appstats.Test*`, `dockercmd.TestStream`, `cfsettings.Test*`, `api.TestV1Logs`, `TestV1ProjectStats`, `TestV1Cloudflare`; parity (done: 73 steps, none differ; the logs and Cloudflare aren't in it, as each side would ask its own Docker and the real Cloudflare. App stats and the Cloudflare view are kept in the process, as Rails kept them in its cache) |
 
+### Batch 4: pages and live updates
+The same stylesheet, fonts, images and Stimulus controllers, served by gantry's assets; each ERB view a templ component; Turbo Streams over gantry's live hub where Rails used Action Cable. Setup's pages are batch 5 (until then, a server without a user shows the sign-in page).
+
+| Slice | Criterion | Test |
+| --- | --- | --- |
+| 4a | Sign-in and sessions: gantry's `auth` on `users` and `sessions` (the users moved, bcrypt as it is), a session ended after 2 weeks unused or 30 days, bound to how it was made (the tunnel or not), 10 tries in 3 minutes an address and 50 failures in all through the tunnel; the layout, header and the assets | `app.TestSignIn*`, `TestSession*`, `TestHeaderStatus`, `systemstatus.Test*`, `move.TestUsers`; gantry's `auth` tests for what it gains (done: gantry v0.11.0's `Idle`, `Lifetime`, `Bind` and the `Attempt`/`Failed` hooks, v0.11.1's rooted stylesheet urls. The form posts to `/sign-in` (gantry's), not Rails' `/session`; signing out is still `DELETE /session`) |
+| 4b | The flight board: projects, their state, last deploy, backups, domains, the update notice, live refresh on change, the resources column read every 30 s | `app.TestFlightBoard*`, `TestResources` |
+| 4c | The project page and its forms: secrets, volumes, backup target and backup now, maintenance (and its preview), the repo, check now, the webhook | `app.TestProjectPage*` |
+| 4d | The deploy page: steps and status replaced live, the log appended live | `app.TestDeployPage*` |
+| 4e | Snapshots, restore, copy and delete confirmations, the deletion page (polled) | `app.TestSnapshotsPage`, `TestRestorePage`, `TestCopyPage`, `TestDeletePage` |
+| 4f | Add project (a draft read from the repo, then saved) | `app.TestAddProjectPage*` |
+| 4g | Settings: general, storage, tokens, Cloudflare, the port, releases and updates (polled) | `app.TestSettings*` |
+| 4h | The maintenance page on a project's hostnames | `app.TestMaintenancePage` |
+| 4i | Visual checks at 1280 and 375 px against the Rails version, and the pages' structure compared by the parity check | screenshots, `bin/parity` |
+
 **Found along the way, for later batches**
 - Batch 5: the production image can't be `FROM scratch`: Mission Control runs the docker CLI (volumes, restic, logs), git over ssh, and its own image as the tools image for helper containers (`HOUSTON_TOOLS_IMAGE`: `sh` and `mkdir`, and its binary at `/app` for `backup-sqlite`). The tunnel's Mission Control address (`HOUSTON_MISSION_CONTROL_URL`, default `http://mission-control:8080`) must match the container the installer runs.
 - Batch 5: the image needs the docker CLI for the server update's and the port switch's helpers too, and `HOUSTON_RUNNER_IMAGE`/`HOUSTON_RUNNERS` from the installer, as the Rails app has them.

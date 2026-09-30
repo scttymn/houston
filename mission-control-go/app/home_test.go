@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scttymn/gantry/testkit"
-
 	"github.com/scttymn/houston/mission-control-go/app"
 	"github.com/scttymn/houston/mission-control-go/test/testapp"
 )
@@ -24,16 +22,6 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	r.Header.Set("Accept", "text/html")
 	h.ServeHTTP(w, r)
 	return w
-}
-
-func TestHome(t *testing.T) {
-	h := handler(t)
-	w := get(t, h, "/")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Mission control go is running.") {
-		t.Fatalf("GET / = %d\n%s", w.Code, w.Body)
-	}
-	// Every stylesheet, script and image the page refers to loads.
-	testkit.Links(t, h, testkit.Page{Path: "/"})
 }
 
 func TestUp(t *testing.T) {

@@ -10,7 +10,8 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import "github.com/scttymn/houston/mission-control-go/app/shared/layout"
 
-func index() templ.Component {
+// index stands where the flight board goes (batch 4b).
+func index(p layout.Page) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -43,13 +44,13 @@ func index() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<main class=\"welcome\"><p class=\"eyebrow\">gantry</p><h1>Mission control go is running.</h1><p>This page is <code>app/home/index.templ</code>. Your routes are in <code>app/routes.go</code>.</p><ul><li><code>gantry g resource admin/posts title:string body:text</code> — a table with its pages</li><li><code>gantry g migration create_posts title:string</code> — a change to the schema</li><li><code>gantry db migrate</code>, <code>gantry test</code>, <code>gantry console</code></li></ul></main>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<main class=\"board\"></main>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Layout(layout.Page{Title: "Mission control go"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Layout(p).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

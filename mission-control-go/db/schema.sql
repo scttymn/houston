@@ -224,6 +224,16 @@ CREATE TABLE server_updates (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE sessions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  token_digest TEXT NOT NULL UNIQUE,
+  ip_address TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  bound_to TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  last_seen_at DATETIME NOT NULL
+);
 CREATE TABLE storage_locations (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -236,6 +246,13 @@ CREATE TABLE storage_locations (
   verified_at DATETIME,
   pruned_at DATETIME,
   prune_error TEXT NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  email_address TEXT NOT NULL UNIQUE,
+  password_digest TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -257,3 +274,4 @@ CREATE UNIQUE INDEX project_deletions_one_active ON project_deletions (project_i
 CREATE INDEX project_deletions_project ON project_deletions (project_id);
 CREATE INDEX project_hosts_project_id ON project_hosts (project_id);
 CREATE UNIQUE INDEX server_updates_one_running ON server_updates (status) WHERE status = 'running';
+CREATE INDEX sessions_user ON sessions (user_id);

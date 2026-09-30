@@ -25,6 +25,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/registry"
 	"github.com/scttymn/houston/mission-control-go/app/services/release"
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/assets"
 )
 
@@ -83,6 +84,10 @@ type App struct {
 	Stats *appstats.Stats
 	// CloudflareSettings is Cloudflare in Settings: its view, token, repair.
 	CloudflareSettings *cfsettings.Settings
+	// SystemStatus is the top bar's: the tunnel and the registry.
+	SystemStatus *systemstatus.Status
+	// Runners is how many runners the installer keeps (HOUSTON_RUNNERS).
+	Runners int
 	// Registry is Houston's image registry; KamalHome, where Kamal keeps
 	// its files on the host (HOUSTON_KAMAL_HOME).
 	Registry  registry.Registry
@@ -189,8 +194,17 @@ func (a *App) Router() *web.Router {
 		s.Handle("GET /projects/{name}/snapshots/{id}/download", remote.DownloadSnapshot)
 	})
 
+	// Sign-in, then every page behind it.
+	signIn := a.signIn()
+	signIn.Routes(rt)
+	rt.Handle("GET /session/new", func(w http.ResponseWriter, r *http.Request) error {
+		http.Redirect(w, r, "/sign-in", http.StatusMovedPermanently)
+		return nil
+	})
 	homePage := home.Controller{DB: a.DB}
-	rt.Handle("GET /{$}", homePage.Show)
+	rt.Scope("", web.Pipeline{signIn.Required, a.page}, func(s *web.Scope) {
+		s.Handle("GET /{$}", homePage.Show)
+	})
 
 	// The pages' live streams: put it behind the filters that decide who
 	// may listen, as the pages it serves are.

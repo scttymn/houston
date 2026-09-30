@@ -20,6 +20,7 @@ import (
 	"github.com/scttymn/houston/mission-control-go/app/services/owncontainer"
 	"github.com/scttymn/houston/mission-control-go/app/services/port"
 	"github.com/scttymn/houston/mission-control-go/app/services/serverupdate"
+	"github.com/scttymn/houston/mission-control-go/app/services/systemstatus"
 	"github.com/scttymn/houston/mission-control-go/test"
 )
 
@@ -50,6 +51,7 @@ func New(t testing.TB) *app.App {
 	a.Updater = serverupdate.Updater{DB: d, Docker: fake, Own: own, Version: a.Version, Repo: "scttymn/houston", Log: a.Log}
 	a.Port = &port.Port{DB: d, Own: own}
 	a.CloudflareSettings = &cfsettings.Settings{DB: d, Services: a.Services}
+	a.SystemStatus = &systemstatus.Status{Registry: "http://registry.invalid"}
 	a.Stats = &appstats.Stats{Docker: fake, Log: a.Log, DiskSize: func() int64 { return 100 << 30 }}
 	if err := a.DefineJobs(); err != nil {
 		t.Fatal(err)

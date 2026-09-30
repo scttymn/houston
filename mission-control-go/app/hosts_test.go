@@ -51,8 +51,8 @@ func TestHosts(t *testing.T) {
 		{"GET", "HOOKS.svnmns.com:443", "/assets/x", 404, ""},
 		{"POST", "hooks.svnmns.com", "/a/b", 404, ""},
 		{"GET", "admin.svnmns.com", "/ping", 200, a.Identity},
-		{"GET", "admin.svnmns.com", "/", 200, "Mission control go is running."},
-		{"GET", "192.168.0.56", "/", 200, "Mission control go is running."},
+		{"GET", "admin.svnmns.com", "/", 302, `<a href="/sign-in">Found</a>`},
+		{"GET", "192.168.0.56", "/", 302, `<a href="/sign-in">Found</a>`},
 	} {
 		w := request(h, c.method, c.host, c.path, "192.168.0.9", nil)
 		if w.Code != c.code || !strings.Contains(w.Body.String(), c.body) || c.body == "" && w.Body.Len() > 0 {
@@ -62,7 +62,7 @@ func TestHosts(t *testing.T) {
 
 	// Before setup there's no base domain: no host is the hooks host.
 	fresh := newApp(t)
-	if w := request(fresh.Handler(), "GET", "hooks.", "/", "192.168.0.9", nil); w.Code != 200 {
+	if w := request(fresh.Handler(), "GET", "hooks.", "/", "192.168.0.9", nil); w.Code != 302 {
 		t.Errorf("hooks. before setup = %d", w.Code)
 	}
 }

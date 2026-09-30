@@ -51,6 +51,7 @@ func stamps() []column { return []column{c("created_at", timestamp), c("updated_
 
 // tables are moved in this order: each after what it refers to.
 var tables = []table{
+	{name: "users", words: "user", columns: append([]column{c("id", integer), c("email_address", text), c("password_digest", text)}, stamps()...)},
 	{name: "installations", words: "installation", first: true, columns: append([]column{c("id", one), c("base_domain", text),
 		c("time_zone", text), c("dns_mode", text), c("port_open", boolean), c("cloudflare_account_id", text), c("cloudflare_zone_id", text),
 		c("cloudflare_api_token", encrypted), c("cloudflare_connected_at", timestamp), c("tunnel_id", text), c("tunnel_token", encrypted),

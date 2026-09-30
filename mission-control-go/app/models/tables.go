@@ -232,6 +232,17 @@ type ServerUpdate struct {
 	UpdatedAt   time.Time
 }
 
+type Session struct {
+	ID          int64
+	UserID      int64
+	TokenDigest string
+	IpAddress   string
+	UserAgent   string
+	BoundTo     string
+	CreatedAt   time.Time
+	LastSeenAt  time.Time
+}
+
 type StorageLocation struct {
 	ID             int64
 	Name           string
@@ -244,6 +255,14 @@ type StorageLocation struct {
 	VerifiedAt     sql.NullTime
 	PrunedAt       sql.NullTime
 	PruneError     string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type User struct {
+	ID             int64
+	EmailAddress   string
+	PasswordDigest string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
