@@ -99,7 +99,7 @@ func (a *App) page(w http.ResponseWriter, r *http.Request) error {
 
 // chrome is the top bar: the systems' status once setup is done.
 func (a *App) chrome(ctx context.Context, r *http.Request, inst models.Installation) layout.Chrome {
-	c := layout.Chrome{SignedIn: true, Version: a.Version}
+	c := layout.Chrome{SignedIn: true, Version: a.Version, Shadow: a.Shadow}
 	q := models.New(a.DB.Read)
 	ready, err := q.DefaultStorageReady(ctx)
 	if err != nil || !inst.CloudflareConnectedAt.Valid || !ready {

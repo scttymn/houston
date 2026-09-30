@@ -56,6 +56,10 @@ type Config struct {
 	// Solid Queue in Puma). JOBS_IN_SERVER=false leaves them to a process of
 	// their own, `mission-control-go jobs`.
 	JobsInServer bool
+	// Shadow is a read-only preview beside the Rails app, on a moved copy
+	// of its data (MISSION_CONTROL_SHADOW=1): no jobs, and nothing asked
+	// that would change anything outside it (app.ReadOnly).
+	Shadow bool
 }
 
 // Development is true where the code is mounted and changes as you work:
@@ -83,6 +87,7 @@ func Load(getenv func(string) string) Config {
 		MissionControlURL: or("HOUSTON_MISSION_CONTROL_URL", "http://mission-control:80"),
 		AppsURL:           or("HOUSTON_APPS_URL", "http://kamal-proxy:80"),
 		JobsInServer:      getenv("JOBS_IN_SERVER") != "false",
+		Shadow:            getenv("MISSION_CONTROL_SHADOW") == "1",
 	}
 	c.DatabaseURL = or("DATABASE_URL", "sqlite://"+c.DataDir+"/mission-control-go.sqlite3")
 	c.KnownHosts = or("HOUSTON_KNOWN_HOSTS", c.DataDir+"/known_hosts")
@@ -96,6 +101,9 @@ func Load(getenv func(string) string) Config {
 		c.EncryptionKeys = devEncryptionKey
 	}
 	c.RailsPrimaryKey, c.RailsKeySalt = getenv("AR_ENCRYPTION_PRIMARY_KEY"), getenv("AR_ENCRYPTION_KEY_DERIVATION_SALT")
+	if c.Shadow {
+		c.JobsInServer = false
+	}
 	return c
 }
 

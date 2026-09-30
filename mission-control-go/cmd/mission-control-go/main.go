@@ -76,6 +76,10 @@ func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args [
 	case "serve":
 		err = serve(ctx, cfg, logger, nil)
 	case "jobs":
+		if cfg.Shadow {
+			err = errors.New("a read-only preview (MISSION_CONTROL_SHADOW) runs no jobs")
+			break
+		}
 		err = runJobs(ctx, cfg, logger)
 	case "assets":
 		// Rails' assets:precompile: the Dockerfile runs it before go build,
@@ -174,7 +178,7 @@ func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.
 	runners, _ := strconv.Atoi(cfg.Runners)
 	own := owncontainer.Own{Docker: dockercmd.Docker, Hostname: hostname}
 	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
-		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost, TunnelTokenPath: cfg.TunnelTokenPath,
+		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost, TunnelTokenPath: cfg.TunnelTokenPath, Shadow: cfg.Shadow,
 		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts, Git: gitremote.Git{Run: gitremote.Exec, KnownHosts: cfg.KnownHosts},
 		Version: version, Release: release.Checker{API: "https://api.github.com", Repo: cfg.Repo, Version: version},
 		KamalHome: cfg.KamalHome, Registry: registry.Registry{URL: cfg.RegistryURL, ComposeProject: cfg.ComposeProject, Docker: dockercmd.Docker},

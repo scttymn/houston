@@ -45,6 +45,8 @@ type Chrome struct {
 	Status *Status
 	// Version is the Houston this is.
 	Version string
+	// Shadow is a read-only preview.
+	Shadow bool
 }
 
 // Status is the systems' status: the tunnel, the runners heard from in the

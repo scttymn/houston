@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,6 +20,7 @@ import (
 //	{Name: "backfill-slugs", Help: "Give every post a slug", Run: backfillSlugs},
 var Tasks = []Task{
 	{Name: "setup-code", Help: "Print a new first-run setup code (only until the admin exists)", Run: setupCode},
+	{Name: "port", Help: "Print whether port 3000 is open or closed (Settings › Security), for the installer", Run: portState},
 }
 
 // setupCode is what the installer prints next to the LAN address.
@@ -43,4 +46,19 @@ type TaskEnv struct {
 	DB  *db.DB
 	Log *slog.Logger
 	Out io.Writer
+}
+
+// portState is the choice saved in Settings › Security: "open" (as a new
+// install is) or "closed". The installer binds port 3000 by it.
+func portState(ctx context.Context, env TaskEnv, _ []string) error {
+	inst, err := models.New(env.DB.Read).CurrentInstallation(ctx)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	state := "open"
+	if err == nil && !inst.PortOpen {
+		state = "closed"
+	}
+	_, err = fmt.Fprintln(env.Out, state)
+	return err
 }

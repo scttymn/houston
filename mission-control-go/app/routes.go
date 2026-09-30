@@ -106,10 +106,33 @@ type App struct {
 	// trusted (proxies); "" trusts none. TunnelTokenPath is where it reads
 	// the tunnel's token, which setup writes.
 	TunnelHost, TunnelTokenPath string
+	// Shadow is a read-only preview (config's Shadow): ReadOnly around
+	// every route, and the top bar says so.
+	Shadow bool
 }
 
 // Handler is every route, in gantry's middleware.
-func (a *App) Handler() http.Handler { return a.Router().Handler() }
+func (a *App) Handler() http.Handler {
+	if a.Shadow {
+		return ReadOnly(a.Router().Handler())
+	}
+	return a.Router().Handler()
+}
+
+// ReadOnly answers only what reads: GET and HEAD, and signing in and out.
+// Anything else, a form, the API's writes, a runner or a webhook, is 503,
+// said in words: in a preview, nothing is changed outside it.
+func ReadOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET", r.Method == "HEAD",
+			r.Method == "POST" && (r.URL.Path == "/sign-in" || r.URL.Path == "/session"), r.Method == "DELETE" && r.URL.Path == "/session":
+			next.ServeHTTP(w, r)
+		default:
+			http.Error(w, "This Mission Control is a read-only preview: it changes nothing. Use the one serving Houston.", http.StatusServiceUnavailable)
+		}
+	})
+}
 
 // Router is every route, before Handler puts gantry's middleware around
 // them (a test may add one of its own).

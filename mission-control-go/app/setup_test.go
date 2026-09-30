@@ -309,3 +309,69 @@ func TestSetupStorage(t *testing.T) {
 		}
 	}
 }
+
+// A read-only preview beside the Rails app: pages and signing in and out,
+// and nothing that would change anything; the top bar says so.
+func TestShadow(t *testing.T) {
+	a, b := shop(t)
+	a.Shadow = true
+	b.h = a.Handler()
+	contains(t, b.do("GET", "/", nil).Body.String(), `<span class="mono topbar__label">READ-ONLY PREVIEW</span>`)
+	contains(t, b.do("GET", "/projects/shop", nil).Body.String(), "<title>shop · Project</title>")
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/projects/shop/deploys"}, {"PATCH", "/projects/shop/maintenance"}, {"POST", "/settings/tokens"},
+		{"POST", "/api/projects/sync"}, {"PUT", "/api/v1/settings"}, {"POST", "/setup"},
+	} {
+		w := b.do(c.method, c.path, url.Values{"x": {"1"}})
+		if w.Code != 503 || !strings.Contains(w.Body.String(), "read-only preview") {
+			t.Errorf("%s %s = %d", c.method, c.path, w.Code)
+		}
+	}
+	if count(t, a, "deploys") != 12 {
+		t.Error("a deploy started")
+	}
+	if w := b.do("POST", "/session", url.Values{"_method": {"delete"}}); w.Code != 303 {
+		t.Errorf("signing out = %d", w.Code)
+	}
+	if w := b.signIn("one@example.com", password); location(w) != "/" {
+		t.Errorf("signing in = %d %q", w.Code, location(w))
+	}
+	a.Shadow = false
+	b.h = a.Handler()
+	if strings.Contains(b.do("GET", "/", nil).Body.String(), "READ-ONLY PREVIEW") {
+		t.Error("the label when serving")
+	}
+}
+
+// The installer's tasks: a setup code, and port 3000's saved state.
+func TestTasks(t *testing.T) {
+	a := newApp(t)
+	run := func(name string) string {
+		t.Helper()
+		for _, task := range app.Tasks {
+			if task.Name == name {
+				var out strings.Builder
+				if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, nil); err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				return out.String()
+			}
+		}
+		t.Fatalf("no task %s", name)
+		return ""
+	}
+	if got := run("port"); got != "open\n" {
+		t.Errorf("before setup: %q", got)
+	}
+	must(t, a, `INSERT INTO installations (id, port_open) VALUES (1, FALSE)`)
+	if got := run("port"); got != "closed\n" {
+		t.Errorf("closed: %q", got)
+	}
+	must(t, a, `UPDATE installations SET port_open = TRUE`)
+	if got := run("port"); got != "open\n" {
+		t.Errorf("open: %q", got)
+	}
+	if got := run("setup-code"); !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\n$`).MatchString(got) {
+		t.Errorf("code %q", got)
+	}
+}

@@ -122,6 +122,9 @@ templ header(c Chrome) {
 	<div class="topbar-shell" data-controller="menu" data-action="keydown.esc@window->menu#close">
 		<header class="topbar">
 			@brand()
+			if c.Shadow {
+				<span class="mono topbar__label">READ-ONLY PREVIEW</span>
+			}
 			if c.SignedIn {
 				<nav class="topbar__nav">
 					<a href="/" class={ templ.KV("is-current", !c.Settings) }>Projects</a>
