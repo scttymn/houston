@@ -1,0 +1,27 @@
+[
+  {
+    "name": "short",
+    "plain": "hunter2",
+    "stored": "{\"p\":\"N1SIG1uPeA==\",\"h\":{\"iv\":\"twTMcLMoMztWFcBm\",\"at\":\"/PFb77XYPEv9Dm7haqMmLg==\"}}"
+  },
+  {
+    "name": "empty",
+    "plain": "",
+    "stored": "{\"p\":\"\",\"h\":{\"iv\":\"FDqOGF/Ota24z94P\",\"at\":\"R7SkJ34eAoDdDfbB1xP7Jw==\"}}"
+  },
+  {
+    "name": "unicode",
+    "plain": "café · 東京 🚀",
+    "stored": "{\"p\":\"eMDjV9IhVCABFzqS0ltIwzt3dJY=\",\"h\":{\"iv\":\"Vsz9GB/UTl80VHZO\",\"at\":\"NHhW0anluSM9mIweS1VEDQ==\"}}"
+  },
+  {
+    "name": "long",
+    "plain": "restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password restic-password ",
+    "stored": "{\"p\":\"ObioRQVyTZez+sMezr5VcmXQA2YcioKsTDhimB4=\",\"h\":{\"iv\":\"wPZ/KlPe98yUknvj\",\"at\":\"P8OmpPqdHAspdtDqIBsj6w==\",\"c\":true}}"
+  },
+  {
+    "name": "json",
+    "plain": "{\"access_key_id\":\"AKIA123\",\"secret_access_key\":\"s3cr3t/+=\"}",
+    "stored": "{\"p\":\"DziyzhDSrN+1xkYnTmNaSawjT7QT9/x+ByViDECO6NPcSf1P0hKfMvGTOmyzkDOomSgFooiPG26TLtk=\",\"h\":{\"iv\":\"e6euoK2ecYlOKHXB\",\"at\":\"GcVNsq5EPhsRB5ZhOA/jeQ==\"}}"
+  }
+]
