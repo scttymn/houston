@@ -54,3 +54,17 @@ SELECT * FROM projects WHERE maintenance_since IS NOT NULL ORDER BY name;
 
 -- name: MarkWebhookVerified :exec
 UPDATE projects SET webhook_verified_at = ? WHERE id = ? AND webhook_verified_at IS NULL;
+
+-- name: Projects :many
+SELECT * FROM projects ORDER BY name;
+
+-- name: ProjectExists :one
+SELECT EXISTS (SELECT 1 FROM projects WHERE name = ?) AS found;
+
+-- name: ProjectSecretRows :many
+SELECT key, value, updated_at FROM secrets WHERE project_id = ?;
+
+-- name: ProjectVolumeRows :many
+SELECT project_volumes.name, project_volumes.placed_at, storage_locations.name AS location
+FROM project_volumes LEFT JOIN storage_locations ON storage_locations.id = project_volumes.location_id
+WHERE project_volumes.project_id = ?;

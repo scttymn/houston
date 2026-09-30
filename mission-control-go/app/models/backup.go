@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/scttymn/gantry/db"
@@ -92,4 +93,25 @@ func (r BackupRun) Stale(now time.Time) bool {
 // StaleError is what a stale run is finished with.
 func (r BackupRun) StaleError() string {
 	return "Mission Control stopped during the backup (no word since " + r.HeartbeatAt.UTC().Format(time.RFC3339) + ")"
+}
+
+// WhereItIs is a location in words: an NFS export, a folder, or its
+// restic repository.
+func WhereItIs(l StorageLocation) string {
+	s := l.Settings.V
+	switch l.Kind {
+	case "nfs":
+		return s["server"] + ":" + s["export"]
+	case "local":
+		return s["path"]
+	case "s3":
+		endpoint := strings.TrimSuffix(s["endpoint"], "/")
+		if endpoint == "" {
+			endpoint = "https://s3.amazonaws.com"
+		}
+		return "s3:" + endpoint + "/" + s["bucket"] + "/houston"
+	case "b2":
+		return "b2:" + s["bucket"] + ":houston"
+	}
+	return ""
 }

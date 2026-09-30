@@ -18,4 +18,5 @@ blog = Project.create!(name: "blog", app_service: "web", services: %w[web], doma
                        repo_url: "git@github.com:scttymn/blog.git", branch: "main", compose_path: "compose.yml", deploy_key_private: "-----KEY-----")
 blog.hosts.create!(name: "blog")
 blog.deploys.create!(number: 1, sha: "b" * 40, ref: "refs/heads/main", status: "queued", token_digest: "", heartbeat_at: Time.utc(2026, 9, 1))
+ApiToken.create!(name: "parity", token_digest: ApiToken.digest("hou_parity-personal-token"))
 puts "parity data: #{Project.count} projects, #{Deploy.count} deploys"

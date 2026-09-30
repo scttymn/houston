@@ -138,6 +138,161 @@ func (q *Queries) DeploySnapshot(ctx context.Context, arg DeploySnapshotParams) 
 	return i, err
 }
 
+const lastBackup = `-- name: LastBackup :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND operation = 'backup' ORDER BY id DESC LIMIT 1
+`
+
+// The project's last snapshot run: what "last backup" means (a restore's
+// data is put back from one and has none of its own).
+func (q *Queries) LastBackup(ctx context.Context, projectID int64) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, lastBackup, projectID)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const latestBackupRun = `-- name: LatestBackupRun :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? ORDER BY id DESC LIMIT 1
+`
+
+func (q *Queries) LatestBackupRun(ctx context.Context, projectID int64) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, latestBackupRun, projectID)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const locationLastWrite = `-- name: LocationLastWrite :one
+SELECT finished_at FROM backup_runs WHERE location_id = ? AND status = 'go' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1
+`
+
+func (q *Queries) LocationLastWrite(ctx context.Context, locationID int64) (sql.NullTime, error) {
+	row := q.db.QueryRowContext(ctx, locationLastWrite, locationID)
+	var finished_at sql.NullTime
+	err := row.Scan(&finished_at)
+	return finished_at, err
+}
+
+const projectBackupRun = `-- name: ProjectBackupRun :one
+SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND id = ?
+`
+
+type ProjectBackupRunParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+func (q *Queries) ProjectBackupRun(ctx context.Context, arg ProjectBackupRunParams) (BackupRun, error) {
+	row := q.db.QueryRowContext(ctx, projectBackupRun, arg.ProjectID, arg.ID)
+	var i BackupRun
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.LocationID,
+		&i.Operation,
+		&i.Kind,
+		&i.Reason,
+		&i.Status,
+		&i.DeployNumber,
+		&i.ScheduledFor,
+		&i.Sha,
+		&i.SnapshotID,
+		&i.SourceSnapshotID,
+		&i.Bytes,
+		&i.Found,
+		&i.Error,
+		&i.Log,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const projectsUsingLocation = `-- name: ProjectsUsingLocation :many
+SELECT id FROM projects WHERE backup_location_id = ?1
+  OR (backup_location_id IS NULL AND ?2)
+`
+
+type ProjectsUsingLocationParams struct {
+	Location          sql.NullInt64
+	IsDefaultAndReady interface{}
+}
+
+// The projects backing up to a location: their own choice of it, or the
+// default for those without one.
+func (q *Queries) ProjectsUsingLocation(ctx context.Context, arg ProjectsUsingLocationParams) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, projectsUsingLocation, arg.Location, arg.IsDefaultAndReady)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const restoreRun = `-- name: RestoreRun :one
 SELECT id, project_id, location_id, operation, kind, reason, status, deploy_number, scheduled_for, sha, snapshot_id, source_snapshot_id, bytes, found, error, log, token_digest, heartbeat_at, started_at, finished_at, created_at, updated_at FROM backup_runs WHERE project_id = ? AND operation = 'restore' AND deploy_number = ?
 `
@@ -175,4 +330,45 @@ func (q *Queries) RestoreRun(ctx context.Context, arg RestoreRunParams) (BackupR
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const verifiedLocations = `-- name: VerifiedLocations :many
+SELECT id, name, kind, settings, credentials, restic_password, is_default, acknowledged_at, verified_at, pruned_at, prune_error, created_at, updated_at FROM storage_locations WHERE verified_at IS NOT NULL ORDER BY name
+`
+
+func (q *Queries) VerifiedLocations(ctx context.Context) ([]StorageLocation, error) {
+	rows, err := q.db.QueryContext(ctx, verifiedLocations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StorageLocation{}
+	for rows.Next() {
+		var i StorageLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Kind,
+			&i.Settings,
+			&i.Credentials,
+			&i.ResticPassword,
+			&i.IsDefault,
+			&i.AcknowledgedAt,
+			&i.VerifiedAt,
+			&i.PrunedAt,
+			&i.PruneError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

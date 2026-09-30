@@ -100,6 +100,16 @@ func (a *App) Router() *web.Router {
 	remote := api.V1{Controller: runner, Version: a.Version}
 	rt.Scope("/api/v1", api.V1Door{DB: a.DB}.Pipeline(), func(s *web.Scope) {
 		s.Handle("GET /me", remote.Me)
+		s.Handle("GET /settings", remote.Settings)
+		s.Handle("GET /storage", remote.Storage)
+		s.Handle("GET /projects", remote.Projects)
+		s.Handle("GET /projects/{name}", remote.Project)
+		s.Handle("GET /projects/{name}/deploys", remote.Deploys)
+		s.Handle("GET /projects/{name}/deploys/{number}", remote.Deploy)
+		s.Handle("GET /projects/{name}/backups/{id}", remote.Backup)
+		s.Handle("GET /projects/{name}/volumes", remote.Volumes)
+		s.Handle("GET /projects/{name}/webhook", remote.Webhook)
+		s.Handle("GET /projects/{name}/secrets", remote.Secrets)
 	})
 
 	homePage := home.Controller{DB: a.DB}

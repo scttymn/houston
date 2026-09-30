@@ -164,6 +164,46 @@ func (q *Queries) DeployByID(ctx context.Context, id int64) (Deploy, error) {
 	return i, err
 }
 
+const deployByNumber = `-- name: DeployByNumber :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? AND number = ?
+`
+
+type DeployByNumberParams struct {
+	ProjectID int64
+	Number    int64
+}
+
+func (q *Queries) DeployByNumber(ctx context.Context, arg DeployByNumberParams) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, deployByNumber, arg.ProjectID, arg.Number)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deployInFlight = `-- name: DeployInFlight :one
 SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? AND status = 'in_flight'
 `
@@ -197,6 +237,94 @@ func (q *Queries) DeployInFlight(ctx context.Context, projectID int64) (Deploy, 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deploySummaries = `-- name: DeploySummaries :many
+
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, CAST('' AS TEXT) AS log, runner, proposed_name,
+  token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+FROM deploys WHERE project_id = ? ORDER BY number DESC LIMIT ? OFFSET ?
+`
+
+type DeploySummariesParams struct {
+	ProjectID int64
+	Limit     int64
+	Offset    int64
+}
+
+type DeploySummariesRow struct {
+	ID               int64
+	ProjectID        int64
+	Number           int64
+	Kind             string
+	Status           string
+	Sha              string
+	Ref              string
+	Fresh            bool
+	Generation       int64
+	Step             string
+	Error            string
+	Log              string
+	Runner           string
+	ProposedName     string
+	TokenDigest      string
+	HeartbeatAt      time.Time
+	FinishedAt       sql.NullTime
+	SwitchedAt       sql.NullTime
+	SourceLocationID sql.NullInt64
+	SourceSnapshotID string
+	SyncPayload      sql.NullString
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// A deploy without its log (up to 4 MiB): for lists. The columns are the
+// table's, in order, so each row converts to a Deploy.
+func (q *Queries) DeploySummaries(ctx context.Context, arg DeploySummariesParams) ([]DeploySummariesRow, error) {
+	rows, err := q.db.QueryContext(ctx, deploySummaries, arg.ProjectID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DeploySummariesRow{}
+	for rows.Next() {
+		var i DeploySummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Number,
+			&i.Kind,
+			&i.Status,
+			&i.Sha,
+			&i.Ref,
+			&i.Fresh,
+			&i.Generation,
+			&i.Step,
+			&i.Error,
+			&i.Log,
+			&i.Runner,
+			&i.ProposedName,
+			&i.TokenDigest,
+			&i.HeartbeatAt,
+			&i.FinishedAt,
+			&i.SwitchedAt,
+			&i.SourceLocationID,
+			&i.SourceSnapshotID,
+			&i.SyncPayload,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const firstGo = `-- name: FirstGo :one
@@ -233,6 +361,41 @@ func (q *Queries) KeepRestoreSync(ctx context.Context, arg KeepRestoreSyncParams
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const latestDeployByNumber = `-- name: LatestDeployByNumber :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, log, runner, proposed_name, token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at FROM deploys WHERE project_id = ? ORDER BY number DESC LIMIT 1
+`
+
+func (q *Queries) LatestDeployByNumber(ctx context.Context, projectID int64) (Deploy, error) {
+	row := q.db.QueryRowContext(ctx, latestDeployByNumber, projectID)
+	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const logSize = `-- name: LogSize :one
@@ -381,6 +544,71 @@ type RestoreServingParams struct {
 func (q *Queries) RestoreServing(ctx context.Context, arg RestoreServingParams) (Deploy, error) {
 	row := q.db.QueryRowContext(ctx, restoreServing, arg.ProjectID, arg.Generation, arg.Sha)
 	var i Deploy
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Kind,
+		&i.Status,
+		&i.Sha,
+		&i.Ref,
+		&i.Fresh,
+		&i.Generation,
+		&i.Step,
+		&i.Error,
+		&i.Log,
+		&i.Runner,
+		&i.ProposedName,
+		&i.TokenDigest,
+		&i.HeartbeatAt,
+		&i.FinishedAt,
+		&i.SwitchedAt,
+		&i.SourceLocationID,
+		&i.SourceSnapshotID,
+		&i.SyncPayload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const runningDeploySummary = `-- name: RunningDeploySummary :one
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, CAST('' AS TEXT) AS log, runner, proposed_name,
+  token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+FROM deploys WHERE project_id = ? AND (status = 'go' OR switched_at IS NOT NULL) ORDER BY number DESC LIMIT 1
+`
+
+type RunningDeploySummaryRow struct {
+	ID               int64
+	ProjectID        int64
+	Number           int64
+	Kind             string
+	Status           string
+	Sha              string
+	Ref              string
+	Fresh            bool
+	Generation       int64
+	Step             string
+	Error            string
+	Log              string
+	Runner           string
+	ProposedName     string
+	TokenDigest      string
+	HeartbeatAt      time.Time
+	FinishedAt       sql.NullTime
+	SwitchedAt       sql.NullTime
+	SourceLocationID sql.NullInt64
+	SourceSnapshotID string
+	SyncPayload      sql.NullString
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// The latest GO, or a restore that switched without getting to GO,
+// whichever is newer.
+func (q *Queries) RunningDeploySummary(ctx context.Context, projectID int64) (RunningDeploySummaryRow, error) {
+	row := q.db.QueryRowContext(ctx, runningDeploySummary, projectID)
+	var i RunningDeploySummaryRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,

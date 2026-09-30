@@ -55,7 +55,7 @@ func TestSnapshots(t *testing.T) {
 
 	// Running and heard from: running.
 	exec(t, a, `UPDATE backup_runs SET status = 'running', heartbeat_at = ?`, time.Now())
-	if got := answer(t, ask(h, "GET", id, "snapshot", "tok")); got["status"] != "running" || got["error"] != "" {
+	if got := answer(t, ask(h, "GET", id, "snapshot", "tok")); got["status"] != "running" || got["error"] != nil {
 		t.Errorf("running %v", got)
 	}
 

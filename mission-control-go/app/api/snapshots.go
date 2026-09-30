@@ -20,19 +20,20 @@ type backupView struct {
 	Kind       string     `json:"kind"`
 	Reason     string     `json:"reason"`
 	Deploy     *int64     `json:"deploy"`
-	Sha        string     `json:"sha"`
-	SnapshotID string     `json:"snapshot_id"`
+	Sha        *string    `json:"sha"`
+	SnapshotID *string    `json:"snapshot_id"`
 	Bytes      *int64     `json:"bytes"`
-	Error      string     `json:"error"`
+	Error      *string    `json:"error"`
 	QueuedAt   time.Time  `json:"queued_at"`
 	StartedAt  *time.Time `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
 func viewBackup(r models.BackupRun, now time.Time) backupView {
-	v := backupView{ID: r.ID, Status: r.Status, Kind: r.Kind, Reason: r.Reason, Sha: r.Sha, SnapshotID: r.SnapshotID, Error: r.Error, QueuedAt: r.CreatedAt}
+	v := backupView{ID: r.ID, Status: r.Status, Kind: r.Kind, Reason: r.Reason, Sha: orNull(r.Sha), SnapshotID: orNull(r.SnapshotID),
+		Error: orNull(r.Error), QueuedAt: r.CreatedAt}
 	if r.Stale(now) {
-		v.Status, v.Error = "no_go", r.StaleError()
+		v.Status, v.Error = "no_go", orNull(r.StaleError())
 	}
 	if r.DeployNumber.Valid {
 		v.Deploy = &r.DeployNumber.Int64

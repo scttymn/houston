@@ -87,7 +87,30 @@ var steps = []step{
 	{name: "a webhook", method: "POST", path: "/shop", host: "hooks.houston.localhost", header: map[string]string{"X-Houston-Token": "whsec", "Authorization": ""}, body: `{}`},
 	{name: "a webhook, unverified", method: "POST", path: "/shop", host: "hooks.houston.localhost", header: map[string]string{"X-Houston-Token": "nope", "Authorization": ""}, body: `{}`},
 	{name: "hooks, anything else", method: "GET", path: "/sign-in", host: "hooks.houston.localhost", header: map[string]string{"Authorization": ""}},
+
+	// The personal API: reads.
+	{name: "v1, no token", method: "GET", path: "/api/v1/me", header: map[string]string{"Authorization": ""}},
+	{name: "v1, the runner's token", method: "GET", path: "/api/v1/me"},
+	{name: "v1 me", method: "GET", path: "/api/v1/me", header: personal},
+	{name: "v1 projects", method: "GET", path: "/api/v1/projects", header: personal},
+	{name: "v1 a project", method: "GET", path: "/api/v1/projects/shop", header: personal,
+		known: "its last backup is the run the Rails app's backup job finished; the Go job's work is batch 3"},
+	{name: "v1 no project", method: "GET", path: "/api/v1/projects/nope", header: personal},
+	{name: "v1 deploys", method: "GET", path: "/api/v1/projects/shop/deploys", header: personal},
+	{name: "v1 the latest deploy", method: "GET", path: "/api/v1/projects/shop/deploys/latest", header: personal},
+	{name: "v1 a deploy's log from a byte", method: "GET", path: "/api/v1/projects/shop/deploys/2?log_from=3", header: personal},
+	{name: "v1 no deploy", method: "GET", path: "/api/v1/projects/shop/deploys/99", header: personal},
+	{name: "v1 the latest backup", method: "GET", path: "/api/v1/projects/shop/backups/latest", header: personal,
+		known: "the Rails app's backup job ran (skipped: nothing to back up); the Go job's work is batch 3"},
+	{name: "v1 settings", method: "GET", path: "/api/v1/settings", header: personal},
+	{name: "v1 storage", method: "GET", path: "/api/v1/storage", header: personal},
+	{name: "v1 volumes", method: "GET", path: "/api/v1/projects/shop/volumes", header: personal},
+	{name: "v1 a webhook, no repo", method: "GET", path: "/api/v1/projects/shop/webhook", header: personal},
+	{name: "v1 secrets", method: "GET", path: "/api/v1/projects/shop/secrets", header: personal},
 }
+
+// personal is the fixture's personal token, for the /api/v1 steps.
+var personal = map[string]string{"Authorization": "Bearer hou_parity-personal-token"}
 
 func main() {
 	railsURL := flag.String("rails", "", "the Rails version's address")
@@ -188,8 +211,9 @@ func send(s *side, st step, token string) (answer, error) {
 }
 
 var (
-	isoTime   = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?`)
-	volatiles = map[string]bool{"token": true, "queued_at": true, "started_at": true, "finished_at": true}
+	isoTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?`)
+	// A deploy's duration is its own clock's: a second apart in flight.
+	volatiles = map[string]bool{"token": true, "queued_at": true, "started_at": true, "finished_at": true, "duration": true, "updated_at": true}
 )
 
 // normal is a JSON value with what can't match between the versions made

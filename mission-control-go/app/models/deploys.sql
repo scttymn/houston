@@ -71,3 +71,24 @@ WHERE id = @id AND status = 'queued';
 -- name: SeeRunner :exec
 INSERT INTO runners (name, last_seen_at, updated_at) VALUES (@name, @now, @now)
 ON CONFLICT (name) DO UPDATE SET last_seen_at = excluded.last_seen_at, updated_at = excluded.updated_at;
+
+-- A deploy without its log (up to 4 MiB): for lists. The columns are the
+-- table's, in order, so each row converts to a Deploy.
+
+-- name: DeploySummaries :many
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, CAST('' AS TEXT) AS log, runner, proposed_name,
+  token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+FROM deploys WHERE project_id = ? ORDER BY number DESC LIMIT ? OFFSET ?;
+
+-- name: RunningDeploySummary :one
+-- The latest GO, or a restore that switched without getting to GO,
+-- whichever is newer.
+SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, CAST('' AS TEXT) AS log, runner, proposed_name,
+  token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at
+FROM deploys WHERE project_id = ? AND (status = 'go' OR switched_at IS NOT NULL) ORDER BY number DESC LIMIT 1;
+
+-- name: DeployByNumber :one
+SELECT * FROM deploys WHERE project_id = ? AND number = ?;
+
+-- name: LatestDeployByNumber :one
+SELECT * FROM deploys WHERE project_id = ? ORDER BY number DESC LIMIT 1;

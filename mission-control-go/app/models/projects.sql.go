@@ -171,6 +171,17 @@ func (q *Queries) ProjectByName(ctx context.Context, name string) (Project, erro
 	return i, err
 }
 
+const projectExists = `-- name: ProjectExists :one
+SELECT EXISTS (SELECT 1 FROM projects WHERE name = ?) AS found
+`
+
+func (q *Queries) ProjectExists(ctx context.Context, name string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, projectExists, name)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const projectHostNames = `-- name: ProjectHostNames :many
 SELECT name FROM project_hosts WHERE project_id = ? ORDER BY name
 `
@@ -234,6 +245,39 @@ func (q *Queries) ProjectHostOwner(ctx context.Context, arg ProjectHostOwnerPara
 	return i, err
 }
 
+const projectSecretRows = `-- name: ProjectSecretRows :many
+SELECT key, value, updated_at FROM secrets WHERE project_id = ?
+`
+
+type ProjectSecretRowsRow struct {
+	Key       string
+	Value     crypt.String
+	UpdatedAt time.Time
+}
+
+func (q *Queries) ProjectSecretRows(ctx context.Context, projectID int64) ([]ProjectSecretRowsRow, error) {
+	rows, err := q.db.QueryContext(ctx, projectSecretRows, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectSecretRowsRow{}
+	for rows.Next() {
+		var i ProjectSecretRowsRow
+		if err := rows.Scan(&i.Key, &i.Value, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const projectSecrets = `-- name: ProjectSecrets :many
 SELECT key, value FROM secrets WHERE project_id = ? ORDER BY key
 `
@@ -253,6 +297,104 @@ func (q *Queries) ProjectSecrets(ctx context.Context, projectID int64) ([]Projec
 	for rows.Next() {
 		var i ProjectSecretsRow
 		if err := rows.Scan(&i.Key, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projectVolumeRows = `-- name: ProjectVolumeRows :many
+SELECT project_volumes.name, project_volumes.placed_at, storage_locations.name AS location
+FROM project_volumes LEFT JOIN storage_locations ON storage_locations.id = project_volumes.location_id
+WHERE project_volumes.project_id = ?
+`
+
+type ProjectVolumeRowsRow struct {
+	Name     string
+	PlacedAt sql.NullTime
+	Location sql.NullString
+}
+
+func (q *Queries) ProjectVolumeRows(ctx context.Context, projectID int64) ([]ProjectVolumeRowsRow, error) {
+	rows, err := q.db.QueryContext(ctx, projectVolumeRows, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectVolumeRowsRow{}
+	for rows.Next() {
+		var i ProjectVolumeRowsRow
+		if err := rows.Scan(&i.Name, &i.PlacedAt, &i.Location); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projects = `-- name: Projects :many
+SELECT id, name, app_service, services, domains, domain_states, variables, volumes, databases, details, deploy_rule, health, port, data_generation, keep_auto, keep_deploy, backup_schedule, backup_location_id, repo_url, branch, compose_path, deploy_key_private, deploy_key_public, webhook_secret, webhook_verified_at, seen_refs, last_checked_at, last_check_error, maintenance_since, maintenance_by, maintenance_message, maintenance_page, synced_at, created_at, updated_at FROM projects ORDER BY name
+`
+
+func (q *Queries) Projects(ctx context.Context) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, projects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.AppService,
+			&i.Services,
+			&i.Domains,
+			&i.DomainStates,
+			&i.Variables,
+			&i.Volumes,
+			&i.Databases,
+			&i.Details,
+			&i.DeployRule,
+			&i.Health,
+			&i.Port,
+			&i.DataGeneration,
+			&i.KeepAuto,
+			&i.KeepDeploy,
+			&i.BackupSchedule,
+			&i.BackupLocationID,
+			&i.RepoUrl,
+			&i.Branch,
+			&i.ComposePath,
+			&i.DeployKeyPrivate,
+			&i.DeployKeyPublic,
+			&i.WebhookSecret,
+			&i.WebhookVerifiedAt,
+			&i.SeenRefs,
+			&i.LastCheckedAt,
+			&i.LastCheckError,
+			&i.MaintenanceSince,
+			&i.MaintenanceBy,
+			&i.MaintenanceMessage,
+			&i.MaintenancePage,
+			&i.SyncedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
