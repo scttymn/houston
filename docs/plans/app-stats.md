@@ -105,3 +105,9 @@
   - 1440 px: the table's gauges show 3 ticks at 26%, 10 amber at 95%, 1 at 2%, and none at 0% or without a limit.
   - 664 px: all three cards lay their details out in two columns, with resources 222–225 px wide. Before, the limit made valleybuiltcrossfit's one column.
   - 375 px: the page is 375 px wide.
+
+## Shares of the host (2026-09-30)
+Your ask: "could we get the graphs to work on the % of the host if the individual limits are not set? That way they aren't just empty values?" … "it's true at idle, they would look like next to nothing. But when they are under load, it'll show helpful values."
+- Without a limit, a share is of the host's: its cores and memory (`docker info`: NCPU, MemTotal), and, for disk, the disk Docker keeps volumes on, read by `df /` in Mission Control's container (on the server: overlay and /dev/sda1 both 100476656 KB). Read with the volumes, every 5 minutes; when Docker can't say, the last reading stays. A limit, when every container has one, wins.
+- Percentages stay unrounded until shown: a sliver reads `<1%`, with one tick (the app is running); the hover says "of the host's …· no limit set".
+- Tests: `AppStatsTest` "shares of the limit, or of the host"; `UsageHelperTest` "shares of the host"; the flight board's row test. Mission Control 526 runs, 0 failures; rubocop clean. Mutation check: all 8 caught (no host CPU fallback, the host winning over a limit, no disk share, the host forgotten or never read, no `<1%`, the hover not saying host, the disk's share not drawn).

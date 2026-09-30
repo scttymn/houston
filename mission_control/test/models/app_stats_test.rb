@@ -16,7 +16,10 @@ class AppStatsTest < ActiveSupport::TestCase
   setup do
     @equip = make_project("equip", services: %w[app db])
     @cart = make_project("cart")
+    @disk_size, AppStats.disk_size = AppStats.disk_size, -> { 100 * GIB }
   end
+
+  teardown { AppStats.disk_size = @disk_size }
 
   STATS = [
     { "ID" => "w1", "Name" => "equip-web-#{"a" * 40}", "CPUPerc" => "12.50%", "MemUsage" => "300MiB / 1GiB" },
@@ -35,7 +38,7 @@ class AppStatsTest < ActiveSupport::TestCase
 
   # limits: container ID → [memory bytes, nano CPUs]; stats/df: what those
   # commands print, or a failure.
-  def docker(stats: STATS, limits: {}, df: DF)
+  def docker(stats: STATS, limits: {}, df: DF, info: "8 #{16 * GIB}")
     FakeDocker.new do |args|
       case args.first
       when "stats" then stats.is_a?(DockerCommand::Result) ? stats : DockerCommand::Result.new(success: true, output: stats)
@@ -43,6 +46,7 @@ class AppStatsTest < ActiveSupport::TestCase
         ids = args.drop(3)
         DockerCommand::Result.new(success: true, output: ids.map { |id| "#{id} #{limits.dig(id, 0) || 0} #{limits.dig(id, 1) || 0}" }.join("\n"))
       when "system" then df.is_a?(DockerCommand::Result) ? df : DockerCommand::Result.new(success: true, output: df)
+      when "info" then info.is_a?(DockerCommand::Result) ? info : DockerCommand::Result.new(success: true, output: info)
       end
     end
   end
@@ -72,6 +76,33 @@ class AppStatsTest < ActiveSupport::TestCase
     assert_equal GIB + 768 * MIB, reading(@equip).memory_limit
     assert_in_delta 3.5, reading(@equip).cpu_limit, 0.0001
     assert_nil reading(@cart).memory_limit
+  end
+
+  # Without a limit, a share is of the host's cores, memory and disk; a limit
+  # wins when every container has one.
+  test "shares of the limit, or of the host" do
+    use_fake_docker(docker(limits: { "c1" => [ 64 * MIB, 500_000_000 ] })) { AppStats.sample! }
+    equip = reading(@equip)
+    assert equip.cpu_of_host?
+    assert_equal 8, equip.cpu_whole
+    assert_in_delta 100 * 0.155 / 8, equip.cpu_percent, 0.0001
+    assert equip.memory_of_host?
+    assert_in_delta 100.0 * 450 * MIB / (16 * GIB), equip.memory_percent, 0.0001
+    assert_in_delta 100.0 * (48_200_000 + 1_500_000_000) / (100 * GIB), equip.disk_percent, 0.0001
+    cart = reading(@cart)
+    assert_not cart.cpu_of_host?
+    assert_in_delta 100 * 0.03 / 0.5, cart.cpu_percent, 0.0001, "its limit, not the host"
+    assert_in_delta 100.0 * 12 / 64, cart.memory_percent, 0.0001
+
+    # The host is read with the disk, every 5 minutes; when Docker can't say,
+    # what was read stays, and before anything was, no share.
+    travel 6.minutes
+    use_fake_docker(docker(info: failure("no"))) { AppStats.sample! }
+    assert_equal 8, reading(@equip).cpu_whole
+    Rails.cache.delete(AppStats::CACHE_KEY)
+    use_fake_docker(docker(info: failure("no"))) { AppStats.sample! }
+    assert_nil reading(@equip).cpu_percent
+    assert_nil reading(@equip).disk_percent
   end
 
   test "disk per project, now and then" do

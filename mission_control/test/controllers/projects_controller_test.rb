@@ -287,9 +287,12 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
       when "stats" then DockerCommand::Result.new(success: true, output: stats)
       when "inspect" then DockerCommand::Result.new(success: true, output: args.drop(3).map { |id| "#{id} #{limits[id]}" }.join("\n"))
       when "system" then DockerCommand::Result.new(success: true, output: df)
+      when "info" then DockerCommand::Result.new(success: true, output: "8 16000000000")
       end
     end
+    disk_size, AppStats.disk_size = AppStats.disk_size, -> { 100_000_000_000 }
     use_fake_docker(fake) { AppStats.sample! }
+    AppStats.disk_size = disk_size
 
     get root_path
     assert_select ".flight-head", /RESOURCES/
@@ -306,20 +309,23 @@ class ProjectsControllerTest < ActionDispatch::IntegrationTest
         assert_select ".usage__percent", "26%"
         assert_select ".usage__amount", "400 MB"
       end
-      assert_select ".usage--disk[title='DISK 1.4 GB · no limit set']" do
-        assert_select ".gauge--open .gauge__tick", 10, "volumes have no limit: outlined ticks keep the column lined up"
-        assert_select ".gauge__tick.is-on", 0
-        assert_select ".usage__percent", "—"
+      # Volumes have no limit: a share of the host's disk.
+      assert_select '.usage--disk[title="DISK 1.4 GB of the host\'s 93.1 GB (2%) · no limit set"]' do
+        assert_select ".gauge__tick.is-on", 1
+        assert_select ".usage__percent", "2%"
         assert_select ".usage__amount", "1.4 GB"
       end
       assert_select ".usage--near", 0
     end
+    # No limits: shares of the host's cores, memory and disk; a sliver is <1%,
+    # with a tick lit, as it's running.
     assert_select "[data-project=cart] .flight__resources" do
-      assert_select ".gauge__tick.is-on", 0, "no limits: amounts only"
-      assert_select ".usage__percent", { text: "—", count: 3 }
-      assert_select ".gauge--open", 3
-      assert_select ".usage--cpu .usage__amount", "0.03 cores"
-      assert_select ".usage--memory .usage__amount", "12 MB"
+      assert_select ".gauge--open", 0
+      assert_select '.usage--cpu[title="CPU 0.03 cores of the host\'s 8 cores (<1%) · no limit set"]' do
+        assert_select ".usage__percent", "<1%"
+        assert_select ".gauge__tick.is-on", 1
+      end
+      assert_select '.usage--memory[title="MEM 12 MB of the host\'s 14.9 GB (<1%) · no limit set"] .usage__percent', "<1%"
       assert_select ".usage--disk .usage__amount", "2.86 MB"
     end
     assert_select "[data-project=idle] .flight__resources", /—/
