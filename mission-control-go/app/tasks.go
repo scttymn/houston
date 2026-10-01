@@ -20,6 +20,7 @@ import (
 //	{Name: "backfill-slugs", Help: "Give every post a slug", Run: backfillSlugs},
 var Tasks = []Task{
 	{Name: "setup-code", Help: "Print a new first-run setup code (only until the admin exists)", Run: setupCode},
+	{Name: "token", Help: "Print a new personal API token named NAME (as Settings › Tokens issues one)", Run: newToken},
 	{Name: "port", Help: "Print whether port 3000 is open or closed (Settings › Security), for the installer", Run: portState},
 }
 
@@ -60,5 +61,19 @@ func portState(ctx context.Context, env TaskEnv, _ []string) error {
 		state = "closed"
 	}
 	_, err = fmt.Fprintln(env.Out, state)
+	return err
+}
+
+// newToken is a personal API token for someone at the server's shell (the
+// CLI's, or a script's), shown once as Settings › Tokens shows it.
+func newToken(ctx context.Context, env TaskEnv, args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: task token NAME")
+	}
+	token, _, err := models.IssueToken(ctx, models.New(env.DB.Write), args[0])
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(env.Out, token)
 	return err
 }

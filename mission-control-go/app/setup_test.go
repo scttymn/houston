@@ -374,4 +374,22 @@ func TestTasks(t *testing.T) {
 	if got := run("setup-code"); !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\n$`).MatchString(got) {
 		t.Errorf("code %q", got)
 	}
+	var task app.Task
+	for _, tk := range app.Tasks {
+		if tk.Name == "token" {
+			task = tk
+		}
+	}
+	var out strings.Builder
+	if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, []string{"laptop"}); err != nil || !strings.HasPrefix(out.String(), "hou_") {
+		t.Fatalf("token: %q %v", out.String(), err)
+	}
+	var name string
+	a.DB.Read.QueryRow(`SELECT name FROM api_tokens WHERE token_digest = ?`, models.Digest(strings.TrimSpace(out.String()))).Scan(&name)
+	if name != "laptop" {
+		t.Errorf("kept as %q", name)
+	}
+	if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, []string{"laptop"}); err == nil {
+		t.Error("a name taken")
+	}
 }
