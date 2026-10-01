@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { Turbo } from "@hotwired/turbo"
+import { visit } from "@hotwired/turbo"
 
 // Refreshes the page in place (Turbo morph) every `every` ms while this
 // element is on the page. The server drops the element once there's nothing
@@ -20,7 +20,7 @@ export default class extends Controller {
   async refresh() {
     try {
       const response = await fetch(window.location.href, { headers: { Accept: "text/html" }, cache: "no-store" })
-      if (response.ok && !response.redirected) Turbo.visit(window.location.href, { action: "replace" })
+      if (response.ok && !response.redirected) visit(window.location.href, { action: "replace" })
     } catch {
       // Not answering yet: try again next time.
     }

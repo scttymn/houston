@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { Turbo } from "@hotwired/turbo"
+import { renderStreamMessage } from "@hotwired/turbo"
 
 // The flight board's resources, read while it's open (ResourcesController):
 // at once, then every `every` ms while the tab is in view, and at once when
@@ -25,7 +25,7 @@ export default class extends Controller {
     this.reading = true
     try {
       const response = await fetch(this.urlValue, { headers: { Accept: "text/vnd.turbo-stream.html" }, cache: "no-store" })
-      if (response.ok && !response.redirected) Turbo.renderStreamMessage(await response.text())
+      if (response.ok && !response.redirected) renderStreamMessage(await response.text())
     } catch {
       // Not answering (a server update): the next one tries again.
     } finally {
