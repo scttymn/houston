@@ -380,7 +380,9 @@ func (w *deletion) removeRoutes(ctx context.Context) error {
 }
 
 // removeDNS removes the records commented exactly managed-by:houston
-// project:<name>, in the zones the project's hostnames live in.
+// project:<name>, in the zones the project's hostnames live in, that point
+// at this server's tunnel: another server's Houston marks its own records
+// the same way.
 func (w *deletion) removeDNS(ctx context.Context) error {
 	if !w.cloudflare() {
 		w.say("ok  Cloudflare isn't connected")
@@ -396,6 +398,10 @@ func (w *deletion) removeDNS(ctx context.Context) error {
 			}
 			for _, rec := range records {
 				if rec.Comment != comment {
+					continue
+				}
+				if rec.Content != cloudflare.Target(w.inst.TunnelID) {
+					w.say("ok  left %s: it points at another server's tunnel", rec.Name)
 					continue
 				}
 				if err = w.client().Delete(ctx, "/zones/"+zone+"/dns_records/"+rec.ID); err != nil {

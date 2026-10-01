@@ -61,10 +61,12 @@ func setUp(t *testing.T, deleteBackups bool) *world {
 
 	w.cf.Zone("zbase", "svnmns.com", "active")
 	w.cf.Zone("zcom", "example.com", "active")
-	w.cf.Record("zbase", cloudflare.Record{Name: "shop.svnmns.com", Comment: "managed-by:houston project:shop"})
-	w.cf.Record("zbase", cloudflare.Record{Name: "blog.svnmns.com", Comment: "managed-by:houston project:blog"})
-	w.cf.Record("zcom", cloudflare.Record{Name: "shop.example.com", Comment: "managed-by:houston project:shop"})
-	w.cf.Record("zcom", cloudflare.Record{Name: "shop2.example.com", Comment: "managed-by:houston project:shop2"})
+	w.cf.Record("zbase", cloudflare.Record{Name: "shop.svnmns.com", Comment: "managed-by:houston project:shop", Content: "tun.cfargotunnel.com"})
+	w.cf.Record("zbase", cloudflare.Record{Name: "blog.svnmns.com", Comment: "managed-by:houston project:blog", Content: "tun.cfargotunnel.com"})
+	w.cf.Record("zcom", cloudflare.Record{Name: "shop.example.com", Comment: "managed-by:houston project:shop", Content: "tun.cfargotunnel.com"})
+	w.cf.Record("zcom", cloudflare.Record{Name: "shop2.example.com", Comment: "managed-by:houston project:shop2", Content: "tun.cfargotunnel.com"})
+	// Another server's shop in the same zone: its record stays.
+	w.cf.Record("zcom", cloudflare.Record{Name: "www.example.com", Comment: "managed-by:houston project:shop", Content: "other.cfargotunnel.com"})
 
 	reg := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -131,7 +133,8 @@ func TestRemoval(t *testing.T) {
 			names = append(names, r.Name)
 		}
 	}
-	if strings.Join(names, " ") != "blog.svnmns.com shop2.example.com" {
+	// Another server's shop (www., at its own tunnel) is left.
+	if strings.Join(names, " ") != "blog.svnmns.com shop2.example.com www.example.com" {
 		t.Errorf("records left %v", names)
 	}
 	if routes := w.cf.Tunnel("acct", "tun"); strings.Contains(routes, "shop") || routes == "" {

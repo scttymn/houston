@@ -112,7 +112,9 @@ func (d DNS) RemoveDomain(ctx context.Context, p models.Project, domain string) 
 	}
 	records := cloudflare.Records{Client: d.client(), Zone: zone.ID}
 	existing, err := records.Find(ctx, domain)
-	if err != nil || existing == nil || existing.Comment != comment(p) {
+	// Only its own: a record another server's Houston points at its tunnel
+	// stays.
+	if err != nil || existing == nil || existing.Comment != comment(p) || existing.Content != cloudflare.Target(d.Installation.TunnelID) {
 		return err
 	}
 	return records.Delete(ctx, *existing)

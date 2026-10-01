@@ -147,6 +147,11 @@ type Record struct {
 // IsManaged is whether Houston made it.
 func (r Record) IsManaged() bool { return strings.HasPrefix(r.Comment, Managed) }
 
+// Target is where a record for tunnelID points: a record is one Houston's
+// when it points at its tunnel. Two Houstons in one zone (a move between
+// servers) both mark theirs Managed.
+func Target(tunnelID string) string { return tunnelID + ".cfargotunnel.com" }
+
 // Records are the DNS records of one zone.
 type Records struct {
 	Client Client
@@ -168,7 +173,7 @@ func (r Records) Find(ctx context.Context, name string) (*Record, error) {
 // Point makes name a proxied CNAME to the tunnel, commented comment: it
 // updates existing (one of Houston's, the caller has checked) or makes it.
 func (r Records) Point(ctx context.Context, name, tunnelID string, existing *Record, comment string) error {
-	record := Record{Type: "CNAME", Name: name, Content: tunnelID + ".cfargotunnel.com", Proxied: true, Comment: comment}
+	record := Record{Type: "CNAME", Name: name, Content: Target(tunnelID), Proxied: true, Comment: comment}
 	if existing != nil {
 		return r.Client.Patch(ctx, "/zones/"+r.Zone+"/dns_records/"+existing.ID, record, nil)
 	}

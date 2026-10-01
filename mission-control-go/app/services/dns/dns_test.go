@@ -122,15 +122,17 @@ func TestRemoveDomain(t *testing.T) {
 	ctx := context.Background()
 	f, d := cloudflareFor(t, false)
 	f.Zone("zcom", "example.com", "active")
-	f.Record("zcom", cloudflare.Record{Name: "shop.example.com", Comment: "managed-by:houston project:shop"})
-	f.Record("zcom", cloudflare.Record{Name: "blog.example.com", Comment: "managed-by:houston project:blog"})
-	f.Record("zbase", cloudflare.Record{Name: "api.svnmns.com", Comment: "managed-by:houston project:shop"})
-	for _, domain := range []string{"shop.example.com", "blog.example.com", "api.svnmns.com", "shop.example.org"} {
+	f.Record("zcom", cloudflare.Record{Name: "shop.example.com", Comment: "managed-by:houston project:shop", Content: "tun.cfargotunnel.com"})
+	f.Record("zcom", cloudflare.Record{Name: "blog.example.com", Comment: "managed-by:houston project:blog", Content: "tun.cfargotunnel.com"})
+	// Another server's shop, in the same zone.
+	f.Record("zcom", cloudflare.Record{Name: "www.example.com", Comment: "managed-by:houston project:shop", Content: "other.cfargotunnel.com"})
+	f.Record("zbase", cloudflare.Record{Name: "api.svnmns.com", Comment: "managed-by:houston project:shop", Content: "tun.cfargotunnel.com"})
+	for _, domain := range []string{"shop.example.com", "blog.example.com", "api.svnmns.com", "shop.example.org", "www.example.com"} {
 		if err := d.RemoveDomain(ctx, shop, domain); err != nil {
 			t.Errorf("%s: %v", domain, err)
 		}
 	}
-	if got := f.Records("zcom"); len(got) != 1 || got[0].Name != "blog.example.com" || len(f.Records("zbase")) != 0 {
+	if got := f.Records("zcom"); len(got) != 2 || got[0].Name != "blog.example.com" || got[1].Name != "www.example.com" || len(f.Records("zbase")) != 0 {
 		t.Errorf("left %+v %+v", got, f.Records("zbase"))
 	}
 }

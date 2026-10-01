@@ -261,7 +261,7 @@ func loadRecords(ctx context.Context, c cloudflare.Client, inst models.Installat
 	if err := c.Get(ctx, "/zones", url.Values{"per_page": {"50"}}, &zones); err != nil {
 		return err
 	}
-	here := inst.TunnelID + ".cfargotunnel.com"
+	here := cloudflare.Target(inst.TunnelID)
 	var records []Record
 	for _, z := range zones {
 		for n := 1; ; n++ {
