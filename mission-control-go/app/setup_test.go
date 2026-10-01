@@ -363,16 +363,30 @@ func TestTasks(t *testing.T) {
 	if got := run("port"); got != "open\n" {
 		t.Errorf("before setup: %q", got)
 	}
+	if got := run("setup"); got != "admin\n" {
+		t.Errorf("setup before the admin: %q", got)
+	}
+	if got := run("setup-code"); !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\n$`).MatchString(got) {
+		t.Errorf("code %q", got)
+	}
+	must(t, a, `INSERT INTO users (email_address, password_digest) VALUES ('one@example.com', 'x')`)
+	if got := run("setup"); got != "cloudflare\n" {
+		t.Errorf("setup after the admin: %q", got)
+	}
 	must(t, a, `INSERT INTO installations (id, port_open) VALUES (1, FALSE)`)
 	if got := run("port"); got != "closed\n" {
 		t.Errorf("closed: %q", got)
 	}
-	must(t, a, `UPDATE installations SET port_open = TRUE`)
+	must(t, a, `UPDATE installations SET port_open = TRUE, cloudflare_connected_at = CURRENT_TIMESTAMP`)
 	if got := run("port"); got != "open\n" {
 		t.Errorf("open: %q", got)
 	}
-	if got := run("setup-code"); !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\n$`).MatchString(got) {
-		t.Errorf("code %q", got)
+	if got := run("setup"); got != "storage\n" {
+		t.Errorf("setup once connected: %q", got)
+	}
+	must(t, a, `INSERT INTO storage_locations (name, kind, is_default, acknowledged_at) VALUES ('nas', 'nfs', TRUE, CURRENT_TIMESTAMP)`)
+	if got := run("setup"); got != "done\n" {
+		t.Errorf("setup done: %q", got)
 	}
 	var task app.Task
 	for _, tk := range app.Tasks {

@@ -4,6 +4,7 @@
 package setup
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -33,16 +34,16 @@ type Controller struct {
 
 // NextStep is where a signed-in admin goes until setup is done: "" once
 // it is.
-func NextStep(r *http.Request, d *db.DB) (string, error) {
+func NextStep(ctx context.Context, d *db.DB) (string, error) {
 	q := models.New(d.Read)
-	inst, err := q.CurrentInstallation(r.Context())
+	inst, err := q.CurrentInstallation(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	if !inst.CloudflareConnectedAt.Valid {
 		return "/setup/cloudflare", nil
 	}
-	switch ready, err := q.DefaultStorageReady(r.Context()); {
+	switch ready, err := q.DefaultStorageReady(ctx); {
 	case err != nil:
 		return "", err
 	case !ready:

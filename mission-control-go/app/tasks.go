@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"log/slog"
 
 	"github.com/scttymn/gantry/db"
 
 	"github.com/scttymn/houston/mission-control-go/app/models"
+	"github.com/scttymn/houston/mission-control-go/app/setup"
 )
 
 // Tasks are the app's own commands, Rails' rake tasks: `mission-control-go task NAME
@@ -21,6 +23,7 @@ import (
 var Tasks = []Task{
 	{Name: "setup-code", Help: "Print a new first-run setup code (only until the admin exists)", Run: setupCode},
 	{Name: "token", Help: "Print a new personal API token named NAME (as Settings › Tokens issues one)", Run: newToken},
+	{Name: "setup", Help: "Print first run's next step: admin, cloudflare, storage, or done", Run: setupState},
 	{Name: "port", Help: "Print whether port 3000 is open or closed (Settings › Security), for the installer", Run: portState},
 }
 
@@ -75,5 +78,26 @@ func newToken(ctx context.Context, env TaskEnv, args []string) error {
 		return err
 	}
 	_, err = fmt.Fprintln(env.Out, token)
+	return err
+}
+
+// setupState is where first run stands, for the installer's report: the
+// step to do next, or done.
+func setupState(ctx context.Context, env TaskEnv, _ []string) error {
+	state := "admin"
+	switch set, err := models.New(env.DB.Read).UserExists(ctx); {
+	case err != nil:
+		return err
+	case set:
+		step, err := setup.NextStep(ctx, env.DB)
+		if err != nil {
+			return err
+		}
+		state = strings.TrimPrefix(step, "/setup/")
+		if step == "" {
+			state = "done"
+		}
+	}
+	_, err := fmt.Fprintln(env.Out, state)
 	return err
 }

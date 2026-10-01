@@ -664,6 +664,15 @@ start() {
   done
 }
 
+# setup_left: what's left of first run once the admin exists, in words;
+# empty when it's done (or Mission Control can't say).
+setup_left() {
+  case "$(compose exec -T mission-control /app task setup 2>/dev/null)" in
+    cloudflare) echo "Cloudflare and backup storage" ;;
+    storage) echo "backup storage" ;;
+  esac
+}
+
 report() {
   address=$(host_address || true)
   if [ "$bind" = 0.0.0.0 ]; then url="http://${address:-<this server>}:3000"; else url="http://$bind:3000"; fi
@@ -672,6 +681,11 @@ report() {
     say "Houston $(installed_version) is running."
     say "Finish setup at  $url"
     say "Setup code       $code"
+    [ "$bind" = 0.0.0.0 ] && say "Port 3000 is plain HTTP, open to your network for setup. Once admin.<your base domain> works, you can close it in Settings › Security."
+  elif left=$(setup_left) && [ -n "$left" ]; then
+    say ""
+    say "Houston $(installed_version) is running."
+    say "Finish setup at  $url: sign in, then $left."
     [ "$bind" = 0.0.0.0 ] && say "Port 3000 is plain HTTP, open to your network for setup. Once admin.<your base domain> works, you can close it in Settings › Security."
   else
     say ""

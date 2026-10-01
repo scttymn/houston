@@ -75,7 +75,7 @@ func (a *App) firstRun(w http.ResponseWriter, r *http.Request) error {
 
 // nextStep takes the signed-in admin to setup's next unfinished step.
 func (a *App) nextStep(w http.ResponseWriter, r *http.Request) error {
-	step, err := setup.NextStep(r, a.DB)
+	step, err := setup.NextStep(r.Context(), a.DB)
 	if err != nil || step == "" {
 		return err
 	}

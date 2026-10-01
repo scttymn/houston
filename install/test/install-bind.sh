@@ -32,6 +32,7 @@ case "$*" in
   *"rails runner"*) exit "${SAVED:-1}" ;;
   *"task port"*) case "${SAVED:-1}" in 0) echo open ;; 4) echo closed ;; *) exit 1 ;; esac ;;
   *"task setup-code"*) [ -n "${SETUP_CODE:-}" ] && echo "$SETUP_CODE" && exit 0; exit 1 ;;
+  *"task setup") echo "${SETUP_STATE:-done}" ;;
   "run --rm --user 1000:1000"*) [ -z "${MOVE_FAILS:-}" ] || exit 1 ;;
 esac
 exit 0
@@ -118,6 +119,9 @@ report() { LIB_CMD='host_address() { echo 192.168.0.56; }; installed_version() {
 out=$(report 'bind=0.0.0.0' SETUP_CODE=ABCD-EFGH)
 printf '%s' "$out" | grep -qF "Finish setup at  http://192.168.0.56:3000" && printf '%s' "$out" | grep -qF "Settings › Security" &&
   ok "setup: the LAN address, and where to close the port once it's done" || bad "setup report: $out"
+out=$(report 'bind=0.0.0.0' SETUP_STATE=storage)
+printf '%s' "$out" | grep -qF "Finish setup at  http://192.168.0.56:3000: sign in, then backup storage." && ! printf '%s' "$out" | grep -qF "already complete" &&
+  ok "the admin made, the rest not: says what's left" || bad "partway report: $out"
 out=$(report 'bind=127.0.0.1')
 printf '%s' "$out" | grep -qF "Sign in at https://admin.<your base domain>" && printf '%s' "$out" | grep -qF "ssh -L 3000:127.0.0.1:3000" &&
   ! printf '%s' "$out" | grep -qF "192.168.0.56:3000" && ok "closed: admin.<base>, and ssh -L for port 3000" || bad "closed report: $out"
