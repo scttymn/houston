@@ -74,8 +74,8 @@ github.com/rogpeppe/go-internal v1.16.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52Z
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
-github.com/scttymn/gantry v0.11.2 h1:ETmgX2OtlrmLOfGQIcFRxRzfqLvhA9NVx9woFDsY6JA=
-github.com/scttymn/gantry v0.11.2/go.mod h1:TlY2/0DvfYYq3/FqHsCdzYkdHAJZy+4z7Rea9cNxECw=
+github.com/scttymn/gantry v0.11.3 h1:Zkp1kXiF1ICxvz89Gdozbgy9b2eNLANhZIFVmF+X9Jk=
+github.com/scttymn/gantry v0.11.3/go.mod h1:TlY2/0DvfYYq3/FqHsCdzYkdHAJZy+4z7Rea9cNxECw=
 github.com/sethvargo/go-retry v0.4.0 h1:9qy1OoIAxBL+gBYnkTnTnWle5wlfsXQlwRzIbbpdqPw=
 github.com/sethvargo/go-retry v0.4.0/go.mod h1:tvsjdKG6xfiCx4LSiUZ06kcv38xvdVQwv8R6/VnnVWg=
 github.com/sirupsen/logrus v1.10.2 h1:G2SED73/qrAu6YwbdxOD6peLkCBI3z7L+ykJFTXJBBo=

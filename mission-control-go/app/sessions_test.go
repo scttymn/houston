@@ -140,7 +140,8 @@ func TestSignIn(t *testing.T) {
 		t.Fatalf("sign in = %d %v", w.Code, w.Header())
 	}
 	c := b.jar[len(b.jar)-1]
-	if c.Name != "session_id" || !c.HttpOnly || c.MaxAge != int(app.SessionLifetime.Seconds()) {
+	// Plain http at a LAN address: not Secure, or the browser drops it.
+	if c.Name != "session_id" || !c.HttpOnly || c.Secure || c.MaxAge != int(app.SessionLifetime.Seconds()) {
 		t.Errorf("cookie %+v", c)
 	}
 	page = b.do("GET", "/", nil).Body.String()
