@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"log/slog"
+	"strings"
 
 	"github.com/scttymn/gantry/db"
 
