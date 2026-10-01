@@ -95,7 +95,7 @@ func (s *Status) Route(ctx context.Context, inst models.Installation, label stri
 		keep = recheckMiss
 	}
 	if !ok || now.Sub(k.at) >= keep {
-		k = kept[string]{value: s.probe(ctx, host), at: now}
+		k = kept[string]{value: s.probe(ctx, host, inst.BaseDomain), at: now}
 		s.mu.Lock()
 		if s.misses == nil {
 			s.misses = map[string]kept[string]{}
@@ -113,7 +113,7 @@ func (s *Status) Route(ctx context.Context, inst models.Installation, label stri
 }
 
 // probe is "" when host answered as this install, else what happened.
-func (s *Status) probe(ctx context.Context, host string) string {
+func (s *Status) probe(ctx context.Context, host, base string) string {
 	u := "https://" + host + "/ping"
 	if s.PingURL != nil {
 		u = s.PingURL(host)
@@ -126,9 +126,15 @@ func (s *Status) probe(ctx context.Context, host string) string {
 	if err != nil {
 		var dns *net.DNSError
 		var timeout interface{ Timeout() bool }
+		var op *net.OpError
 		switch {
 		case errors.As(err, &dns):
 			return "can't look up " + host + " from this server"
+		case errors.As(err, &op) && op.Op == "remote error": // a TLS alert from the other end
+			// Cloudflare's edge has no certificate for the name: its free one
+			// covers a zone and one level below it, not a base on a
+			// subdomain; or a new zone's isn't issued yet.
+			return "Cloudflare refused https for " + host + " (" + err.Error() + "): it has no certificate for it. Its free certificate covers a zone and one level below it, so a base on a subdomain needs an Advanced Certificate for *." + base + "; a new zone's can take a few minutes"
 		case errors.As(err, &timeout) && timeout.Timeout():
 			return "no answer in 2 s"
 		}

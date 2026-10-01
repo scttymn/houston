@@ -2,10 +2,15 @@ package systemstatus_test
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
+	"errors"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +129,28 @@ func TestRoute(t *testing.T) {
 	}
 	s2 := &systemstatus.Status{PingURL: func(string) string { return "http://no-such-host.invalid/ping" }}
 	if r := s2.Route(ctx, inst, "hooks", false, now); r.Reason != "can't look up hooks.svnmns.com from this server" {
+		t.Errorf("= %+v", r)
+	}
+}
+
+// Cloudflare's edge with no certificate for the name (a base on a
+// subdomain): the reason says so, and what fixes it.
+func TestRouteNoCertificate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{ErrorLog: log.New(io.Discard, "", 0)}
+	go srv.Serve(tls.NewListener(ln, &tls.Config{GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("no certificate for that name")
+	}}))
+	defer srv.Close()
+	s := &systemstatus.Status{Identity: "me", PingURL: func(string) string { return "https://" + ln.Addr().String() + "/ping" }}
+	now := time.Now()
+	inst := models.Installation{BaseDomain: "next.example.com", CloudflareConnectedAt: sql.NullTime{Time: now.Add(-time.Hour), Valid: true}}
+	r := s.Route(context.Background(), inst, "admin", false, now)
+	if r.State != "nogo" || !strings.Contains(r.Reason, "Cloudflare refused https for admin.next.example.com") ||
+		!strings.Contains(r.Reason, "needs an Advanced Certificate for *.next.example.com") {
 		t.Errorf("= %+v", r)
 	}
 }
