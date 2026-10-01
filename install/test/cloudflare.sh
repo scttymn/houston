@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Read-only preflight and cleanup for the real Cloudflare check, using
-# mission_control/.houston/cloudflare-check.env (CLOUDFLARE_API_TOKEN,
+# .houston/cloudflare-check.env (CLOUDFLARE_API_TOKEN,
 # BASE_DOMAIN). The token is only ever read from that file into a private
 # header file for curl; it's never printed.
 #
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-env_file="$repo/mission_control/.houston/cloudflare-check.env"
+env_file="$repo/.houston/cloudflare-check.env"
 [ -f "$env_file" ] || { echo "no $env_file (CLOUDFLARE_API_TOKEN=…, BASE_DOMAIN=…)"; exit 1; }
 base=$(sed -n 's/^BASE_DOMAIN=//p' "$env_file")
 tunnel_name="houston-${base%%.*}"
