@@ -847,13 +847,13 @@ select, .inline-form select {
    SettingsMobile at 390): the title, then the menu pinned at the top as the
    page scrolls (underlined tabs, then chips), and sections that stack. */
 .settings__side { display: flex; flex-direction: column; width: 200px; flex-shrink: 0; position: sticky; top: 24px; align-self: flex-start; }
-.settings__title { margin: 0 0 16px; font-size: 44px; line-height: 1; }
+h1.settings__title { margin: 0 0 32px; font-size: 44px; line-height: 1; }
 .settings__side .section-nav { position: static; width: auto; }
 
 @media (max-width: 1099px) {
   .settings { flex-direction: column; gap: 20px; padding: 28px 24px 40px; }
   .settings__side { display: contents; }
-  .settings__title { margin: 0; font-size: 40px; }
+  h1.settings__title { margin: 0; font-size: 40px; }
   .settings .section-nav { position: sticky; top: 0; z-index: 5; align-self: stretch; flex-direction: row; flex-wrap: nowrap; gap: 0; overflow-x: auto; scrollbar-width: none; background: var(--paper); border-bottom: 1px solid var(--rule); }
   .settings .section-nav::-webkit-scrollbar { display: none; }
   .settings .section-nav a { display: flex; align-items: center; flex-shrink: 0; height: 44px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
@@ -888,7 +888,7 @@ select, .inline-form select {
 
 @media (max-width: 640px) {
   .settings { gap: 16px; padding: 20px 16px 32px; }
-  .settings__title { font-size: 36px; }
+  h1.settings__title { font-size: 36px; }
   .settings .section-nav { gap: 8px; margin: 0 -16px; padding: 8px 16px; border-bottom: 0; }
   .settings .section-nav a { height: 36px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); }
   .settings .section-nav a:hover { background: var(--surface); }
