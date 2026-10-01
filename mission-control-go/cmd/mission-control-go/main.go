@@ -260,6 +260,10 @@ func task(ctx context.Context, cfg config.Config, logger *slog.Logger, args []st
 		if t.Name != args[0] {
 			continue
 		}
+		// Tasks read what the server does, its encrypted columns too.
+		if err := useKeys(cfg); err != nil {
+			return err
+		}
 		database, err := db.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return err
