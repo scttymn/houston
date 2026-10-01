@@ -2,11 +2,10 @@ package layout
 
 import (
 	"net/http"
-
-	"github.com/a-h/templ"
 	"strconv"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/scttymn/gantry/web"
 )
 
@@ -18,10 +17,10 @@ type Page struct {
 	NoHeader bool
 	// Setup is a first-run step's number (1 to 3): the bar shows the steps
 	// and Host, the address the admin reached, instead.
-	Setup int
-	Host  string
-	Chrome   Chrome
-	Toast    *Toast
+	Setup  int
+	Host   string
+	Chrome Chrome
+	Toast  *Toast
 	// Head is what the page adds to the head (Rails' content_for :head).
 	Head templ.Component
 	// Zone is the request's time zone (the installation's), for showing
