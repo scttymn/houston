@@ -1,26 +1,24 @@
+# Houston's project: gantry dev (houston dev) serves it at
+# http://mission-control.localhost, gantry test runs its tests, and houston deploy
+# puts it on the server.
 name: mission-control
 
 services:
   app:
-    build: { context: ., target: dev }
-    ports: ["3000:3000"]
+    # Built from the module's root (..), where go.mod is.
+    build: { context: .., dockerfile: mission_control/Dockerfile, target: dev }
+    expose: ["8080"]
     environment:
-      # Blank in dev: Rails then reads config/master.key. Set it on the server.
-      RAILS_MASTER_KEY: ${RAILS_MASTER_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-}   # signs cookies and forms; blank: a key kept in the database
     volumes:
-      - .:/rails
-      - storage:/rails/storage
-      # Dev only: Mission Control runs restic and creates volumes through Docker.
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ..:/app                    # the module, this app at /app/mission_control; rebuilt on change
+      - data:/data                 # the SQLite database and uploads
 
 volumes:
-  storage:
+  data:
 
 x-houston:
   health: /up
-  app_port: 80
   commands:
-    console: bin/rails console
-    test: bin/rails test
-  hooks:
-    release: bin/rails db:migrate
+    test: sh -c "go vet ./... && go test ./..."
+    console: { dev: go run ./cmd/mission-control db console, server: /app db console }

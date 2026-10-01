@@ -1,0 +1,296 @@
+package projects
+
+import (
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/scttymn/houston/mission_control/app/models"
+	"github.com/scttymn/houston/mission_control/app/services/systemstatus"
+	"github.com/scttymn/houston/mission_control/app/shared/layout"
+)
+
+// Board is the flight board's.
+type Board struct {
+	Page       layout.Page
+	Live       templ.Component // its stream: refreshed when anything on it changes
+	Base       string
+	Version    string
+	Rows       []Row
+	Proposals  map[string]string // a project's copy's name, when its deploy holds for one
+	InFlight   int
+	NoGo       int
+	NextBackup *time.Time
+	Update     *models.ServerUpdate // running, or finished within a day
+	Newer      string               // a newer release, when one's out
+	OnLAN      bool                 // not on admin.<base>
+	AdminRoute *systemstatus.Route
+	HooksRoute *systemstatus.Route
+	Tunnel     systemstatus.Tunnel
+	PerHost    bool // DNS host by host (another server has the wildcard)
+	Storage    *models.StorageLocation
+	Now        time.Time
+	Zone       *time.Location
+}
+
+templ flags(b Board, row Row) {
+	if row.FailedBackup {
+		<small class="field__error">backup NO-GO</small>
+	}
+	if row.Project.MaintenanceSince.Valid {
+		<small class="mono state state--hold">MAINTENANCE</small>
+	}
+	if row.Deleting {
+		<small class="mono state state--nogo">DELETING</small>
+	}
+	if name := b.Proposals[row.Project.Name]; name != "" {
+		<small class="mono state state--hold">{ "names " + name }</small>
+	}
+}
+
+templ plus() {
+	<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.8"></path></svg>
+}
+
+templ updatePill(b Board) {
+	if u := b.Update; u != nil && u.Status == "running" {
+		<a class="mono board__pill board__pill--updating" data-controller="refresh" data-refresh-every-value="10000" href={ templ.SafeURL("/settings/updates/" + strconv.FormatInt(u.ID, 10)) }>
+			{ "Updating to " + u.ToVersion }
+			if u.Step != "" {
+				{ " · " + u.Step }
+			} else {
+				…
+			}
+			if u.StartedAt.Before(b.Now.Add(-20 * time.Minute)) {
+				{ " · taking long" }
+			}
+		</a>
+	} else if u != nil && (u.Status == "rolled_back" || u.Status == "no_go") {
+		<a class="mono board__pill board__pill--failed" href={ templ.SafeURL("/settings/updates/" + strconv.FormatInt(u.ID, 10)) }>{ "Update to " + u.ToVersion + " failed" }</a>
+	} else if b.Newer != "" {
+		<a class="mono board__pill" href="/settings#releases">{ b.Newer + " available" }</a>
+	}
+}
+
+templ stat(label, value string, none bool) {
+	<div class="stat"><span class="mono eyebrow">{ label }</span> <span class={ "disp stat__value", templ.KV("stat__value--none", none) }>{ value }</span></div>
+}
+
+templ BoardPage(b Board) {
+	@layout.Layout(b.Page) {
+		@b.Live
+		// Each app's resources, read while this board is open and in view.
+		<div hidden data-controller="stats" data-stats-url-value="/resources" data-stats-every-value="30000"></div>
+		<main class="page board">
+			<div class="board__top">
+				<div class="board__title">
+					<div class="board__version">
+						<span class="mono eyebrow">{ "FLIGHT BOARD · " + strings.ToUpper(b.Base) + " · " + strings.ToUpper(b.Version) }</span>
+						@updatePill(b)
+					</div>
+					<div class="board__heading">
+						<h1 class="disp">Projects</h1>
+						if len(b.Rows) > 0 {
+							<a class="button button--primary button--medium" href="/link">
+								@plus()
+								<span class="add__long">Add project</span><span class="add__short">Add</span>
+							</a>
+						}
+					</div>
+				</div>
+				<div class="stats">
+					@stat("PROJECTS", strconv.Itoa(len(b.Rows)), false)
+					@stat("IN FLIGHT", strconv.Itoa(b.InFlight), b.InFlight == 0)
+					@stat("NO-GO", strconv.Itoa(b.NoGo), b.NoGo == 0)
+					if b.NextBackup != nil {
+						@stat("NEXT BACKUP", b.NextBackup.Format("15:04 MST"), false)
+					} else {
+						@stat("NEXT BACKUP", "—", true)
+					}
+				</div>
+			</div>
+			if b.OnLAN && b.AdminRoute != nil {
+				switch b.AdminRoute.State {
+					case "go":
+						<div class="notice notice--go">
+							<span class="mono">GO</span>
+							<span class="notice__text">Setup complete. Mission Control now lives at <span class="mono">{ "admin." + b.Base }</span>. You're on the LAN address, so bookmark the new one.</span>
+							<a target="_blank" rel="noopener noreferrer" href={ templ.SafeURL("https://admin." + b.Base) }>{ "Open admin." + b.Base + " ↗" }</a>
+						</div>
+					case "hold":
+						<div class="notice notice--hold" data-controller="refresh" data-refresh-every-value="10000">
+							<span class="mono">HOLD</span>
+							<span class="notice__text">Setup complete. Cloudflare is switching <span class="mono">{ "admin." + b.Base }</span> over to this server, which can take a few minutes. This page checks again every 10 seconds.</span>
+						</div>
+					default:
+						<div class="notice notice--nogo">
+							<span class="mono">NO-GO</span>
+							<span class="notice__text"><span class="mono">{ "admin." + b.Base }</span>{ " isn't reaching Houston: " + b.AdminRoute.Reason + ". Keep using this LAN address meanwhile, and check the admin." + b.Base + " record and the tunnel in Cloudflare." }</span>
+						</div>
+				}
+			}
+			if len(b.Rows) > 0 {
+				<section class="panel flight">
+					<div class="mono flight-head"><span>STATUS</span><span>PROJECT</span><span>RUNNING SHA</span><span>DOMAINS</span><span>LAST DEPLOY</span><span>LAST BACKUP</span><span>RESOURCES</span></div>
+					for _, row := range b.Rows {
+						<div class={ "flight__row flight__row--" + Dasherize(row.Status) } data-project={ row.Project.Name }>
+							<span class="flight__status">
+								@StatePill(row.Status)
+								@flags(b, row)
+							</span>
+							<span class="flight__cell">
+								<a class="flight__name" href={ templ.SafeURL("/projects/" + row.Project.Name) }>{ row.Project.Name }</a>
+								<small class="flight__services">{ ServicesWords(row.Project) }</small>
+							</span>
+							<span class="flight__cell">
+								@runningSha(row)
+							</span>
+							<span class="flight__cell flight__domains">
+								@domains(row)
+							</span>
+							<span class="flight__cell">
+								@lastDeploy(row, b.Now)
+							</span>
+							<span class="flight__cell flight__backup">
+								@lastBackup(row.Backup, b.Zone)
+							</span>
+							<span class="flight__cell flight__resources" data-resources={ row.Project.Name }>
+								@Resources(row.Stats, b.Now)
+							</span>
+						</div>
+					}
+				</section>
+				// On tablets and phones, a card per project instead (CSS lays it out for each).
+				<div class="flight-cards">
+					for _, row := range b.Rows {
+						<article class={ "flight-card flight-card--" + Dasherize(row.Status) } data-card={ row.Project.Name }>
+							<div class="flight-card__head">
+								<span class="flight-card__title"><a class="flight-card__name" href={ templ.SafeURL("/projects/" + row.Project.Name) }>{ row.Project.Name }</a><small>{ ServicesWords(row.Project) }</small></span>
+								@flags(b, row)
+								@StatePill(row.Status)
+								<svg class="flight-card__chevron" width="10" height="16" viewBox="0 0 10 16" fill="none" aria-hidden="true"><path d="M2 2l6 6-6 6" stroke="currentColor" stroke-width="1.6"></path></svg>
+								<div class="flight-card__domains flight__domains">
+									@domains(row)
+								</div>
+							</div>
+							<div class="flight-card__body">
+								<div class="flight-card__details">
+									<div class="flight__cell">
+										<span class="mono flight-card__label">RUNNING SHA</span>
+										@runningSha(row)
+									</div>
+									<div class="flight__cell">
+										<span class="mono flight-card__label">LAST DEPLOY</span>
+										@lastDeploy(row, b.Now)
+									</div>
+									<div class="flight__cell flight__backup">
+										<span class="mono flight-card__label">LAST BACKUP</span>
+										@lastBackup(row.Backup, b.Zone)
+									</div>
+								</div>
+								<div class="flight-card__resources flight__resources">
+									<span class="mono flight-card__label">RESOURCES</span>
+									<div data-resources={ row.Project.Name }>
+										@Resources(row.Stats, b.Now)
+									</div>
+								</div>
+							</div>
+						</article>
+					}
+				</div>
+				<p class="board__foot">Add a project by linking its repo, or let the first <span class="mono code-chip">houston deploy</span> register it.</p>
+			} else {
+				@emptyBoard(b)
+			}
+		</main>
+	}
+}
+
+templ check(state, label, name, detail string) {
+	<li><span class={ "mono state state--" + state }>{ label }</span><span><span>{ name }</span><small>{ detail }</small></span></li>
+}
+
+templ emptyBoard(b Board) {
+	<div class="board__body">
+		<section class="panel empty">
+			<div class="empty__head">
+				@launchPad()
+				<div>
+					<h2 class="disp">Nothing on the pad yet</h2>
+					<p>The server is ready. Bring your first project over one of two ways.</p>
+				</div>
+			</div>
+			<div class="empty__paths">
+				<div class="path">
+					<span class="mono eyebrow eyebrow--signal">A · REPO HAS AN X-HOUSTON BLOCK</span>
+					<p>Link the repo. Houston reads its compose.yml, takes secrets, and gives you a webhook so pushes deploy.</p>
+					<a class="button button--primary" href="/link">Add project</a>
+				</div>
+				<div class="path" data-controller="clipboard">
+					<span class="mono eyebrow eyebrow--signal">B · NOT SET UP FOR HOUSTON YET</span>
+					<p>In the repo on your laptop, let Houston write the config, then push it.</p>
+					<div class="commands">
+						<button type="button" class="commands__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy</button>
+						<pre class="mono" data-clipboard-target="source">houston init
+  git add .
+  git commit -m "Add Houston"
+  git push</pre>
+					</div>
+					<p class="field__hint">Then come back and use option A.</p>
+				</div>
+			</div>
+		</section>
+		<aside class="panel preflight">
+			<h2 class="disp panel__title">Pre-flight check</h2>
+			<ul>
+				@check("go", "GO", "Admin login", "Signed in on this browser")
+				@tunnelCheck(b)
+				if r := b.AdminRoute; r != nil {
+					<li data-check="admin-route" data-state={ r.State }>
+						@routeCheck(*r, "admin."+b.Base, adminGo(b.OnLAN))
+					</li>
+				}
+				if r := b.HooksRoute; r != nil {
+					<li data-check="hooks-route" data-state={ r.State }>
+						@routeCheck(*r, "hooks."+b.Base, "Webhooks reach this Mission Control through Cloudflare")
+					</li>
+				}
+				if b.PerHost {
+					@check("go", "GO", "admin."+b.Base+" and hooks."+b.Base, "Sharing the domain: another server has *."+b.Base+", so each app gets its own record when it's first deployed")
+				} else {
+					@check("go", "GO", "*."+b.Base, "New apps get a subdomain automatically")
+				}
+				if b.Storage != nil {
+					@check("go", "GO", "Backup storage "+b.Storage.Name, "Default · password saved")
+				}
+				@check("hold", "OPTIONAL", "Cloudflare Access on admin."+b.Base, "Adds a second login in front of Mission Control")
+			</ul>
+		</aside>
+	</div>
+}
+
+templ tunnelCheck(b Board) {
+	{{ name := "Tunnel houston-" + strings.Split(b.Base, ".")[0] }}
+	switch b.Tunnel.State {
+		case "go":
+			@check("go", "GO", name, connectionsWords(b.Tunnel.Connections))
+		case "hold":
+			@check("hold", "HOLD", name, "cloudflared isn't connected yet")
+		default:
+			@check("unknown", "?", name, "Can't check: "+b.Tunnel.Reason)
+	}
+}
+
+templ routeCheck(r systemstatus.Route, host, goes string) {
+	switch r.State {
+		case "go":
+			<span class="mono state state--go">GO</span>
+			<span><span>{ "Route to " + host }</span><small>{ goes }</small></span>
+		case "hold":
+			<span class="mono state state--hold">HOLD</span>
+			<span><span>{ "Route to " + host }</span><small>{ "Switching over, which can take a few minutes. Last check: " + r.Reason }</small></span>
+		default:
+			<span class="mono state state--nogo">NO-GO</span>
+			<span><span>{ "Route to " + host }</span><small>{ upcaseFirst(r.Reason) }</small></span>
+	}
+}

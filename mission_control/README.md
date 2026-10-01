@@ -1,24 +1,31 @@
-# README
+# Mission Control
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+Houston's web admin and its API: a [gantry](https://github.com/scttymn/gantry) app in Houston's Go module, so it imports `internal/`. The installer runs its production image (see `Dockerfile`); `bin/image-check` checks that image.
 
-Things you may want to cover:
+```sh
+gantry dev                 # http://mission-control.localhost, rebuilt as you change it
+gantry test                # its tests, in a throwaway copy
+gantry db migrate          # run pending migrations (and rewrite db/schema.sql)
+gantry console             # sqlite3 on the dev database
+```
 
-* Ruby version
+## Where things go
+- `app/routes.go`: every route, and the controllers behind them
+- `app/<name>/`: a controller and its views (`.templ`), one folder per resource
+- `app/models/`: each table's queries (`<table>.sql`, turned into Go by sqlc) and rules (`<table>.go`)
+- `app/jobs.go`: background jobs, run by the server (or `mission-control jobs`, with `JOBS_IN_SERVER=false`)
+- `app/tasks.go`: the app's own commands, run with `gantry task NAME`
+- `db/migrations/`: schema changes, written by `gantry g migration`; `db/schema.sql` is what they leave
+- `db/seeds/`: what a fresh database starts with
+- `assets/`: stylesheets, scripts, fonts and images; `assets/public/` is served at the root (robots.txt, the error pages)
+- `assets/js/`: JavaScript, through an import map with no build step: Turbo and Stimulus, the app's Stimulus controllers in `js/controllers/`, and packages from `gantry importmap pin NAME` in `js/vendor/`
+- `config/config.go`: settings, from the environment
+- `test/`: what the tests share
 
-* System dependencies
-
-* Configuration
-
-* Database creation
-
-* Database initialization
-
-* How to run the test suite
-
-* Services (job queues, cache servers, search engines, etc.)
-
-* Deployment instructions
-
-* ...
+## Generators
+```sh
+gantry g resource admin/posts title:string:required body:text
+gantry g migration add_email_to_users email:string
+gantry g error-pages
+gantry g fonts "Work Sans:400,600" "Instrument Serif:400,400i"   # Google Fonts, served from the app
+```

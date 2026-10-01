@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # The download spike (docs/plans/download-snapshot.md, Batch 1): pins what
 # a snapshot download leans on. restic's zip of a whole snapshot, its
-# failures, Docker's container name as a one-at-a-time lock, and Puma
-# breaking a response whose body raises. Needs only Docker; changes nothing
-# outside its own volumes and containers.
+# failures, and Docker's container name as a one-at-a-time lock. Needs only
+# Docker; changes nothing outside its own volumes and containers.
 #
 #   install/test/restic-dump-spike.sh
 # shellcheck disable=SC2015 # ok/bad return 0
 set -uo pipefail
 
-here=$(cd "$(dirname "$0")" && pwd)
 image="restic/restic:0.19.1"
 repo="houston-spike-dump-repo" data="houston-spike-dump-data" out="houston-spike-dump-out"
 work=$(mktemp -d)
@@ -85,26 +83,6 @@ docker run --rm --name houston-spike-export --entrypoint echo "$image" hi >/dev/
 created=$(docker inspect -f '{{.Created}}' houston-spike-export)
 [[ "$created" =~ ^20[0-9-]+T[0-9:.]+Z$ ]] && ok "docker inspect gives its start time ($created)" || bad "created: $created"
 docker rm -f houston-spike-export >/dev/null
-
-echo "== Puma breaks a response whose body raises"
-cat > "$work/config.ru" <<'RUBY'
-class Body
-  def initialize(broken) = @broken = broken
-  def each
-    3.times { |i| yield "chunk#{i}\n" * 1000 }
-    raise "broke" if @broken
-  end
-end
-run ->(env) { [ 200, { "content-type" => "application/zip" }, Body.new(env["PATH_INFO"] == "/break") ] }
-RUBY
-result=$(cd "$here/../../mission_control" && docker compose --progress quiet run --rm --no-deps -T -v "$work:/spike" --entrypoint sh app -c '
-  bundle exec puma -q -b tcp://127.0.0.1:9292 /spike/config.ru >/dev/null 2>&1 &
-  for _ in $(seq 50); do curl -s -o /dev/null http://127.0.0.1:9292/ok && break; sleep 0.2; done
-  curl -s -o /dev/null http://127.0.0.1:9292/ok; a=$?
-  curl -s -o /dev/null http://127.0.0.1:9292/break; b=$?
-  echo "$a $b $(bundle exec puma --version)"')
-read -r clean broken version <<<"$result"
-[ "$clean" = 0 ] && [ "$broken" != 0 ] && ok "a clean body: curl 0; a raising one: curl $broken, not a complete file ($version)" || bad "puma: $result"
 
 echo
 if [ "$failures" = 0 ]; then echo "RESTIC DUMP SPIKE PASS"; else echo "RESTIC DUMP SPIKE FAIL ($failures)"; exit 1; fi

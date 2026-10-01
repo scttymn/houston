@@ -4,8 +4,7 @@ For agents working **on Houston's code**. To *use* Houston (set up an app, deplo
 
 ## What's where
 - `cmd/houston`, `internal/`: the Go CLI. It runs locally (`houston dev`, `houston test`) and against a server (`--server`, via Mission Control's API).
-- `mission_control/`: Mission Control, the web admin (Rails 8.1, SQLite, Solid Queue, Solid Cable, Turbo, Stimulus).
-- `mission-control-go/`: Mission Control's Go rewrite, a [gantry](https://github.com/scttymn/gantry) app in this module (so it imports `internal/`), made by `gantry new mission-control-go --in-module`. It runs beside the Rails one (`gantry dev` in its folder: `http://mission-control-go.localhost`) until it replaces it. gantry's plan for it: gantry's `docs/plans/mission-control.md`.
+- `mission_control/`: Mission Control, the web admin: a [gantry](https://github.com/scttymn/gantry) app in this module (so it imports `internal/`), on SQLite, templ, Turbo and Stimulus. `gantry dev` in its folder serves it at `http://mission-control.localhost`; its README says where things go. It replaced a Rails app in v0.5.0 (docs/plans/mission-control-go.md).
 - `install/`: `install.sh` (the server installer), `runner.Dockerfile`, and `install/test/`, real runs on throwaway OrbStack machines.
 - `docs/plans/`: one plan per feature, each with an acceptance-criteria-to-test map and what was found while building it. Read the relevant plan before changing a feature.
 - `.github/workflows/release.yml`: a `v*` tag tests, then publishes the images and a GitHub Release.
@@ -13,16 +12,15 @@ For agents working **on Houston's code**. To *use* Houston (set up an app, deplo
 ## Build and test (everything runs in Docker)
 ```sh
 bin/go test ./...                                   # Go tests, in the toolchain container
-docker compose --progress quiet run --rm cli gofmt -l internal cmd   # must print nothing
+docker compose --progress quiet run --rm cli gofmt -l internal cmd mission_control/{app,cmd,config,test}   # must print nothing
 bin/test-integration                                # Go tests that drive real Docker
-cd mission_control && docker compose run --rm --no-deps -T -e RAILS_ENV=test app sh -c 'bin/rails test && bin/rubocop'
+cd mission_control && gantry test                   # Mission Control's tests, as its image builds them
 install/test/install-version.sh                     # the installer's release path, in a container
 install/test/install-bind.sh                        # where port 3000 listens, in a container
 install/test/install-ssh-key.sh                     # houston's SSH key, in a container
 ```
-- Don't install Go, Ruby or gems on the host.
+- Don't install Go on the host.
 - `bin/release` builds the CLI for all four platforms into `dist/`, and `bin/install` puts this machine's in `~/.local/bin`.
-- If a bind-mounted file seems to be ignored by Rails, add `-e DISABLE_BOOTSNAP=1`: bootsnap caches by mtime and size.
 
 ## How changes are made
 - **Tests first.** Write the failing tests for the plan's rows, see them fail for the right reason, then implement until they pass. Then break the code on purpose (mutation check) to prove the tests catch it. A behaviour without a test that fails when it breaks isn't done.

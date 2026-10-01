@@ -1,0 +1,277 @@
+// mission-control: it serves by default, and its other commands are `mission-control db
+// ...`, `mission-control jobs` and `mission-control task NAME` (in development, `gantry db
+// migrate` runs them in the app's container).
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"syscall"
+	"time"
+
+	"github.com/scttymn/gantry/crypt"
+	"github.com/scttymn/gantry/db"
+	"github.com/scttymn/gantry/images"
+	"github.com/scttymn/gantry/jobs"
+	"github.com/scttymn/gantry/live"
+	"github.com/scttymn/gantry/sign"
+
+	"github.com/scttymn/houston/mission_control/app"
+	"github.com/scttymn/houston/mission_control/app/services/appstats"
+	"github.com/scttymn/houston/mission_control/app/services/backup"
+	"github.com/scttymn/houston/mission_control/app/services/cfsettings"
+	"github.com/scttymn/houston/mission_control/app/services/dns"
+	"github.com/scttymn/houston/mission_control/app/services/dockercmd"
+	"github.com/scttymn/houston/mission_control/app/services/gitremote"
+	"github.com/scttymn/houston/mission_control/app/services/owncontainer"
+	"github.com/scttymn/houston/mission_control/app/services/port"
+	"github.com/scttymn/houston/mission_control/app/services/registry"
+	"github.com/scttymn/houston/mission_control/app/services/release"
+	"github.com/scttymn/houston/mission_control/app/services/serverupdate"
+	"github.com/scttymn/houston/mission_control/app/services/systemstatus"
+	"github.com/scttymn/houston/mission_control/assets"
+	"github.com/scttymn/houston/mission_control/config"
+	"github.com/scttymn/houston/mission_control/db/migrations"
+	"github.com/scttymn/houston/mission_control/db/seeds"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	os.Exit(command(ctx, config.FromEnv(), logger, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+const usage = `usage:
+  mission-control                        serve (the default), and run the jobs unless JOBS_IN_SERVER=false
+  mission-control jobs                   run the background jobs alone
+  mission-control assets [DIR]           the assets precompiled, into DIR (assets/built; the build runs it)
+  mission-control db migrate|rollback [N]|status|seed|reset|console
+  mission-control backup-sqlite DATA OUT a backup's SQLite copies (its helper container runs it)
+  mission-control tasks                  the app's own tasks (app/tasks.go)
+  mission-control task NAME [ARGS...]    run one
+`
+
+// command runs the command args name, and is its exit code.
+func command(ctx context.Context, cfg config.Config, logger *slog.Logger, args []string, in io.Reader, out, errOut io.Writer) int {
+	name := "serve"
+	if len(args) > 0 {
+		name, args = args[0], args[1:]
+	}
+	var err error
+	switch name {
+	case "serve":
+		err = serve(ctx, cfg, logger, nil)
+	case "jobs":
+		err = runJobs(ctx, cfg, logger)
+	case "assets":
+		// The Dockerfile runs it before go build,
+		// which embeds what it makes (the scripts minified, the pictures'
+		// copies).
+		dir := filepath.Join("assets", "built")
+		if len(args) > 0 {
+			dir = args[0]
+		}
+		if why := images.AVIFSlow(); why != "" {
+			fmt.Fprintf(errOut, "assets: no AVIF copies, as %s: the encoder would take minutes a copy here; the pictures are WebP alone\n", why)
+		}
+		var made int
+		made, err = assets.All.Precompile(ctx, dir)
+		if err == nil {
+			fmt.Fprintf(out, "assets: precompiled into %s (%d picture copies made)\n", dir, made)
+		}
+	case "db":
+		return dbCommand(ctx, cfg, args, in, out, errOut)
+	case "backup-sqlite":
+		// In a backup's helper container (this image, as its tools): the
+		// app's SQLite databases copied into the staging volume. Its last
+		// line is the report; it fails when a database couldn't be copied.
+		if len(args) != 2 {
+			fmt.Fprint(errOut, usage)
+			return 2
+		}
+		report := backup.CopySQLite(args[0], args[1])
+		json.NewEncoder(out).Encode(report)
+		if len(report.Errors) > 0 {
+			return 1
+		}
+		return 0
+	case "tasks":
+		for _, t := range app.Tasks {
+			fmt.Fprintf(out, "%-20s %s\n", t.Name, t.Help)
+		}
+		return 0
+	case "task":
+		err = task(ctx, cfg, logger, args, out)
+	default:
+		fmt.Fprint(errOut, usage)
+		return 2
+	}
+	if err != nil {
+		fmt.Fprintln(errOut, "mission-control:", err)
+		return 1
+	}
+	return 0
+}
+
+// build opens the database, brings it up to date, and is the app on it,
+// its jobs defined. close closes the database.
+func build(ctx context.Context, cfg config.Config, logger *slog.Logger) (a *app.App, close func(), err error) {
+	if err := useKeys(cfg); err != nil {
+		return nil, nil, err
+	}
+	database, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			database.Close()
+		}
+	}()
+	if err := migrations.Up(ctx, database); err != nil {
+		return nil, nil, err
+	}
+	if err := seeds.Run(ctx, database); err != nil {
+		return nil, nil, err
+	}
+	key, err := sign.Key(ctx, database, cfg.SecretKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	queue, err := jobs.New(ctx, database, jobs.Options{Log: logger, Queues: app.Queues})
+	if err != nil {
+		return nil, nil, err
+	}
+	signer := sign.Signer{Key: key}
+	// The identity: from SECRET_KEY_BASE (app.Identity); else (in
+	// development) from the signing key.
+	identity := cfg.SecretKeyBase
+	if identity == "" {
+		identity = string(key)
+	}
+	version := app.HoustonVersion(os.Getenv("HOUSTON_VERSION"), os.Getenv("HOUSTON_SOURCE_SHA"))
+	hostname, _ := os.Hostname() // the container's name on Docker
+	runners, _ := strconv.Atoi(cfg.Runners)
+	own := owncontainer.Own{Docker: dockercmd.Docker, Hostname: hostname}
+	a = &app.App{DB: database, Log: logger, Signer: signer, Jobs: queue, Live: live.New(signer, live.Options{Log: logger}),
+		Identity: app.Identity(identity), RunnerToken: cfg.RunnerToken, TunnelHost: cfg.TunnelHost, TunnelTokenPath: cfg.TunnelTokenPath,
+		Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}, DockerCLI: dockercmd.Docker, Snapshots: &backup.Snapshots{Docker: dockercmd.Docker}, Tools: cfg.ToolsImage, ToolsBin: "/app", KnownHosts: cfg.KnownHosts, Git: gitremote.Git{Run: gitremote.Exec, KnownHosts: cfg.KnownHosts},
+		Version: version, Release: release.Checker{API: "https://api.github.com", Repo: cfg.Repo, Version: version},
+		KamalHome: cfg.KamalHome, Registry: registry.Registry{URL: cfg.RegistryURL, ComposeProject: cfg.ComposeProject, Docker: dockercmd.Docker},
+		Updater: serverupdate.Updater{DB: database, Docker: dockercmd.Docker, Own: own, Version: version, Repo: cfg.Repo, RunnerImage: cfg.RunnerImage,
+			Runners: cfg.Runners, Log: logger},
+		Port: &port.Port{DB: database, Own: own, RunnerImage: cfg.RunnerImage}, Stats: &appstats.Stats{Docker: dockercmd.Docker, Log: logger},
+		SystemStatus: &systemstatus.Status{Registry: cfg.RegistryURL, Identity: app.Identity(identity)}, Runners: runners,
+		CloudflareSettings: &cfsettings.Settings{DB: database, Services: dns.Services{MissionControl: cfg.MissionControlURL, Apps: cfg.AppsURL}}}
+	if err := a.DefineJobs(); err != nil {
+		return nil, nil, err
+	}
+	return a, func() { database.Close() }, nil
+}
+
+// serve builds the app, then serves until ctx ends, running its jobs
+// alongside when cfg says to. Anything that fails before listening is
+// returned, so the process exits non-zero and its health check never
+// passes. listening, when set, gets the address.
+func serve(ctx context.Context, cfg config.Config, logger *slog.Logger, listening chan<- string) error {
+	a, closeDB, err := build(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	server := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	server.RegisterOnShutdown(a.Live.Close) // live streams end, so shutting down doesn't wait on them
+
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		return err
+	}
+	logger.Info("listening", "addr", ln.Addr().String(), "env", cfg.Env)
+	if listening != nil {
+		listening <- ln.Addr().String()
+	}
+	// The jobs stop with the server: running ones get their grace, then go
+	// back to the queue.
+	jobsCtx, stopJobs := context.WithCancel(ctx)
+	jobsDone := make(chan error, 1)
+	if cfg.JobsInServer {
+		go func() { jobsDone <- a.Jobs.Run(jobsCtx) }()
+	} else {
+		jobsDone <- nil
+	}
+	defer func() { stopJobs(); <-jobsDone }()
+	errs := make(chan error, 1)
+	go func() { errs <- server.Serve(ln) }()
+	select {
+	case err := <-errs:
+		return err
+	case <-ctx.Done():
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdown); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// runJobs builds the app and runs its jobs until ctx ends: a process of
+// jobs alone, beside servers started with JOBS_IN_SERVER=false.
+func runJobs(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	a, closeDB, err := build(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+	logger.Info("running jobs", "env", cfg.Env)
+	return a.Jobs.Run(ctx)
+}
+
+// task runs one of app.Tasks, on the migrated database.
+func task(ctx context.Context, cfg config.Config, logger *slog.Logger, args []string, out io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("which task? `mission-control tasks` lists them")
+	}
+	for _, t := range app.Tasks {
+		if t.Name != args[0] {
+			continue
+		}
+		// Tasks read what the server does, its encrypted columns too.
+		if err := useKeys(cfg); err != nil {
+			return err
+		}
+		database, err := db.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		if err := migrations.Up(ctx, database); err != nil {
+			return err
+		}
+		return t.Run(ctx, app.TaskEnv{DB: database, Log: logger, Out: out}, args[1:])
+	}
+	return fmt.Errorf("no task %q: `mission-control tasks` lists them", args[0])
+}
+
+// useKeys sets gantry's crypt keys, which secrets are kept with.
+func useKeys(cfg config.Config) error {
+	keys, err := crypt.ParseKeys(cfg.EncryptionKeys)
+	if err == nil && len(keys) == 0 {
+		err = errors.New("ENCRYPTION_KEYS is missing: 32 random bytes in base64 (openssl rand -base64 32)")
+	}
+	if err != nil {
+		return err
+	}
+	return crypt.Use(keys...)
+}

@@ -1,0 +1,78 @@
+package setup
+
+import (
+	"github.com/scttymn/gantry/web"
+
+	"github.com/scttymn/houston/mission_control/app/services/cfsetup"
+	"github.com/scttymn/houston/mission_control/app/shared/layout"
+)
+
+// CloudflarePage is step 2: the base domain and Cloudflare's API token,
+// with the token's checks after a try.
+templ CloudflarePage(page layout.Page, form cfsetup.Form, checks []cfsetup.Check, errs web.Invalid) {
+	{{ base := form.BaseDomain }}
+	if base == "" {
+		{{ base = "example.com" }}
+	}
+	@layout.Layout(page) {
+		<main class="setup">
+			<form class="setup__form" action="/setup/cloudflare" accept-charset="UTF-8" method="post">
+				<div class="setup__intro">
+					<span class="mono eyebrow eyebrow--signal">STEP 02 OF 03</span>
+					<h1 class="disp">Connect Cloudflare</h1>
+					<p>Houston routes every app through one Cloudflare tunnel. After this step, a new project is live at its own subdomain with no DNS work.</p>
+				</div>
+				<div class="field">
+					<label for="cloudflare_base_domain">Base domain</label>
+					<input class="mono" placeholder="example.com" autocomplete="off" spellcheck="false" required autofocus aria-invalid={ invalid(errs, "base_domain") } type="text" value={ form.BaseDomain } name="cloudflare[base_domain]" id="cloudflare_base_domain"/>
+					if len(errs["base_domain"]) > 0 {
+						<span class="field__error">{ "Base domain " + web.Sentence(errs["base_domain"]) + "." }</span>
+					}
+					<span class="field__hint">
+						{ "Apps get " }<span class="mono">{ "<name>." + base }</span>{ ". Mission Control moves to " }<span class="mono">{ "admin." + base }</span>.
+					</span>
+				</div>
+				<div class="field">
+					<label for="cloudflare_api_token">Cloudflare API token</label>
+					<input class="mono" autocomplete="off" required type="password" name="cloudflare[api_token]" id="cloudflare_api_token"/>
+					<span class="field__hint">Needs Account · Cloudflare Tunnel · Edit and Zone · DNS · Edit on the base domain.</span>
+					if len(checks) > 0 {
+						<div class="checks" role="status">
+							<span class="mono eyebrow">TOKEN CHECK</span>
+							for _, check := range checks {
+								<p class="check">
+									if check.OK {
+										<span class="mono check__state check__state--go">GO</span>
+									} else {
+										<span class="mono check__state check__state--nogo">NO-GO</span>
+									}
+									<span>{ check.Label }</span>
+								</p>
+							}
+						</div>
+					}
+				</div>
+				<div><input type="submit" name="commit" value="Create tunnel and continue" class="button button--primary"/></div>
+			</form>
+			<aside class="panel setup__aside">
+				<h2 class="disp panel__title">What Houston will create</h2>
+				<div class="panel__row">
+					<span class="mono eyebrow">TUNNEL · REMOTELY MANAGED</span>
+					<span class="mono">{ cfsetup.TunnelName(form.BaseDomain) }</span>
+				</div>
+				<div class="panel__row">
+					<span class="mono eyebrow">INGRESS RULES</span>
+					<span class="rule"><span class="mono">{ "admin." + base }</span><span class="rule__arrow">→</span><span>Mission Control</span></span>
+					<span class="rule"><span class="mono">{ "hooks." + base }</span><span class="rule__arrow">→</span><span>Mission Control, webhook paths only</span></span>
+					<span class="rule"><span class="mono">everything else</span><span class="rule__arrow">→</span><span>Your apps, matched by hostname</span></span>
+				</div>
+				<div class="panel__row">
+					<span class="mono eyebrow">DNS RECORD</span>
+					<span><span class="mono">{ "*." + base }</span> CNAME to the tunnel, proxied</span>
+					<span class="mono panel__row--muted">comment: managed-by:houston</span>
+				</div>
+				<p class="panel__row panel__row--muted">Then Houston connects this server to the tunnel. This setup rarely changes after today.</p>
+			</aside>
+		</main>
+	}
+}

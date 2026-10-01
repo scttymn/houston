@@ -1,0 +1,60 @@
+# sqlc turns the queries beside each model (app/models/*.sql) into typed Go,
+# in the same package, over the schema the migrations leave (db/schema.sql).
+# Add app/models/<table>.sql (gantry g resource writes one), then:
+# gantry exec sqlc generate
+version: "2"
+sql:
+  - engine: sqlite
+    schema: db/schema.sql
+    queries: app/models/*.sql
+    gen:
+      go:
+        package: models
+        out: app/models
+        sql_package: database/sql
+        output_db_file_name: queries.go
+        output_models_file_name: tables.go
+        emit_empty_slices: true
+        overrides:
+          # Encrypted at rest (gantry's crypt).
+          - column: installations.cloudflare_api_token
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: installations.tunnel_token
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: projects.deploy_key_private
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: projects.webhook_secret
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: secrets.value
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: storage_locations.credentials
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: storage_locations.restic_password
+            go_type: github.com/scttymn/gantry/crypt.String
+          # JSON (app/models/project.go names each).
+          - column: projects.services
+            go_type: { type: Names }
+          - column: projects.domains
+            go_type: { type: Names }
+          - column: projects.domain_states
+            go_type: { type: DomainStates }
+          - column: projects.variables
+            go_type: { type: Variables }
+          - column: projects.volumes
+            go_type: { type: Volumes }
+          - column: projects.databases
+            go_type: { type: Databases }
+          - column: projects.details
+            go_type: { type: ProjectDetails }
+          - column: projects.deploy_rule
+            go_type: { type: Object }
+          - column: projects.seen_refs
+            go_type: { type: Refs }
+          - column: storage_locations.settings
+            go_type: { type: Settings }
+          - column: repo_links.deploy_key_private
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: repo_links.webhook_secret
+            go_type: github.com/scttymn/gantry/crypt.String
+          - column: project_copies.handed_over
+            go_type: { type: Names }

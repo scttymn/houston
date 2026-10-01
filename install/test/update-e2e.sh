@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # The houston-update helper on a real host (docs/plans/update-from-mission-control.md,
 # row 12): a fresh OrbStack machine (Ubuntu, systemd, Docker) runs
-# mission_control/lib/update-helper.sh the way ServerUpdate starts it, from
-# the runner's base image. The release images are amd64 only and OrbStack's
-# amd64 machines can't run containers, so a stand-in installer takes the
-# release's place: the host's curl is wrapped to hand it out (and to 404 for
-# v0.0.99, a release that doesn't exist). It writes down what it was run
+# mission_control/app/services/serverupdate/update-helper.sh the way the
+# server update starts it, from the runner's base image. The release images
+# are amd64 only and OrbStack's amd64 machines can't run containers, so a
+# stand-in installer takes the release's place: the host's curl is wrapped
+# to hand it out (and to 404 for v0.0.99, a release that doesn't exist). It writes down what it was run
 # with, as whom and where, and checks it can use the host's Docker, as the
 # real installer does.
 #
@@ -33,7 +33,7 @@ helper() {
   vm docker run -d --name houston-update --privileged --pid=host --user 0 \
     -e "HOUSTON_UPDATE_TO=$1" -e "HOUSTON_UPDATE_FROM=$2" -e HOUSTON_REPO=scttymn/houston \
     -e HOUSTON_DIR=/opt/houston -e HOUSTON_RUNNERS=2 -e SECRET_KEY_BASE=leaked \
-    --entrypoint sh "$image" -c "$(cat "$repo/mission_control/lib/update-helper.sh")" >/dev/null || { echo start-failed; return; }
+    --entrypoint sh "$image" -c "$(cat "$repo/mission_control/app/services/serverupdate/update-helper.sh")" >/dev/null || { echo start-failed; return; }
   vm docker wait houston-update
 }
 installed() { vm cat "/root/installed-$1" 2>/dev/null; }

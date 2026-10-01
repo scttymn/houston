@@ -1,0 +1,280 @@
+// Package cloudflaretest is a fake of the parts of Cloudflare's API Houston
+// calls: accounts, zones, their DNS records, and tunnels (made, their
+// tokens, and their configuration).
+package cloudflaretest
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/scttymn/houston/mission_control/app/services/cloudflare"
+)
+
+// Fake is the API, in memory.
+type Fake struct {
+	URL string // its address, for Client.Base
+
+	mu      sync.Mutex
+	zones   []cloudflare.Zone
+	records map[string][]cloudflare.Record // zone id → records
+	nextID  int
+	// Tunnels are each tunnel's last configuration, by "account/tunnel";
+	// details, what GET says of each; accounts, the token's.
+	tunnels  map[string]json.RawMessage
+	details  map[string]any
+	accounts []map[string]string
+	// Fail, when set, is the error every call answers; failCalls, the
+	// error one call answers ("PATCH /zones/z/dns_records/rec1").
+	fail      string
+	failCalls map[string]failure
+	// Calls are what was asked, "GET /zones?name=x" style.
+	calls []string
+	// Loose makes it ignore a list's comment.exact filter, as an API that
+	// didn't know it would.
+	Loose bool
+}
+
+// New is a fake, stopped when the test ends.
+func New(t testing.TB) *Fake {
+	f := &Fake{records: map[string][]cloudflare.Record{}, tunnels: map[string]json.RawMessage{}, details: map[string]any{}}
+	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	t.Cleanup(srv.Close)
+	f.URL = srv.URL
+	return f
+}
+
+// Client is a client of the fake.
+func (f *Fake) Client() cloudflare.Client { return cloudflare.Client{Token: "cf-token", Base: f.URL} }
+
+// Zone adds a zone: status "active", or "pending" before its nameservers
+// are switched.
+func (f *Fake) Zone(id, name, status string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.zones = append(f.zones, cloudflare.Zone{ID: id, Name: name, Status: status})
+}
+
+// Record adds a record to zone.
+func (f *Fake) Record(zone string, r cloudflare.Record) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	r.ID = fmt.Sprintf("rec%d", f.nextID)
+	f.records[zone] = append(f.records[zone], r)
+}
+
+// Records are zone's records.
+func (f *Fake) Records(zone string) []cloudflare.Record {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]cloudflare.Record(nil), f.records[zone]...)
+}
+
+// Tunnel is a tunnel's last configuration, as sent.
+func (f *Fake) Tunnel(account, tunnel string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return string(f.tunnels[account+"/"+tunnel])
+}
+
+// Account adds an account the token sees.
+func (f *Fake) Account(id, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accounts = append(f.accounts, map[string]string{"id": id, "name": name})
+}
+
+// TunnelDetails is what GET says of a tunnel (its name, status,
+// connections...); a tunnel without is 404.
+func (f *Fake) TunnelDetails(account, tunnel string, details any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.details[account+"/"+tunnel] = details
+}
+
+// Configure sets a tunnel's configuration, as a PUT would.
+func (f *Fake) Configure(account, tunnel, config string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tunnels[account+"/"+tunnel] = json.RawMessage(config)
+}
+
+// Fail makes every call answer Cloudflare's error msg ("" for none).
+func (f *Fake) Fail(msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = msg
+}
+
+// FailCall makes one call answer Cloudflare's error msg, 403: call is its
+// method and path, "PATCH /zones/z/dns_records/rec1".
+func (f *Fake) FailCall(call, msg string) { f.FailCallWith(call, 403, msg) }
+
+// FailCallWith makes one call answer Cloudflare's error msg with status.
+func (f *Fake) FailCallWith(call string, status int, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failCalls == nil {
+		f.failCalls = map[string]failure{}
+	}
+	f.failCalls[call] = failure{status, msg}
+}
+
+type failure struct {
+	status int
+	msg    string
+}
+
+// Calls are the calls made so far.
+func (f *Fake) Calls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
+}
+
+func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	call := r.Method + " " + r.URL.Path
+	if r.URL.RawQuery != "" {
+		call += "?" + r.URL.RawQuery
+	}
+	f.calls = append(f.calls, call)
+	if r.Header.Get("Authorization") != "Bearer cf-token" {
+		answer(w, 403, nil, "Invalid API Token")
+		return
+	}
+	if f.fail != "" {
+		answer(w, 400, nil, f.fail)
+		return
+	}
+	if fail, ok := f.failCalls[r.Method+" "+r.URL.Path]; ok {
+		answer(w, fail.status, nil, fail.msg)
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	switch {
+	case r.Method == "GET" && len(parts) == 1 && parts[0] == "zones":
+		found := []cloudflare.Zone{}
+		for _, z := range f.zones {
+			if !r.URL.Query().Has("name") || z.Name == r.URL.Query().Get("name") {
+				found = append(found, z)
+			}
+		}
+		answer(w, 200, found, "")
+	case len(parts) >= 3 && parts[0] == "zones" && parts[2] == "dns_records":
+		f.dnsRecords(w, r, parts[1], parts[3:])
+	case r.Method == "GET" && len(parts) == 1 && parts[0] == "accounts":
+		answer(w, 200, append([]map[string]string{}, f.accounts...), "")
+	case r.Method == "GET" && len(parts) == 3 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		answer(w, 200, f.tunnelList(parts[1], r.URL.Query().Get("name")), "")
+	case r.Method == "POST" && len(parts) == 3 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		var body struct{ Name string }
+		json.NewDecoder(r.Body).Decode(&body)
+		f.nextID++
+		tunnel := map[string]any{"id": fmt.Sprintf("tun%d", f.nextID), "name": body.Name, "status": "inactive", "connections": []any{}}
+		f.details[parts[1]+"/"+tunnel["id"].(string)] = tunnel
+		answer(w, 200, tunnel, "")
+	case r.Method == "GET" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "token":
+		if _, ok := f.details[parts[1]+"/"+parts[3]]; ok {
+			answer(w, 200, "token-for-"+parts[3], "")
+		} else {
+			answer(w, 404, nil, "Tunnel not found")
+		}
+	case r.Method == "GET" && len(parts) == 4 && parts[0] == "accounts" && parts[2] == "cfd_tunnel":
+		if d, ok := f.details[parts[1]+"/"+parts[3]]; ok {
+			answer(w, 200, d, "")
+		} else {
+			answer(w, 404, nil, "Tunnel not found")
+		}
+	case r.Method == "GET" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "configurations":
+		answer(w, 200, f.tunnels[parts[1]+"/"+parts[3]], "")
+	case r.Method == "PUT" && len(parts) == 5 && parts[0] == "accounts" && parts[2] == "cfd_tunnel" && parts[4] == "configurations":
+		var body json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		f.tunnels[parts[1]+"/"+parts[3]] = body
+		answer(w, 200, map[string]any{}, "")
+	default:
+		answer(w, 404, nil, "no route for "+call)
+	}
+}
+
+// tunnelList is account's tunnels, those named name when it's set.
+func (f *Fake) tunnelList(account, name string) []any {
+	found := []any{}
+	for key, d := range f.details {
+		id, ok := strings.CutPrefix(key, account+"/")
+		if !ok {
+			continue
+		}
+		var t struct{ Name string }
+		b, _ := json.Marshal(d)
+		json.Unmarshal(b, &t)
+		if name == "" || t.Name == name {
+			found = append(found, map[string]any{"id": id, "name": t.Name})
+		}
+	}
+	return found
+}
+
+func (f *Fake) dnsRecords(w http.ResponseWriter, r *http.Request, zone string, rest []string) {
+	records := f.records[zone]
+	switch {
+	case r.Method == "GET" && len(rest) == 0:
+		found := []cloudflare.Record{}
+		q := r.URL.Query()
+		for _, rec := range records {
+			if (!q.Has("name") || rec.Name == q.Get("name")) && (f.Loose || !q.Has("comment.exact") || rec.Comment == q.Get("comment.exact")) {
+				found = append(found, rec)
+			}
+		}
+		if q.Has("per_page") { // a page of them
+			per, _ := strconv.Atoi(q.Get("per_page"))
+			n, _ := strconv.Atoi(q.Get("page"))
+			start := min(per*(max(n, 1)-1), len(found))
+			found = found[start:min(start+per, len(found))]
+		}
+		answer(w, 200, found, "")
+	case r.Method == "POST" && len(rest) == 0:
+		var rec cloudflare.Record
+		json.NewDecoder(r.Body).Decode(&rec)
+		f.nextID++
+		rec.ID = fmt.Sprintf("rec%d", f.nextID)
+		f.records[zone] = append(records, rec)
+		answer(w, 200, rec, "")
+	case (r.Method == "PATCH" || r.Method == "DELETE") && len(rest) == 1:
+		for i, rec := range records {
+			if rec.ID != rest[0] {
+				continue
+			}
+			if r.Method == "DELETE" {
+				f.records[zone] = append(records[:i:i], records[i+1:]...)
+				answer(w, 200, map[string]string{"id": rec.ID}, "")
+				return
+			}
+			json.NewDecoder(r.Body).Decode(&records[i])
+			records[i].ID = rec.ID
+			answer(w, 200, records[i], "")
+			return
+		}
+		answer(w, 404, nil, "Record not found")
+	default:
+		answer(w, 404, nil, "no route")
+	}
+}
+
+func answer(w http.ResponseWriter, status int, result any, msg string) {
+	body := map[string]any{"success": msg == "", "result": result, "errors": []any{}}
+	if msg != "" {
+		body["errors"] = []map[string]any{{"code": 1000, "message": msg}}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(body)
+}

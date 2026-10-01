@@ -21,19 +21,16 @@ failures=0
 ok() { printf '  ok    %s\n' "$*"; }
 bad() { printf '  FAIL  %s\n' "$*"; failures=$((failures + 1)); }
 
-# docker: logs its arguments. The saved choice: the Rails Mission Control's
-# "rails runner" exits with $SAVED (0 open, 4 closed), the Go one's "task
-# port" says so; "task setup-code" prints a code only when $SETUP_CODE is
-# set; the move's "docker run" fails when $MOVE_FAILS is set.
+# docker: logs its arguments. The saved choice: "task port" says open
+# ($SAVED=0) or closed (4); "task setup-code" prints a code only when
+# $SETUP_CODE is set.
 mkdir -p /stub /fake && cat > /stub/docker <<'SH' && chmod 755 /stub/docker
 #!/bin/sh
 echo "HOUSTON_BIND=${HOUSTON_BIND:-} docker $*" >> /fake/docker.log
 case "$*" in
-  *"rails runner"*) exit "${SAVED:-1}" ;;
   *"task port"*) case "${SAVED:-1}" in 0) echo open ;; 4) echo closed ;; *) exit 1 ;; esac ;;
   *"task setup-code"*) [ -n "${SETUP_CODE:-}" ] && echo "$SETUP_CODE" && exit 0; exit 1 ;;
   *"task setup") echo "${SETUP_STATE:-done}" ;;
-  "run --rm --user 1000:1000"*) [ -z "${MOVE_FAILS:-}" ] || exit 1 ;;
 esac
 exit 0
 SH
@@ -63,7 +60,7 @@ bound() {
 echo "== a first install: open for setup"
 rm -rf /opt/houston; mkdir -p /opt/houston
 bound "0.0.0.0" "no compose.yml yet"
-grep -q "rails runner" /fake/docker.log && bad "checked setup with no install to ask" || ok "didn't ask a Mission Control that isn't there"
+grep -q "task port" /fake/docker.log && bad "asked with no install to ask" || ok "didn't ask a Mission Control that isn't there"
 [ "$(ports)" = '"${HOUSTON_BIND:-127.0.0.1}:3000:80"' ] && ok "compose.yml: closed unless a run says otherwise" || bad "ports: $(ports)"
 grep -qx '      HOUSTON_RUNNER_IMAGE: houston/runner:local' /opt/houston/compose.yml &&
   ok "Mission Control knows the runner image (Settings › Security recreates it with that)" || bad "environment: $(grep -n 'HOUSTON_' /opt/houston/compose.yml)"
@@ -76,29 +73,6 @@ bound "127.0.0.1" "saved closed" SAVED=4
 bound "127.0.0.1" "can't tell" SAVED=1
 out=$(LIB_CMD='choose_bind && echo "unknown=${bind_unknown:-}"' lib SAVED=1 2>&1)
 printf '%s' "$out" | grep -qx "unknown=1" && ok "can't tell: the report will say so" || bad "can't tell: $out"
-
-echo "== a server running the Rails Mission Control"
-rails_compose() { printf 'services:\n  mission-control:\n    volumes:\n      - mission-control-storage:/rails/storage\n' > /opt/houston/compose.yml; }
-rails_compose
-: > /fake/docker.log
-out=$(LIB_CMD='choose_bind && echo "bind=$bind"' lib SAVED=4 2>&1)
-printf '%s' "$out" | grep -qx "bind=127.0.0.1" && grep -q "mission-control bin/rails runner" /fake/docker.log &&
-  ok "asked the Rails one, as it knows how" || bad "rails: $out $(cat /fake/docker.log)"
-: > /fake/docker.log
-out=$(LIB_CMD='IMAGE=mc:go; move_from_rails && echo moved' lib 2>&1); code=$?
-[ "$code" = 0 ] && grep -q "compose -f /opt/houston/compose.yml stop mission-control" /fake/docker.log &&
-  grep -q "docker run --rm --user 1000:1000 --env-file /opt/houston/.env -v houston_mission-control-storage:/rails/storage:ro -v houston_mission-control-data:/data --entrypoint sh mc:go" /fake/docker.log &&
-  ! grep -q "compose -f /opt/houston/compose.yml start" /fake/docker.log && ok "its data moved, once it's stopped" || bad "move: $code $out $(cat /fake/docker.log)"
-: > /fake/docker.log
-out=$(LIB_CMD='IMAGE=mc:go; move_from_rails; echo "went on"' lib MOVE_FAILS=1 2>&1); code=$?
-[ "$code" = 1 ] && printf '%s' "$out" | grep -qF "the Rails one is running again" && grep -q "compose -f /opt/houston/compose.yml start mission-control" /fake/docker.log &&
-  ! printf '%s' "$out" | grep -q "went on" && ok "a failed move: the Rails one again, and stop" || bad "failed move: $code $out"
-LIB_CMD='choose_bind && write_compose' lib SAVED=0 >/dev/null 2>&1
-: > /fake/docker.log
-out=$(LIB_CMD='move_from_rails && echo nothing' lib 2>&1)
-[ "$out" = nothing ] && [ ! -s /fake/docker.log ] && ok "the Go one: nothing to move" || bad "go: $out $(cat /fake/docker.log)"
-grep -q -- "- mission-control-data:/data" /opt/houston/compose.yml && ! grep -q "rails" /opt/houston/compose.yml &&
-  ok "compose.yml: the Go one, on its own volume" || bad "compose.yml: $(sed -n '/mission-control:/,/cloudflared/p' /opt/houston/compose.yml)"
 
 echo "== HOUSTON_BIND chooses"
 bound "0.0.0.0" "HOUSTON_BIND=0.0.0.0, saved closed" SAVED=4 HOUSTON_BIND=0.0.0.0

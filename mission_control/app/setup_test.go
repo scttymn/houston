@@ -1,0 +1,376 @@
+package app_test
+
+import (
+	"context"
+	"errors"
+	"net/url"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/scttymn/houston/mission_control/app"
+	"github.com/scttymn/houston/mission_control/app/models"
+	"github.com/scttymn/houston/mission_control/app/services/cloudflare/cloudflaretest"
+	"github.com/scttymn/houston/mission_control/app/services/dockercmd/dockercmdtest"
+)
+
+// firstRun is a server fresh from the installer: no admin, a code printed,
+// and a browser on the network.
+func firstRun(t *testing.T) (*app.App, *browser, string) {
+	t.Helper()
+	a := newApp(t)
+	code, err := models.IssueSetupCode(context.Background(), a.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a, &browser{t: t, h: a.Handler(), addr: "192.168.0.20"}, code
+}
+
+func adminForm(code, email, pw, confirmation string) url.Values {
+	return url.Values{"setup[code]": {code}, "setup[email_address]": {email}, "setup[password]": {pw}, "setup[password_confirmation]": {confirmation}}
+}
+
+// The code: 8 of the letters and digits that can't be misread, shown in
+// two halves; a new one replaces the last; none once the admin exists.
+func TestSetupCode(t *testing.T) {
+	a, _, first := firstRun(t)
+	if !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$`).MatchString(first) {
+		t.Errorf("code %q", first)
+	}
+	second, err := models.IssueSetupCode(context.Background(), a.DB)
+	if err != nil || second == first || count(t, a, "setup_codes") != 1 {
+		t.Fatalf("a second code = %q %v, %d kept", second, err, count(t, a, "setup_codes"))
+	}
+	var digest string
+	a.DB.Read.QueryRow(`SELECT code_digest FROM setup_codes`).Scan(&digest)
+	if strings.Contains(digest, strings.ReplaceAll(second, "-", "")) {
+		t.Error("the code kept as it is")
+	}
+	_, err = models.Admin{Code: first, EmailAddress: "one@example.com", Password: password, PasswordConfirmation: password}.Save(context.Background(), a.DB, time.Now())
+	if err == nil {
+		t.Error("the replaced code still works")
+	}
+	must(t, a, `INSERT INTO users (email_address, password_digest) VALUES ('one@example.com', 'x')`)
+	if _, err := models.IssueSetupCode(context.Background(), a.DB); !errors.Is(err, models.ErrSetUp) {
+		t.Errorf("a code once set up: %v", err)
+	}
+}
+
+// Until the admin exists every page is setup's, sign-in too; the admin
+// is made with the code, signed in, and taken to the next step.
+func TestSetupAdmin(t *testing.T) {
+	a, b, code := firstRun(t)
+	for _, path := range []string{"/", "/sign-in", "/settings", "/projects/shop"} {
+		if w := b.do("GET", path, nil); w.Code != 302 || location(w) != "/setup" {
+			t.Errorf("GET %s before setup = %d %q", path, w.Code, location(w))
+		}
+	}
+	page := b.do("GET", "/setup", nil).Body.String()
+	contains(t, page, "<title>First-run setup · Mission Control</title>", `<header class="topbar topbar--setup">`,
+		`<span class="mono topbar__label">FIRST-RUN SETUP</span>`,
+		`<li class="steps__step is-current" aria-current="step"><span class="mono steps__number">01</span> <span class="mono steps__name">ADMIN ACCOUNT</span></li>`,
+		`<li class="steps__line" aria-hidden="true"></li> <li class="steps__step"><span class="mono steps__number">02</span> <span class="mono steps__name">CLOUDFLARE</span></li>`,
+		`<span class="mono topbar__meta">mc.local</span>`, `<form class="setup__form" action="/setup" accept-charset="UTF-8" method="post">`,
+		`name="setup[code]" id="setup_code"`, `aria-invalid="false"`,
+		"Houston is running.\nFinish setup at  http://mc.local\nSetup code       <span class=\"terminal__code\">XXXX-XXXX</span>")
+	if strings.Contains(page, `class="topbar"`) || strings.Contains(page, "Sign out") {
+		t.Error("the top bar during setup")
+	}
+
+	// Wrong: every field says why, and what was typed stays but passwords.
+	w := b.do("POST", "/setup", adminForm("AAAA-AAAA", "not an email", "short", "other"))
+	if w.Code != 422 {
+		t.Fatalf("a wrong form = %d", w.Code)
+	}
+	contains(t, w.Body.String(), `<span class="field__error">Setup code doesn&#39;t match the one the installer printed.</span>`,
+		`<span class="field__error">Email doesn&#39;t look like an email address.</span>`,
+		`<span class="field__error">Password needs at least 12 characters and doesn&#39;t match.</span>`,
+		`aria-invalid="true" type="text" value="AAAA-AAAA" name="setup[code]"`, `value="not an email" name="setup[email_address]"`)
+	if strings.Contains(w.Body.String(), `value="short"`) || count(t, a, "users") != 0 {
+		t.Error("a password shown again, or an admin made")
+	}
+	for pw, short := range map[string]bool{"elevenchars": true, "twelve chars": false} {
+		if page := b.do("POST", "/setup", adminForm("AAAA-AAAA", "one@example.com", pw, pw)).Body.String(); strings.Contains(page, "needs at least 12") != short {
+			t.Errorf("%d characters: short = %v", len(pw), !short)
+		}
+	}
+	contains(t, b.do("POST", "/setup", adminForm(code, "", password, password)).Body.String(),
+		`<span class="field__error">Email can&#39;t be blank and doesn&#39;t look like an email address.</span>`)
+
+	// Right: the code's case and dash don't matter; it's used up.
+	w = b.do("POST", "/setup", adminForm(strings.ToLower(strings.ReplaceAll(code, "-", "")), "One@Example.com", password, password))
+	if w.Code != 302 || location(w) != "/" {
+		t.Fatalf("setup = %d %q\n%s", w.Code, location(w), w.Body.String())
+	}
+	if count(t, a, "setup_codes") != 0 || count(t, a, "users") != 1 {
+		t.Errorf("%d codes, %d users", count(t, a, "setup_codes"), count(t, a, "users"))
+	}
+	if w := b.do("GET", "/", nil); location(w) != "/setup/cloudflare" {
+		t.Errorf("after the admin = %d %q", w.Code, location(w))
+	}
+	if w := b.do("GET", "/setup", nil); location(w) != "/" {
+		t.Errorf("setup again, signed in = %d %q", w.Code, location(w))
+	}
+
+	// Closed: signed out, it's sign-in, which is open now.
+	b.do("POST", "/session", url.Values{"_method": {"delete"}})
+	for _, method := range []string{"GET", "POST"} {
+		if w := b.do(method, "/setup", adminForm(code, "two@example.com", password, password)); location(w) != "/sign-in" {
+			t.Errorf("%s /setup set up = %d %q", method, w.Code, location(w))
+		}
+	}
+	if w := b.do("GET", "/sign-in", nil); w.Code != 200 {
+		t.Errorf("sign-in = %d", w.Code)
+	}
+	if w := b.signIn("one@example.com", password); location(w) != "/" {
+		t.Errorf("signing in = %q", location(w))
+	}
+	if count(t, a, "users") != 1 {
+		t.Error("a second admin")
+	}
+}
+
+// Two setups at once with the same code: one admin.
+func TestSetupOnce(t *testing.T) {
+	a, _, code := firstRun(t)
+	var wg sync.WaitGroup
+	errs := make([]error, 4)
+	for i := range errs {
+		wg.Go(func() {
+			_, errs[i] = models.Admin{Code: code, EmailAddress: "admin" + string(rune('a'+i)) + "@example.com", Password: password,
+				PasswordConfirmation: password}.Save(context.Background(), a.DB, time.Now())
+		})
+	}
+	wg.Wait()
+	if n := count(t, a, "users"); n != 1 {
+		t.Fatalf("%d admins (%v)", n, errs)
+	}
+}
+
+// Ten tries in 3 minutes an address.
+func TestSetupLimit(t *testing.T) {
+	_, b, _ := firstRun(t)
+	for range 10 {
+		if w := b.do("POST", "/setup", adminForm("AAAA-AAAA", "one@example.com", password, password)); w.Code != 422 {
+			t.Fatalf("a try = %d", w.Code)
+		}
+	}
+	if w := b.do("POST", "/setup", adminForm("AAAA-AAAA", "one@example.com", password, password)); w.Code != 429 || w.Body.Len() != 0 {
+		t.Errorf("the 11th = %d %q", w.Code, w.Body.String())
+	}
+	b.addr = "192.168.0.21"
+	if w := b.do("POST", "/setup", adminForm("AAAA-AAAA", "one@example.com", password, password)); w.Code != 422 {
+		t.Errorf("another address = %d", w.Code)
+	}
+}
+
+// Signed in, each unfinished step in turn; then the board.
+func TestSetupNextStep(t *testing.T) {
+	a, b := signedIn(t)
+	must(t, a, `INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
+	for _, path := range []string{"/", "/settings", "/link"} {
+		if w := b.do("GET", path, nil); location(w) != "/setup/cloudflare" {
+			t.Errorf("GET %s = %d %q", path, w.Code, location(w))
+		}
+	}
+	if w := b.do("POST", "/projects/shop/deploys", nil); location(w) != "/setup/cloudflare" {
+		t.Errorf("a form = %d %q", w.Code, location(w))
+	}
+	must(t, a, `UPDATE installations SET cloudflare_connected_at = CURRENT_TIMESTAMP`)
+	if w := b.do("GET", "/", nil); location(w) != "/setup/storage" {
+		t.Errorf("connected = %d %q", w.Code, location(w))
+	}
+	must(t, a, `INSERT INTO storage_locations (name, kind, is_default) VALUES ('nas', 'nfs', TRUE)`)
+	if w := b.do("GET", "/", nil); location(w) != "/setup/storage" {
+		t.Errorf("its password not confirmed = %d %q", w.Code, location(w))
+	}
+	must(t, a, `UPDATE storage_locations SET acknowledged_at = CURRENT_TIMESTAMP`)
+	reachable(t, a)
+	if w := b.do("GET", "/", nil); w.Code != 200 {
+		t.Errorf("set up = %d %q", w.Code, location(w))
+	}
+	// Signing in and out is never a step's.
+	if w := b.do("GET", "/sign-in", nil); w.Code != 200 {
+		t.Errorf("sign-in = %d", w.Code)
+	}
+}
+
+// Step 2: the base domain and the token; its checks when it fails, and on
+// to storage when it passes. Closed once connected.
+func TestSetupCloudflare(t *testing.T) {
+	a, b := signedIn(t)
+	fake := cloudflaretest.New(t)
+	fake.Account("acct", "Seven Moons")
+	fake.Zone("zbase", "svnmns.com", "active")
+	a.Cloudflare = fake.URL
+	b.h = a.Handler()
+	page := b.do("GET", "/setup/cloudflare", nil).Body.String()
+	contains(t, page, "<title>Connect Cloudflare · Mission Control</title>",
+		`<li class="steps__step is-done"><span class="mono steps__number">GO</span> <span class="mono steps__name">ADMIN ACCOUNT</span></li>`,
+		`<li class="steps__step is-current" aria-current="step"><span class="mono steps__number">02</span>`,
+		`<form class="setup__form" action="/setup/cloudflare" accept-charset="UTF-8" method="post">`, `name="cloudflare[base_domain]"`,
+		`<span class="mono">houston-&lt;base&gt;</span>`, `<span class="mono">*.example.com</span>`)
+
+	w := b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"svnmns.com"}, "cloudflare[api_token]": {"nope"}})
+	if w.Code != 422 {
+		t.Fatalf("a wrong token = %d", w.Code)
+	}
+	contains(t, w.Body.String(), `<span class="mono eyebrow">TOKEN CHECK</span>`,
+		`<p class="check"><span class="mono check__state check__state--nogo">NO-GO</span> <span>The token isn&#39;t valid (Cloudflare: Invalid API Token).`,
+		`value="svnmns.com" name="cloudflare[base_domain]"`, `<span class="mono">houston-svnmns</span>`, `<span class="mono">admin.svnmns.com</span>`)
+	w = b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"https://svnmns.com"}, "cloudflare[api_token]": {"cf-token"}})
+	contains(t, w.Body.String(), `<span class="field__error">Base domain must be a domain like example.com, with no scheme, path or wildcard.</span>`)
+
+	w = b.do("POST", "/setup/cloudflare", url.Values{"cloudflare[base_domain]": {"svnmns.com"}, "cloudflare[api_token]": {"cf-token"}})
+	if w.Code != 302 || location(w) != "/" {
+		t.Fatalf("connect = %d %q\n%s", w.Code, location(w), w.Body.String())
+	}
+	if w := b.do("GET", "/", nil); location(w) != "/setup/storage" {
+		t.Errorf("after = %q", location(w))
+	}
+	for _, method := range []string{"GET", "POST"} {
+		if w := b.do(method, "/setup/cloudflare", nil); w.Code != 302 || location(w) != "/" {
+			t.Errorf("%s once connected = %d %q", method, w.Code, location(w))
+		}
+	}
+	b.jar = nil
+	if w := b.do("GET", "/setup/cloudflare", nil); location(w) != "/sign-in" {
+		t.Errorf("signed out = %q", location(w))
+	}
+}
+
+// Step 3: Cloudflare first; the storage tested and saved, its password
+// shown until it's saved, then the default and setup done. Never kept by
+// the browser; closed once done.
+func TestSetupStorage(t *testing.T) {
+	a, b := signedIn(t)
+	must(t, a, `INSERT INTO installations (id, base_domain) VALUES (1, 'svnmns.com')`)
+	if w := b.do("GET", "/setup/storage", nil); location(w) != "/setup/cloudflare" {
+		t.Errorf("before Cloudflare = %d %q", w.Code, location(w))
+	}
+	must(t, a, `UPDATE installations SET cloudflare_connected_at = CURRENT_TIMESTAMP`)
+	// Settings' storage, made and not confirmed, is no default.
+	must(t, a, `INSERT INTO storage_locations (name, kind, settings, is_default, acknowledged_at) VALUES ('old', 'local', '{"path":"/old"}', TRUE, NULL)`)
+	w := b.do("GET", "/setup/storage", nil)
+	contains(t, w.Body.String(), "<title>Default backup storage · Mission Control</title>", `<span class="mono eyebrow eyebrow--signal">STEP 03 OF 03</span>`,
+		`<form class="storage-form" action="/setup/storage" accept-charset="UTF-8" method="post">`, `<input type="radio" value="nfs" checked name="storage[kind]"`)
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("kept by the browser")
+	}
+	if w := b.do("POST", "/setup/storage/finish", url.Values{"saved": {"1"}}); w.Code != 404 {
+		t.Errorf("finish before storage = %d", w.Code)
+	}
+
+	fake := a.DockerCLI.(*dockercmdtest.Fake)
+	fake.On(dockercmdtest.Fail(1, "Fatal: create repository at /repo failed: permission denied"), "run")
+	w = b.do("POST", "/setup/storage", url.Values{"storage[kind]": {"local"}, "storage[name]": {"disk"}, "storage[local_path]": {"/srv/backups"}})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), "restic couldn&#39;t write there: Fatal: create repository") {
+		t.Fatalf("restic failing = %d\n%s", w.Code, w.Body.String())
+	}
+	a.DockerCLI = &dockercmdtest.Fake{}
+	b.h = a.Handler()
+	w = b.do("POST", "/setup/storage", url.Values{"storage[kind]": {"local"}, "storage[name]": {"disk"}, "storage[local_path]": {"/srv/backups"}})
+	if w.Code != 302 || location(w) != "/setup/storage" {
+		t.Fatalf("save = %d %q\n%s", w.Code, location(w), w.Body.String())
+	}
+	page := b.do("GET", "/setup/storage", nil).Body.String()
+	contains(t, page, `<dt class="mono">NAME</dt><dd class="mono">disk</dd><dt class="mono">TYPE</dt><dd class="mono">local</dd><dt class="mono">WHERE</dt><dd class="mono">/srv/backups</dd>`,
+		`<form class="finish" action="/setup/storage/finish" method="post">`, `href="/setup/storage/password.txt"`, `value="Finish setup"`)
+	if strings.Contains(page, `class="storage-form"`) {
+		t.Error("the form with the location made")
+	}
+	w = b.do("GET", "/setup/storage/password.txt", nil)
+	if !strings.Contains(page, w.Body.String()[:40]) || len(w.Body.String()) != 41 || w.Header().Get("Content-Disposition") != `attachment; filename="houston-disk-restic-password.txt"` ||
+		w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("download %q %v", w.Body.String(), w.Header())
+	}
+
+	w = b.do("POST", "/setup/storage/finish", url.Values{})
+	if w.Code != 422 || !strings.Contains(w.Body.String(), "Tick the box once the password is saved somewhere off this server.") {
+		t.Errorf("unticked = %d", w.Code)
+	}
+	if w := b.do("POST", "/setup/storage/finish", url.Values{"saved": {"1"}}); w.Code != 302 || location(w) != "/" {
+		t.Fatalf("finish = %d %q", w.Code, location(w))
+	}
+	var defaults string
+	a.DB.Read.QueryRow(`SELECT group_concat(name || ':' || is_default || ':' || (acknowledged_at IS NOT NULL)) FROM storage_locations ORDER BY id`).Scan(&defaults)
+	if defaults != "old:0:0,disk:1:1" {
+		t.Errorf("locations %q", defaults)
+	}
+	reachable(t, a)
+	if w := b.do("GET", "/", nil); w.Code != 200 {
+		t.Errorf("the board = %d %q", w.Code, location(w))
+	}
+	for _, path := range []string{"/setup/storage", "/setup/storage/password.txt"} {
+		if w := b.do("GET", path, nil); w.Code != 302 || location(w) != "/" {
+			t.Errorf("%s once done = %d %q", path, w.Code, location(w))
+		}
+	}
+}
+
+// The installer's tasks: a setup code, and port 3000's saved state.
+func TestTasks(t *testing.T) {
+	a := newApp(t)
+	run := func(name string) string {
+		t.Helper()
+		for _, task := range app.Tasks {
+			if task.Name == name {
+				var out strings.Builder
+				if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, nil); err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				return out.String()
+			}
+		}
+		t.Fatalf("no task %s", name)
+		return ""
+	}
+	if got := run("port"); got != "open\n" {
+		t.Errorf("before setup: %q", got)
+	}
+	if got := run("setup"); got != "admin\n" {
+		t.Errorf("setup before the admin: %q", got)
+	}
+	if got := run("setup-code"); !regexp.MustCompile(`^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}\n$`).MatchString(got) {
+		t.Errorf("code %q", got)
+	}
+	must(t, a, `INSERT INTO users (email_address, password_digest) VALUES ('one@example.com', 'x')`)
+	if got := run("setup"); got != "cloudflare\n" {
+		t.Errorf("setup after the admin: %q", got)
+	}
+	must(t, a, `INSERT INTO installations (id, port_open) VALUES (1, FALSE)`)
+	if got := run("port"); got != "closed\n" {
+		t.Errorf("closed: %q", got)
+	}
+	must(t, a, `UPDATE installations SET port_open = TRUE, cloudflare_connected_at = CURRENT_TIMESTAMP`)
+	if got := run("port"); got != "open\n" {
+		t.Errorf("open: %q", got)
+	}
+	if got := run("setup"); got != "storage\n" {
+		t.Errorf("setup once connected: %q", got)
+	}
+	must(t, a, `INSERT INTO storage_locations (name, kind, is_default, acknowledged_at) VALUES ('nas', 'nfs', TRUE, CURRENT_TIMESTAMP)`)
+	if got := run("setup"); got != "done\n" {
+		t.Errorf("setup done: %q", got)
+	}
+	var task app.Task
+	for _, tk := range app.Tasks {
+		if tk.Name == "token" {
+			task = tk
+		}
+	}
+	var out strings.Builder
+	if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, []string{"laptop"}); err != nil || !strings.HasPrefix(out.String(), "hou_") {
+		t.Fatalf("token: %q %v", out.String(), err)
+	}
+	var name string
+	a.DB.Read.QueryRow(`SELECT name FROM api_tokens WHERE token_digest = ?`, models.Digest(strings.TrimSpace(out.String()))).Scan(&name)
+	if name != "laptop" {
+		t.Errorf("kept as %q", name)
+	}
+	if err := task.Run(context.Background(), app.TaskEnv{DB: a.DB, Out: &out}, []string{"laptop"}); err == nil {
+		t.Error("a name taken")
+	}
+}

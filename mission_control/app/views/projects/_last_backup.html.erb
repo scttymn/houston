@@ -1,7 +1,0 @@
-<%# A project's last good backup (the flight board's row and phone card). %>
-<% if backup %>
-  <span><%= l(backup.finished_at, format: :short) %></span>
-  <small><%= backup.kind %><%= " · #{number_to_human_size(backup.bytes)}" if backup.bytes %></small>
-<% else %>
-  <span class="muted">—</span>
-<% end %>

@@ -29,13 +29,13 @@ jobs:
         with:
           persist-credentials: false
       # The same commands as locally: the Go toolchain in compose.yml's cli
-      # service. Mission Control (mission-control-go) is in the module, so
+      # service. Mission Control (mission_control) is in the module, so
       # go test ./... is its tests too.
       - name: Go tests
         run: docker compose --progress quiet run --rm cli go test ./...
       - name: gofmt
         run: |
-          unformatted=$(docker compose --progress quiet run --rm cli gofmt -l internal cmd mission-control-go/app mission-control-go/cmd mission-control-go/config mission-control-go/test)
+          unformatted=$(docker compose --progress quiet run --rm cli gofmt -l internal cmd mission_control/app mission_control/cmd mission_control/config mission_control/test)
           [ -z "$unformatted" ] || { echo "not gofmt'd: $unformatted"; exit 1; }
       - name: Installer
         run: install/test/install-version.sh && install/test/install-bind.sh && install/test/install-ssh-key.sh
@@ -60,14 +60,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # amd64 only for now (the plan's "arm64 images later").
-      # Built from the module's root, as mission-control-go's Dockerfile
+      # Built from the module's root, as mission_control's Dockerfile
       # expects (its .dockerignore beside it).
       - name: Mission Control
         id: mission_control
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: mission-control-go/Dockerfile
+          file: mission_control/Dockerfile
           target: production
           platforms: linux/amd64
           build-args: |

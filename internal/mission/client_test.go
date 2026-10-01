@@ -16,7 +16,7 @@ import (
 
 const token = "runner-token-for-tests-0123456789abcdef"
 
-// server answers like Mission Control's /api (mission_control/app/controllers/api).
+// server answers like Mission Control's /api (mission_control/app/api).
 func server(t *testing.T, handle func(w http.ResponseWriter, r *http.Request, body map[string]any)) *Client {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

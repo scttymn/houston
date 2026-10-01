@@ -1,3 +1,0 @@
-<%# What's serving, and what's next or what rule deploys (the flight board's row and phone card). %>
-<span class="mono"><%= running&.short_sha || "—" %></span>
-<small class="<%= "mono flight__next" if project.status == :in_flight %>"><%= project.status == :in_flight ? "→ #{latest.short_sha}" : (project.status == :no_go ? "still serving" : project.deploy_rule_words.downcase.delete_prefix("every commit to ")) %></small>

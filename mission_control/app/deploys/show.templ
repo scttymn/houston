@@ -1,0 +1,143 @@
+// Package deploys is a deploy's page, and its live updates.
+package deploys
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/scttymn/houston/mission_control/app/models"
+	"github.com/scttymn/houston/mission_control/app/projects"
+	"github.com/scttymn/houston/mission_control/app/shared/layout"
+)
+
+// Page is what a deploy's page shows.
+type Page struct {
+	Layout layout.Page
+	Live   templ.Component
+	Status Status
+	// Alert is what a form here was refused with (a copy's cancel).
+	Alert string
+}
+
+// Status is the deploy's head and what's serving meanwhile.
+type Status struct {
+	D       models.Deploy
+	P       models.Project
+	Base    string
+	Running *models.Deploy
+	Copy    *models.ProjectCopy
+	View    view
+}
+
+templ ShowPage(pg Page) {
+	{{ d, p := pg.Status.D, pg.Status.P }}
+	@layout.Layout(pg.Layout) {
+		@pg.Live
+		<main class="page deploy-page">
+			<nav class="mono crumbs"><a href="/">Projects</a> <span>/</span> <a href={ templ.SafeURL("/projects/" + p.Name) }>{ p.Name }</a> <span>/</span> <span class="crumbs__here">{ Word(d) + " #" + strconv.FormatInt(d.Number, 10) }</span></nav>
+			if pg.Alert != "" {
+				<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ pg.Alert }</span></div>
+			}
+			@StatusPart(pg.Status)
+			<div class="deploy-body">
+				@Steps(d)
+				<section class="log-panel" data-controller="follow clipboard">
+					<div class="log-panel__head">
+						if d.Status == "queued" || d.Status == "in_flight" {
+							<span class="mono log-panel__live">LIVE</span>
+						}
+						<span class="mono log-panel__what">{ p.Name + " · " + d.ShortSha() }</span>
+						<span class="log-panel__spacer"></span>
+						<label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"/> Follow</label>
+						<button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+					</div>
+					<pre id="deploy_log" class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled">{ d.Log }</pre>
+				</section>
+			</div>
+		</main>
+	}
+}
+
+// StatusPart is the deploy's head (title, state, clock) and what's serving
+// meanwhile. Replaced live.
+templ StatusPart(s Status) {
+	{{ d, p := s.D, s.P }}
+	<div id="deploy_status" class="deploy-status">
+		<div class="deploy-head">
+			<div class="deploy-head__main">
+				<div class="deploy-head__title">
+					<h1 class="disp">{ Word(d) + " #" + strconv.FormatInt(d.Number, 10) }</h1>
+					@projects.StatePill(d.Status)
+				</div>
+				<p class="deploy-head__meta">
+					<span class="mono">{ d.ShortSha() }</span>{ " · " + projects.RefName(d.Ref) }
+					if d.Runner != "" {
+						{ "· runner " }<span class="mono">{ d.Runner }</span>
+					}
+				</p>
+			</div>
+			<div class="deploy-head__clock">
+				if d.Status == "queued" || d.Status == "in_flight" {
+					<span class="mono eyebrow">{ "MISSION ELAPSED · STARTED " + s.View.started }</span>
+					<span class="disp deploy-head__elapsed">{ projects.MissionElapsed(d.Duration(s.View.now)) }</span>
+				} else {
+					<span class="mono eyebrow">{ "TOOK · STARTED " + s.View.started }</span>
+					<span class="disp deploy-head__elapsed">{ projects.DurationWords(d.Duration(s.View.now)) }</span>
+				}
+			</div>
+		</div>
+		if c := s.Copy; c != nil {
+			{{ active := (c.Status == "queued" || c.Status == "running") && !c.HandedOverAt.Valid }}
+			<div class="notice notice--hold">
+				<span class="mono">COPY</span>
+				<span class="notice__text">
+					{ c.FromName + " → " + c.ToName + "." }
+					if active {
+						{ c.FromName + " keeps serving until " + c.ToName + " passes its health check and takes over the hosts they share." }
+					}
+					if len(c.HandedOver.V) > 0 {
+						{ "Handed over: " }<span class="mono">{ strings.Join(c.HandedOver.V, ", ") }</span>.
+					}
+				</span>
+				if active {
+					<form class="button_to" method="post" action={ templ.SafeURL("/projects/" + p.Name + "/copy/cancel") }><button class="button button--small" data-turbo-confirm={ "Cancel the copy? " + c.ToName + " is removed; " + c.FromName + " keeps serving." } type="submit">Cancel the copy</button></form>
+				}
+			</div>
+		}
+		if d.Status == "queued" || d.Status == "in_flight" {
+			<div class="serving">
+				<span class="serving__dot"></span>
+				<span>
+					if s.Running != nil {
+						<span class="mono">{ s.Running.ShortSha() }</span>{ " is still serving " + p.Host(s.Base) + "." }
+					} else {
+						{ "Nothing is serving " + p.Host(s.Base) + " yet." }
+					}
+					if d.Status == "queued" {
+						Waiting for a runner.
+					} else {
+						Traffic switches only after <span class="mono">{ p.Health }</span> returns 200 on the new version.
+					}
+				</span>
+			</div>
+		} else if d.Status == "no_go" {
+			<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ d.Error }</span></div>
+		}
+	</div>
+}
+
+var stepWords = map[string]string{"done": "DONE", "current": "RUNNING", "failed": "FAILED", "pending": "—", "skipped": "SKIPPED"}
+
+// Steps are the deploy's steps and where each stands. Replaced live.
+templ Steps(d models.Deploy) {
+	<ol id="deploy_steps" class="panel deploy-steps">
+		for i, s := range d.StepStates() {
+			<li data-step={ s.Name } data-state={ s.State }>
+				<span class="mono">{ fmt.Sprintf("%02d", i) }</span>
+				<span>{ s.Name }</span>
+				<span class="mono step__state">{ stepWords[s.State] }</span>
+			</li>
+		}
+	</ol>
+}

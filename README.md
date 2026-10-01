@@ -1,4 +1,4 @@
-<p align="center"><img src="mission_control/app/assets/images/patch.svg" width="280" alt="Houston Mission Control"></p>
+<p align="center"><img src="mission_control/assets/images/patch.svg" width="280" alt="Houston Mission Control"></p>
 
 # Houston
 
@@ -309,18 +309,18 @@ The page is served by Mission Control, routed at the tunnel. It stays up whateve
 
 ## Working on Houston
 
-The Go CLI is in `cmd/` and `internal/`; Mission Control (Rails 8, SQLite) is in `mission_control/`. Everything builds and runs in Docker:
+The Go CLI is in `cmd/` and `internal/`; Mission Control (Go on [gantry](https://github.com/scttymn/gantry), SQLite) is in `mission_control/`. Everything builds and runs in Docker:
 
 ```sh
 bin/go test ./...                    # Go tests in the toolchain container
 bin/test-integration                 # the same, plus the ones that drive real Docker
-houston -f mission_control/compose.yml test    # Mission Control's suite, run by Houston itself
+houston -f mission_control/compose.yml test    # Mission Control's tests, run by Houston itself
 ```
 
 **Releasing:** push a tag like `vX.Y.Z`. `.github/workflows/release.yml` runs the tests (Go, Mission Control, the installer), then publishes both images at that tag and a GitHub Release with the CLI binaries, `install.sh` and `SHA256SUMS`. Nothing is published unless the tests pass.
 
-`install/test/install-version.sh` checks installing a release, against a fake GitHub, in a container. The other real runs are in `install/test/`. Each creates a throwaway OrbStack machine and installs Houston on it:
-- `orbstack.sh ubuntu:noble` runs the whole install, including the real Cloudflare tunnel when `mission_control/.houston/cloudflare-check.env` exists.
+`install/test/install-version.sh` checks installing a release, against a fake GitHub, in a container. The other real runs are in `install/test/`. Each makes a throwaway machine and installs Houston on it:
+- `install-e2e.sh ubuntu:24.04` runs the whole install, including the real Cloudflare tunnel when `.houston/cloudflare-check.env` exists.
 - `deploy-e2e.sh`, `backups-e2e.sh`, `restore-e2e.sh`, `init-e2e.sh` and others cover the rest.
 
 ## License

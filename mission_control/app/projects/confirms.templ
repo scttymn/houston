@@ -1,0 +1,443 @@
+package projects
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/scttymn/houston/mission_control/app/models"
+	"github.com/scttymn/houston/mission_control/app/services/backup"
+	"github.com/scttymn/houston/mission_control/app/shared/layout"
+)
+
+// Snapshots is the Snapshots panel's list.
+type Snapshots struct {
+	P          models.Project
+	Kind       string // auto, deploy, settings
+	Location   *models.StorageLocation
+	List       []backup.Snapshot
+	Counts     map[string]int
+	Error      string
+	Schedule   string // the schedule in words
+	Default    *models.StorageLocation
+	Others     []models.StorageLocation // set up, besides the default
+	Chosen     string                   // the chosen location's name ("": the default)
+	SQLite     []string                 // SQLite paths the last backup found
+	Zone       *time.Location
+}
+
+templ SnapshotsFrame(s Snapshots) {
+	{{ p := s.P }}
+	<turbo-frame id="snapshots-list">
+		if s.Location == nil {
+			<p class="panel__row panel__row--muted">No backup storage yet. Set a default in Settings › Storage.</p>
+		} else {
+			<nav class="tabs" role="tablist" aria-label="Snapshots">
+				for _, tab := range [][2]string{{"auto", "Scheduled"}, {"deploy", "Pre-deploy"}, {"settings", "Settings"}} {
+					<a role="tab" aria-selected={ strconv.FormatBool(s.Kind == tab[0]) } class="tabs__tab" href={ templ.SafeURL(snapshotsTab(p, tab[0])) }><span class="tabs__label" data-label={ tab[1] }>{ tab[1] }</span></a>
+				}
+			</nav>
+			if s.Kind == "settings" {
+				@snapshotSettings(s)
+			} else if s.Error != "" {
+				<p class="panel__row"><span class="field__error">{ "Can't read snapshots: " + s.Error }</span></p>
+			} else {
+				<p class="snapshots__rule">
+					if s.Kind == "auto" {
+						{ fmt.Sprintf("%s, plus any you create. One per day is kept for %d days · kept %d / %d.", s.Schedule, p.KeepAuto, s.Counts["auto"], p.KeepAuto) }
+					} else {
+						{ fmt.Sprintf("Taken right before every deploy and restore, of the version that was running. The last %d are kept · kept %d / %d.", p.KeepDeploy, s.Counts["deploy"], p.KeepDeploy) }
+					}
+				</p>
+				if len(s.List) == 0 {
+					<p class="panel__row panel__row--muted">None yet.</p>
+				}
+				for _, snap := range s.List {
+					<div class="snapshots__row" data-snapshot={ snap.ShortID }>
+						<span class="snapshots__when">
+							<span>{ ShortTime(snap.Time.In(s.Zone)) }</span>
+							<small>{ snapshotWhy(snap) }</small>
+						</span>
+						<span class="mono">{ snap.Sha[:min(7, len(snap.Sha))] }</span>
+						<span class="mono muted">{ snapshotSize(snap) }</span>
+						<span class="snapshots__actions">
+							// No download attribute: a refusal redirects, and the browser would save that page as the file.
+							<a data-turbo="false" title={ downloadTitle(snap) } href={ templ.SafeURL("/projects/" + p.Name + "/snapshots/" + snap.ShortID + "/download?location=" + s.Location.Name) }>Download</a>
+							<a data-turbo-frame="_top" href={ templ.SafeURL("/projects/" + p.Name + "/restores/new?snapshot=" + snap.ShortID + "&location=" + s.Location.Name) }>Restore</a>
+						</span>
+					</div>
+				}
+				<p class="panel__row panel__row--muted">Each snapshot holds code and data together. Download gives its files (data/) and databases (out/, with houston.json saying which is which).</p>
+			}
+		}
+	</turbo-frame>
+}
+
+// SnapshotsPage is the list visited on its own, outside the project page's
+// frame: in the layout.
+templ SnapshotsPage(page layout.Page, s Snapshots) {
+	@layout.Layout(page) {
+		@SnapshotsFrame(s)
+	}
+}
+
+// snapshotSettings is Snapshots' Settings tab: the backup plan.
+templ snapshotSettings(s Snapshots) {
+	{{ p := s.P }}
+	<div class="snapshot-settings">
+		<p class="snapshots__rule">Edit in compose.yml: the schedule, what's kept and the volumes come from its x-houston block. Where the snapshots go is chosen here.</p>
+		<dl class="plan">
+			<dt class="mono">SCHEDULE</dt><dd>{ s.Schedule + ", plus any you create" }</dd>
+			<dt class="mono">STORAGE</dt>
+			<dd>
+				<form class="inline-form" data-turbo-frame="_top" action={ templ.SafeURL("/projects/" + p.Name + "/backup_target") } method="post">
+					<input type="hidden" name="_method" value="patch" autocomplete="off"/>
+					<select aria-label="Backup storage" name="location" id="location">
+						<option value="" selected?={ s.Chosen == "" }>{ defaultName(s.Default) + " (default)" }</option>
+						for _, l := range s.Others {
+							<option value={ l.Name } selected?={ s.Chosen == l.Name }>{ l.Name }</option>
+						}
+					</select>
+					<input type="submit" name="commit" value="Save" class="button button--small"/>
+				</form>
+				<small class="muted">Backing up to <span class="mono">{ s.Location.Name }</span>. Earlier snapshots stay where they were written.</small>
+			</dd>
+			<dt class="mono">KEEP</dt><dd>{ fmt.Sprintf("%d scheduled · %d pre-deploy", p.KeepAuto, p.KeepDeploy) }</dd>
+			<dt class="mono">VOLUMES</dt>
+			<dd class="plan__list">
+				if len(p.Volumes.V) == 0 {
+					none
+				}
+				for _, v := range p.Volumes.V {
+					<span><span class="mono">{ v.Name }</span>{ " → " + v.Path }</span>
+				}
+			</dd>
+			<dt class="mono">DATABASES</dt>
+			<dd class="plan__list">
+				for _, d := range p.Databases.V {
+					<span><span class="mono">{ d.Service }</span> · pg_dump</span>
+				}
+				for _, path := range s.SQLite {
+					<span><span class="mono">{ path }</span> · .backup</span>
+				}
+				if len(p.Databases.V) == 0 && len(s.SQLite) == 0 {
+					<span>none found yet</span>
+				}
+			</dd>
+			if missing := notBackedUp(p); len(missing) > 0 {
+				<dt class="mono">NOT BACKED UP</dt><dd class="muted"><span class="mono">{ strings.Join(missing, ", ") }</span> · start empty after a restore</dd>
+			}
+		</dl>
+	</div>
+}
+
+// dialog is the Restore dialog's frame: a banner, the crumbs, and its body.
+templ dialog(page layout.Page, p models.Project, banner [2]string, crumb, titleID string) {
+	@layout.Layout(page) {
+		<main class="restore">
+			<section class="restore__dialog" role="dialog" aria-labelledby={ titleID }>
+				<div class="mono restore__banner"><span>{ banner[0] }</span><span>{ banner[1] }</span></div>
+				<div class="restore__body">
+					<nav class="mono crumbs"><a href="/">Projects</a> <span>/</span> <a href={ templ.SafeURL("/projects/" + p.Name) }>{ p.Name }</a> <span>/</span> <span class="crumbs__here">{ crumb }</span></nav>
+					{ children... }
+				</div>
+			</section>
+		</main>
+	}
+}
+
+templ confirmField(name, problem string) {
+	<div class="field">
+		<label for="confirm">Type <span class="mono">{ name }</span> to confirm</label>
+		<input type="text" name="confirm" id="confirm" class="mono" autocomplete="off"/>
+		if problem != "" {
+			<span class="field__error">{ problem }</span>
+		}
+	</div>
+}
+
+// Restore is the Restore page's.
+type Restore struct {
+	Page     layout.Page
+	P        models.Project
+	Snapshot backup.Snapshot
+	Location models.StorageLocation
+	Running  *models.Deploy
+	Error    string
+}
+
+templ RestorePage(r Restore) {
+	{{ p, snap := r.P, r.Snapshot }}
+	{{ when := ShortTime(snap.Time.In(zoneOf(r.Page))) }}
+	{{ sha := snap.Sha[:min(7, len(snap.Sha))] }}
+	@dialog(r.Page, p, [2]string{"RESTORE · WHOLE PROJECT", "CODE + DATA"}, "Restore", "restore-title") {
+		<h1 class="disp" id="restore-title">{ "Roll " + p.Name + " back to " + when + "?" }</h1>
+		<div class="restore-compare">
+			<span></span><span class="mono restore-compare__head">NOW</span><span></span><span class="mono restore-compare__head">AFTER RESTORE</span>
+			<span class="mono restore-compare__label">CODE</span>
+			<span class="mono">{ runningWordsOr(r.Running, "—") }</span>
+			<span class="restore-compare__arrow">→</span>
+			<span class="mono restore-compare__after">{ sha }</span>
+			<span class="mono restore-compare__label">DATA</span>
+			<span>Live</span>
+			<span class="restore-compare__arrow">→</span>
+			<span class="restore-compare__after">{ when + " · " + snap.Kind + " · " + snapshotSize(snap) + " " }<small class="mono">{ "(" + snap.ShortID + ", " + r.Location.Name + ")" }</small></span>
+		</div>
+		<div class="restore-note">
+			<span class="mono">NOTE</span>
+			<span>
+				{ p.Name + " keeps serving while the snapshot is restored beside it; traffic switches only once the restored version passes its health check." }
+				{ "Anything written after " + when + " is replaced; a safety snapshot is taken just before the switch." }
+				if p.MaintenanceSince.Valid {
+					The maintenance page is up, so nothing is being written meanwhile.
+				} else {
+					The maintenance page is off: writes in the seconds before the switch would be lost. Put it up first (on the project page) if that matters.
+				}
+			</span>
+		</div>
+		<div class="restore__phases">
+			<div class="restore__phase">
+				<span class="mono restore__phase-title restore__phase-title--go">{ "WHILE " + strings.ToUpper(p.Name) + " KEEPS SERVING" }</span>
+				<ol>
+					<li>Fetch <span class="mono">{ sha }</span> from the repo (it must still be there), and its image from Houston's registry or a rebuild.</li>
+					<li>Restore the snapshot's volumes and databases into new storage, beside the live data.</li>
+				</ol>
+			</div>
+			<div class="restore__phase restore__phase--switch">
+				<span class="mono restore__phase-title restore__phase-title--nogo">AT THE SWITCH</span>
+				<ol start="3">
+					<li>Start <span class="mono">{ sha }</span> on it, pass the health check, switch traffic, and remove the old storage.</li>
+				</ol>
+			</div>
+		</div>
+		<form class="restore__confirm" action={ templ.SafeURL("/projects/" + p.Name + "/restores") } method="post">
+			<input type="hidden" name="snapshot" id="snapshot" value={ snap.ID } autocomplete="off"/>
+			<input type="hidden" name="location" id="location" value={ r.Location.Name } autocomplete="off"/>
+			@confirmField(p.Name, r.Error)
+			<div class="restore__actions">
+				<span class="mono muted">{ "CLI: houston restore " + snap.ShortID + " --confirm " + p.Name }</span>
+				<a class="button button--medium button--quiet" href={ templ.SafeURL("/projects/" + p.Name) }>Cancel</a>
+				<input type="submit" name="commit" value={ "Restore " + p.Name } class="button button--primary button--medium"/>
+			</div>
+		</form>
+	}
+}
+
+// Copy is the Copy page's.
+type Copy struct {
+	Page     layout.Page
+	P        models.Project
+	Proposal *models.Deploy
+	To       string
+	Refusal  string
+	Shared   []string
+	Volumes  string // each volume and where it lives
+	Storage  string
+	Error    string
+}
+
+templ CopyPage(c Copy) {
+	{{ p := c.P }}
+	@dialog(c.Page, p, [2]string{"COPY · NEW NAME", "NO DOWNTIME"}, "Copy", "copy-title") {
+		if c.To != "" && c.Refusal == "" {
+			<h1 class="disp" id="copy-title">{ "Copy " + p.Name + " to " + c.To + "?" }</h1>
+			<dl class="plan delete-list">
+				<dt class="mono">FROM</dt>
+				<dd>{ "compose.yml on " + p.Branch + " at " }<span class="mono">{ c.Proposal.ShortSha() }</span>{ ", which names " + c.To }</dd>
+				<dt class="mono">GETS</dt>
+				<dd>{ p.Name + "'s secrets, its repo link and deploy key, its volumes where they live (" + c.Volumes + "), and its backup target (" + c.Storage + ")" }</dd>
+				<dt class="mono">DATA</dt>
+				<dd>{ "A snapshot of " + p.Name + ", taken once " + c.To + " is built, restored into " + c.To }</dd>
+				<dt class="mono">HOSTS</dt>
+				<dd class="mono">{ orWords(strings.Join(c.Shared, ", "), "none shared") }</dd>
+			</dl>
+			<div class="restore-note">
+				<span class="mono">NOTE</span>
+				<span>
+					{ p.Name + " keeps serving until " + c.To + " passes its health check; then the hosts above move to " + c.To + " with no failed request." }
+					if p.MaintenanceSince.Valid {
+						{ p.Name + "'s maintenance page is up, so nothing is written to it meanwhile; the hosts keep showing it until you turn it off or delete " + p.Name + "." }
+					} else {
+						{ p.Name + "'s maintenance page is off: anything written to " + p.Name + " after the snapshot stays in " + p.Name + ". Put it up first if that matters." }
+					}
+					{ "Delete " + p.Name + " when you're happy with " + c.To + "." }
+				</span>
+			</div>
+			<form class="restore__confirm" action={ templ.SafeURL("/projects/" + p.Name + "/copy") } method="post">
+				@confirmField(p.Name, c.Error)
+				<div class="restore__actions">
+					<span class="mono muted">{ "CLI: houston copy --confirm " + p.Name }</span>
+					<a class="button button--medium button--quiet" href={ templ.SafeURL("/projects/" + p.Name) }>Cancel</a>
+					<input type="submit" name="commit" value={ "Copy to " + c.To } class="button button--primary button--medium"/>
+				</div>
+			</form>
+		} else {
+			<h1 class="disp" id="copy-title">Nothing to copy</h1>
+			<p>{ c.Refusal + ". Change " }<span class="mono">name:</span>{ " in compose.yml and push: " + p.Name + "'s deploy holds with the new name, and the copy is offered here." }</p>
+			<div class="restore__actions"><a class="button button--medium button--quiet" href={ templ.SafeURL("/projects/" + p.Name) }>Back</a></div>
+		}
+	}
+}
+
+// Delete is the Delete page's.
+type Delete struct {
+	Page          layout.Page
+	P             models.Project
+	Base          string
+	Containers    []string
+	Data          []string
+	Kept          bool // there's data for a final snapshot
+	Storage       *models.StorageLocation
+	Locations     []string // where its backups are
+	DeleteBackups bool
+	Error         string
+}
+
+templ DeletePage(d Delete) {
+	{{ p := d.P }}
+	@dialog(d.Page, p, [2]string{"DELETE · WHOLE PROJECT", "CAN'T BE UNDONE"}, "Delete", "delete-title") {
+		<h1 class="disp" id="delete-title">{ "Delete " + p.Name + "?" }</h1>
+		<dl class="plan delete-list">
+			<dt class="mono">CONTAINERS</dt>
+			<dd class="mono">{ strings.Join(d.Containers, ", ") }</dd>
+			<dt class="mono">DATA</dt>
+			<dd>{ orWords(strings.Join(d.Data, "; "), "none") }</dd>
+			<dt class="mono">DOMAINS</dt>
+			<dd class="mono">{ strings.Join(p.Hostnames(d.Base), ", ") }</dd>
+			<dt class="mono">ON THE SERVER</dt>
+			<dd>Kamal's files for it (with its secret values), the runners' checkouts, its images</dd>
+			<dt class="mono">MISSION CONTROL</dt>
+			<dd>Its secrets, deploy history and settings</dd>
+		</dl>
+		<div class="restore-note">
+			<span class="mono">KEPT</span>
+			<span>
+				if d.Kept && d.Storage != nil {
+					{ "A final snapshot of " + p.Name + "'s data goes to " + d.Storage.Name + " first, and its backups stay" + inWhere(d.Locations, " (%s)") + "." }
+					{ "Add a project named " + p.Name + " again to restore one." }
+				} else if d.Kept {
+					There's no backup storage for a final snapshot: finish setup's storage step first, or delete the backups too.
+				} else {
+					{ p.Name + " has no data to snapshot" + inWhere(d.Locations, ", and its backups stay (%s)") + "." }
+				}
+				{ "Houston can't remove the deploy key and the webhook on the git host" + repoWhere(p) + "; remove them there." }
+			</span>
+		</div>
+		<form class="restore__confirm" action={ templ.SafeURL("/projects/" + p.Name + "/deletion") } method="post">
+			<label class="check">
+				<input type="checkbox" name="delete_backups" id="delete_backups" value="1" checked?={ d.DeleteBackups }/>
+				<span>{ "Also delete its backups: every snapshot of " + p.Name + inWhere(d.Locations, " in %s") + ", and no final snapshot. They can't be brought back." }</span>
+			</label>
+			@confirmField(p.Name, d.Error)
+			<div class="restore__actions">
+				<span class="mono muted">{ "CLI: houston delete --confirm " + p.Name }</span>
+				<a class="button button--medium button--quiet" href={ templ.SafeURL("/projects/" + p.Name) }>Cancel</a>
+				<input type="submit" name="commit" value={ "Delete " + p.Name } class="button button--danger button--medium"/>
+			</div>
+		</form>
+	}
+}
+
+// Deletion is a deletion's page.
+type Deletion struct {
+	Page     layout.Page
+	D        models.ProjectDeletion
+	Project  bool // its project's still there
+	Location string
+}
+
+templ DeletionPage(dp Deletion) {
+	{{ d := dp.D }}
+	{{ active := d.Status == "queued" || d.Status == "running" }}
+	@layout.Layout(dp.Page) {
+		<main class="page deploy-page">
+			<nav class="mono crumbs">
+				<a href="/">Projects</a> <span>/</span>
+				if dp.Project {
+					<a href={ templ.SafeURL("/projects/" + d.Name) }>{ d.Name }</a>
+				} else {
+					<span>{ d.Name }</span>
+				}
+				<span>/</span> <span class="crumbs__here">Delete</span>
+			</nav>
+			<div class="deploy-status">
+				<div class="deploy-head">
+					<div class="deploy-head__main">
+						<div class="deploy-head__title">
+							<h1 class="disp">{ "Deleting " + d.Name }</h1>
+							if active {
+								<span class="mono state state-pill state--in-flight"><span class="state-pill__dot"></span>DELETING</span>
+							} else if d.Status == "go" {
+								@StatePill("go")
+							} else {
+								@StatePill("no_go")
+							}
+						</div>
+						<p class="deploy-head__meta">{ "Asked by " + d.RequestedBy + " · " + ShortTime(d.CreatedAt.In(zoneOf(dp.Page))) + backupsToo(d) }</p>
+					</div>
+				</div>
+				if active {
+					<div class="serving" data-controller="refresh" data-refresh-every-value="5000">
+						<span class="serving__dot"></span>
+						<span>
+							if d.RemovingAt.Valid {
+								{ d.Name + " is being taken apart; it serves nothing new meanwhile." }
+							} else {
+								{ d.Name + " keeps serving until its final snapshot is taken." }
+							}
+						</span>
+					</div>
+				} else if d.Status == "go" {
+					<div class="notice notice--go">
+						<span class="mono">GO</span>
+						<span class="notice__text">
+							{ d.Name + " was deleted." }
+							if d.SnapshotID != "" {
+								{ "Its final snapshot " + d.SnapshotID[:min(8, len(d.SnapshotID))] + " in " + dp.Location + " is kept" + otherBackups(d) + ": add a project named " + d.Name + " again, then " }<span class="mono">{ "houston restore " + d.SnapshotID[:min(8, len(d.SnapshotID))] }</span>.
+							} else if d.DeleteBackups {
+								Its backups were deleted too.
+							}
+						</span>
+					</div>
+				} else if !d.RemovingAt.Valid {
+					<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ "Deleting " + d.Name + " was " + d.Error + ". Nothing was removed; it serves as before." }</span></div>
+				} else {
+					<div class="notice notice--nogo">
+						<span class="mono">NO-GO</span>
+						<span class="notice__text">{ "Deleting " + d.Name + " " + d.Error + ". It serves nothing new until it's finished." }</span>
+						if dp.Project {
+							@button("/projects/"+d.Name+"/deletion", "Finish deleting", "button button--small", map[string]string{"confirm": d.Name})
+						}
+					</div>
+				}
+				if d.Status == "go" && d.RepoUrl != "" {
+					<div class="notice notice--hold"><span class="mono">ON THE GIT HOST</span><span class="notice__text">{ "Houston can't remove the deploy key and the webhook it gave " + d.RepoUrl + "; remove them there." }</span></div>
+				}
+			</div>
+			<div class="deploy-body">
+				<ol class="panel deploy-steps">
+					for i, step := range deletionSteps(d) {
+						<li data-state={ step[1] }>
+							<span class="mono">{ fmt.Sprintf("%02d", i) }</span>
+							<span>{ step[0] }</span>
+							<span class="mono step__state">{ deletionStateWords[step[1]] }</span>
+						</li>
+					}
+				</ol>
+				<section class="log-panel" data-controller="follow clipboard">
+					<div class="log-panel__head">
+						if active {
+							<span class="mono log-panel__live">LIVE</span>
+						}
+						<span class="mono log-panel__what">{ "houston · delete " + d.Name }</span>
+						<span class="log-panel__spacer"></span>
+						<label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"/> Follow</label>
+						<button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+					</div>
+					<pre class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled">{ orWords(d.Log, "Waiting to start…") }</pre>
+				</section>
+			</div>
+		</main>
+	}
+}

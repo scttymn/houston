@@ -1,94 +1,67 @@
-# syntax=docker/dockerfile:1
-# check=error=true
+# Stages: toolchain (Go, templ, sqlc, sqlite3), dev (the mounted code,
+# rebuilt on change), test, and production (the static binary, with what
+# Mission Control runs). Houston builds dev for gantry dev, test for gantry
+# test, and production to deploy.
 
-# This Dockerfile is designed for production, not development. Use with Kamal or build'n'run by hand:
-# docker build -t mission_control .
-# docker run -d -p 80:80 -e RAILS_MASTER_KEY=<value from config/master.key> --name mission_control mission_control
+FROM golang:1.27-bookworm AS toolchain
+COPY --from=sqlc/sqlc:1.31.1 /workspace/sqlc /usr/local/bin/sqlc
+# sqlite3, for db console.
+RUN apt-get update && apt-get install -y --no-install-recommends sqlite3 && rm -rf /var/lib/apt/lists/*
+# nodynamic: gantry's image codecs run as WASM, so the binary stays static.
+ENV CGO_ENABLED=0 GOFLAGS="-buildvcs=false -tags=nodynamic"
+RUN go install github.com/a-h/templ/cmd/templ@v0.3.1020
+WORKDIR /app
 
-# For a containerized dev environment, see Dev Containers: https://guides.rubyonrails.org/getting_started_with_devcontainer.html
+# templ regenerates on change and restarts the server. Caches live in the
+# mounted folder's .cache/ (ignored, and skipped by the watcher), so
+# restarts reuse them.
+FROM toolchain AS dev
+# The app is mission_control/ in its module, which is mounted at /app.
+WORKDIR /app/mission_control
+ENV GANTRY_ENV=development ADDR=:8080 DATA_DIR=/data GOMODCACHE=/app/mission_control/.cache/go/mod GOCACHE=/app/mission_control/.cache/go/cache
+CMD ["templ", "generate", "--watch", "-path", "/app/mission_control", "--watch-pattern=(.+\\.go$)|(.+\\.templ$)|(.+\\.js$)|(.+\\.css$)|(.+\\.sql$)", "--cmd=go run ./cmd/mission-control"]
 
-# Make sure RUBY_VERSION matches the Ruby version in .ruby-version
-ARG RUBY_VERSION=3.4.10
-FROM docker.io/library/ruby:$RUBY_VERSION-slim AS base
+FROM toolchain AS test
+ENV GANTRY_ENV=test
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+WORKDIR /app/mission_control
+RUN templ generate -path /app/mission_control
+# The assets precompiled as the build does them, so the tests see what
+# production serves and no picture is resized on request.
+RUN --mount=type=cache,id=mission-control-assets,target=/cache/assets,sharing=locked \
+    go run ./cmd/mission-control assets /cache/assets && cp -a /cache/assets/. assets/built/
+CMD ["sh", "-c", "go vet ./... && go test ./..."]
 
-# Rails app lives here
-WORKDIR /rails
+FROM toolchain AS build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+WORKDIR /app/mission_control
+# The assets precompiled first (the scripts minified, the pictures'
+# copies), for go build to embed. They're kept in a
+# build cache between deploys, so only a new or changed picture is resized.
+RUN --mount=type=cache,id=mission-control-assets,target=/cache/assets,sharing=locked \
+    templ generate -path /app/mission_control && go run ./cmd/mission-control assets /cache/assets && cp -a /cache/assets/. assets/built/ \
+ && go build -trimpath -ldflags "-s -w" -tags timetzdata,nodynamic -o /out/app ./cmd/mission-control
 
-# Mission Control drives Docker on its server (restic, volumes); it needs the CLI.
+# Mission Control drives Docker on its server (restic, volumes, logs), reads
+# linked repos with git over ssh, and is its own tools image for helper
+# containers (sh, mkdir, and /app backup-sqlite). It runs as 1000, the uid
+# cloudflared reads the tunnel's token as, on port 80 inside, where the
+# tunnel's routes and the runners send it.
+FROM debian:bookworm-slim AS production
 COPY --from=docker:29-cli /usr/local/bin/docker /usr/local/bin/docker
-
-# Install base packages. git and ssh read linked repos (with a deploy key).
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y curl git libjemalloc2 openssh-client sqlite3 && \
-    ln -s /usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2 /usr/local/lib/libjemalloc.so && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
-
-# Set production environment variables and enable jemalloc for reduced memory usage and latency.
-ENV RAILS_ENV="production" \
-    BUNDLE_DEPLOYMENT="1" \
-    BUNDLE_PATH="/usr/local/bundle" \
-    BUNDLE_WITHOUT="development" \
-    LD_PRELOAD="/usr/local/lib/libjemalloc.so"
-
-# Development and test stages, added by houston init.
-FROM base AS dev
-ENV RAILS_ENV="development" \
-    BUNDLE_DEPLOYMENT="0" \
-    BUNDLE_WITHOUT=""
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential git libyaml-dev pkg-config && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
-COPY vendor/* ./vendor/
-COPY Gemfile Gemfile.lock ./
-RUN bundle install
-CMD ["sh", "-c", "bin/rails db:prepare && exec bin/rails server -b 0.0.0.0 -p 3000 -P /tmp/server.pid"]
-
-FROM dev AS test
-ENV RAILS_ENV="test"
-COPY . .
-
-# Throw-away build stage to reduce size of final image
-FROM base AS build
-
-# Install packages needed to build gems
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential git libyaml-dev pkg-config && \
-    rm -rf /var/lib/apt/lists /var/cache/apt/archives
-
-# Install application gems
-COPY vendor/* ./vendor/
-COPY Gemfile Gemfile.lock ./
-
-RUN bundle install && \
-    rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git && \
-    # -j 1 disable parallel compilation to avoid a QEMU bug: https://github.com/rails/bootsnap/issues/495
-    bundle exec bootsnap precompile -j 1 --gemfile
-
-# Copy application code
-COPY . .
-
-# Precompile bootsnap code for faster boot times.
-# -j 1 disable parallel compilation to avoid a QEMU bug: https://github.com/rails/bootsnap/issues/495
-RUN bundle exec bootsnap precompile -j 1 app/ lib/
-
-# Precompiling assets for production without requiring secret RAILS_MASTER_KEY
-RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
-
-
-
-
-# Final stage for app image
-FROM base AS production
-
-# Run and own only the runtime files as a non-root user for security
-RUN groupadd --system --gid 1000 rails && \
-    useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash
+RUN apt-get update -qq \
+ && apt-get install --no-install-recommends -y ca-certificates git openssh-client sqlite3 \
+ && rm -rf /var/lib/apt/lists /var/cache/apt/archives \
+ && groupadd --system --gid 1000 houston && useradd houston --uid 1000 --gid 1000 --create-home --shell /bin/sh \
+ && mkdir /data && chown 1000:1000 /data
+COPY --from=build /out/app /app
 USER 1000:1000
-
-# Copy built artifacts: gems, application
-COPY --chown=rails:rails --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
-COPY --chown=rails:rails --from=build /rails /rails
-
+ENV ADDR=:80 DATA_DIR=/data
+EXPOSE 80
 # Which Houston this is (HoustonVersion): a release's tag, from the release
 # workflow, or a checkout's commit, from the installer. Last, so a new
 # version doesn't rebuild the layers above.
@@ -96,10 +69,4 @@ ARG HOUSTON_VERSION=""
 ARG HOUSTON_SOURCE_SHA=""
 ENV HOUSTON_VERSION=$HOUSTON_VERSION \
     HOUSTON_SOURCE_SHA=$HOUSTON_SOURCE_SHA
-
-# Entrypoint prepares the database.
-ENTRYPOINT ["/rails/bin/docker-entrypoint"]
-
-# Start server via Thruster by default, this can be overwritten at runtime
-EXPOSE 80
-CMD ["./bin/thrust", "./bin/rails", "server"]
+ENTRYPOINT ["/app"]

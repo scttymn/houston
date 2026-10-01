@@ -1,5 +1,5 @@
 // Package mission talks to Mission Control's local API (mission_control's
-// Api:: controllers) with the runner token.
+// app/api) with the runner token.
 package mission
 
 import (

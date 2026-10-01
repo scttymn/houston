@@ -1,0 +1,126 @@
+package settings
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/scttymn/houston/mission_control/app/models"
+	"github.com/scttymn/houston/mission_control/app/projects"
+	"github.com/scttymn/houston/mission_control/app/services/serverupdate"
+	"github.com/scttymn/houston/mission_control/app/shared/layout"
+)
+
+// updateSteps are the installer's steps so far (its "==> " lines), each
+// with its state: the last is current while it runs, the one that broke
+// failed. After a rollback that's the step before the helper put the old
+// version back; the old version's own steps are done.
+func updateSteps(u models.ServerUpdate) [][2]string {
+	var names []string
+	for _, line := range strings.Split(u.Log, "\n") {
+		if strings.HasPrefix(line, "==> ") {
+			names = append(names, serverupdate.StepName(line))
+		}
+	}
+	states := make([]string, len(names))
+	back := -1
+	for i, name := range names {
+		states[i] = "done"
+		if back < 0 && strings.Contains(name, "didn't install; putting") {
+			back = i
+		}
+	}
+	if back > 0 {
+		states[back-1] = "failed"
+	}
+	if len(names) > 0 {
+		switch u.Status {
+		case "running":
+			states[len(states)-1] = "current"
+		case "no_go":
+			states[len(states)-1] = "failed"
+		}
+	}
+	out := make([][2]string, len(names))
+	for i := range names {
+		out[i] = [2]string{names[i], states[i]}
+	}
+	return out
+}
+
+var updateStateWords = map[string]string{"done": "DONE", "current": "RUNNING", "failed": "FAILED"}
+
+templ UpdatePage(page layout.Page, u models.ServerUpdate, version string, now time.Time) {
+	{{ running := u.Status == "running" }}
+	{{ started := u.StartedAt.In(now.Location()).Format("15:04:05 MST") }}
+	@layout.Layout(page) {
+		<main class="page deploy-page">
+			<nav class="mono crumbs"><a href="/settings">Settings</a> <span>/</span> <a href="/settings#releases">Releases</a> <span>/</span> <span class="crumbs__here">{ "Update #" + strconv.FormatInt(u.ID, 10) }</span></nav>
+			<div class="deploy-status">
+				<div class="deploy-head">
+					<div class="deploy-head__main">
+						<div class="deploy-head__title">
+							<h1 class="disp">{ "Update #" + strconv.FormatInt(u.ID, 10) }</h1>
+							if running {
+								<span class="mono state state-pill state--in-flight"><span class="state-pill__dot"></span>UPDATING</span>
+							} else if u.Status == "go" {
+								@projects.StatePill("go")
+							} else {
+								@projects.StatePill("no_go")
+							}
+						</div>
+						<p class="deploy-head__meta"><span class="mono">{ u.FromVersion + " → " + u.ToVersion }</span> · Houston on this server</p>
+					</div>
+					<div class="deploy-head__clock">
+						if running {
+							<span class="mono eyebrow">{ "MISSION ELAPSED · STARTED " + started }</span>
+							<span class="disp deploy-head__elapsed">{ projects.MissionElapsed(now.Sub(u.StartedAt)) }</span>
+						} else {
+							<span class="mono eyebrow">{ "TOOK · STARTED " + started }</span>
+							<span class="disp deploy-head__elapsed">{ projects.DurationWords(u.FinishedAt.Time.Sub(u.StartedAt)) }</span>
+						}
+					</div>
+				</div>
+				if running {
+					<div class="serving" data-controller="refresh" data-refresh-every-value="5000">
+						<span class="serving__dot"></span>
+						<span>
+							{ u.FromVersion + " keeps running your apps while it updates. Mission Control restarts on the way, and this page comes back when it's up. Deploys and backups wait." }
+							if u.StartedAt.Before(now.Add(-serverupdate.Long)) {
+								{ " It's taking long: " }<span class="mono">docker logs houston-update</span>{ " on the server has the rest." }
+							}
+						</span>
+					</div>
+				} else if u.Status == "rolled_back" {
+					<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ "The update to " + u.ToVersion + " failed, so this server went back to " + u.FromVersion + "." }</span></div>
+				} else if u.Status == "no_go" {
+					<div class="notice notice--nogo"><span class="mono">NO-GO</span><span class="notice__text">{ "The update to " + u.ToVersion + " failed. This server runs " + version + "; the log says why." }</span></div>
+				}
+			</div>
+			<div class="deploy-body">
+				<ol class="panel deploy-steps">
+					for i, step := range updateSteps(u) {
+						<li data-state={ step[1] }>
+							<span class="mono">{ fmt.Sprintf("%02d", i) }</span>
+							<span>{ step[0] }</span>
+							<span class="mono step__state">{ updateStateWords[step[1]] }</span>
+						</li>
+					}
+				</ol>
+				<section class="log-panel" data-controller="follow clipboard">
+					<div class="log-panel__head">
+						if running {
+							<span class="mono log-panel__live">LIVE</span>
+						}
+						<span class="mono log-panel__what">{ "houston · " + u.FromVersion + " → " + u.ToVersion }</span>
+						<span class="log-panel__spacer"></span>
+						<label class="mono"><input type="checkbox" checked data-follow-target="toggle" data-action="change->follow#toggle"/> Follow</label>
+						<button type="button" class="mono log-panel__copy" data-action="clipboard#copy" data-clipboard-target="button">Copy log</button>
+					</div>
+					<pre class="mono log" data-follow-target="log" data-clipboard-target="source" data-action="scroll->follow#scrolled">{ orWords(u.Log, "Starting…") }</pre>
+				</section>
+			</div>
+		</main>
+	}
+}
