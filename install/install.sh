@@ -435,6 +435,14 @@ write_compose() {
   houston_uid=$(id -u houston)
   houston_gid=$(id -g houston)
   houston_home=$(getent passwd houston | cut -d: -f6)
+  # The tunnel's share of the machine: a quarter of its cores, at least one.
+  # Asked for more than an app can answer, cloudflared spins on what it
+  # can't pass (6.5 of 8 cores, passing next to nothing: gantry's
+  # docs/plans/performance.md, Batch 4), and every other app on the server
+  # starves. At 1.5 cores it passed 7,000 requests a second.
+  cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+  tunnel_cpus=$((cores / 4))
+  [ "$tunnel_cpus" -ge 1 ] || tunnel_cpus=1
   step "Writing $HOUSTON_DIR/compose.yml"
   cat >"$HOUSTON_DIR/compose.yml" <<EOF
 # Written by the Houston installer; rerunning it rewrites this file.
@@ -469,6 +477,7 @@ services:
   cloudflared:
     image: $CLOUDFLARED_IMAGE
     restart: unless-stopped
+    cpus: "$tunnel_cpus"
     user: "1000:1000"
     command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/houston/tunnel-token"]
     volumes:
