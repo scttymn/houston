@@ -5,6 +5,7 @@
 #     least one: a flood through it can't take the machine from every
 #     other app
 #   - nothing else in compose.yml gets a limit
+#   - kamal-proxy, which Kamal starts, gets the same share when it's there
 #
 #   install/test/install-tunnel-cpus.sh
 set -uo pipefail
@@ -36,6 +37,21 @@ for case in "1 1" "2 1" "4 1" "8 2" "16 4" "48 12"; do
   got=$(cpus cloudflared)
   [ "$got" = "$2" ] && ok "$1 cores: the tunnel gets $2" || bad "$1 cores: the tunnel gets '$got', want $2"
 done
+# cap_proxy: kamal-proxy, which Kamal starts, gets the tunnel's share, when
+# it's there; when it isn't (no deploy yet), nothing is asked of it.
+cat > /stub/docker <<'SH' && chmod 755 /stub/docker
+#!/bin/sh
+echo "docker $*" >> /fake.log
+case "$1" in inspect) [ -n "${PROXY:-}" ] || exit 1 ;; esac
+exit 0
+SH
+: > /fake.log
+env CORES=8 PROXY=1 HOUSTON_INSTALL_LIB=1 HOUSTON_DIR=/opt/houston sh -c '. /install/install.sh; cap_proxy' >/dev/null 2>&1
+grep -qx "docker update --cpus 2 kamal-proxy" /fake.log && ok "8 cores: kamal-proxy gets 2" || bad "kamal-proxy's cap: $(cat /fake.log)"
+: > /fake.log
+env CORES=8 HOUSTON_INSTALL_LIB=1 HOUSTON_DIR=/opt/houston sh -c '. /install/install.sh; cap_proxy' >/dev/null 2>&1; code=$?
+[ "$code" = 0 ] && ! grep -q "docker update" /fake.log && ok "no kamal-proxy yet: nothing asked of it" || bad "no kamal-proxy: exit $code, $(cat /fake.log)"
+
 for svc in mission-control registry; do
   [ -z "$(cpus $svc)" ] && ok "$svc: no limit" || bad "$svc has a cpus limit: $(cpus $svc)"
 done

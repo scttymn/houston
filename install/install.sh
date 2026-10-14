@@ -430,19 +430,33 @@ choose_bind() {
 # probe_address: where to check Mission Control answers.
 probe_address() { if [ "$bind" = 0.0.0.0 ]; then echo 127.0.0.1; else echo "$bind"; fi; }
 
+# front_cpus: the share of the machine the tunnel and kamal-proxy each get:
+# a quarter of its cores, at least one. Asked for more than an app can
+# answer, each spins on what it can't pass (cloudflared took 6.5 of 8 cores
+# once, passing next to nothing), and every other app on the server starves
+# (docs/plans/tunnel-cpus.md). At 1.5 cores the tunnel passed 7,000 requests
+# a second.
+front_cpus() {
+  cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+  share=$((cores / 4))
+  [ "$share" -ge 1 ] || share=1
+  echo "$share"
+}
+
+# cap_proxy: kamal-proxy gets its share too. Kamal starts it (at an app's
+# first deploy), so it's set here when it's there, without restarting it,
+# and by every deploy after (internal/deploy, capProxy).
+cap_proxy() {
+  docker inspect kamal-proxy >/dev/null 2>&1 || return 0
+  docker update --cpus "$(front_cpus)" kamal-proxy >/dev/null 2>&1 || say "Couldn't set kamal-proxy's share of the cores; the next deploy will."
+}
+
 write_compose() {
   docker_gid=$(getent group docker | cut -d: -f3)
   houston_uid=$(id -u houston)
   houston_gid=$(id -g houston)
   houston_home=$(getent passwd houston | cut -d: -f6)
-  # The tunnel's share of the machine: a quarter of its cores, at least one.
-  # Asked for more than an app can answer, cloudflared spins on what it
-  # can't pass (6.5 of 8 cores, passing next to nothing: gantry's
-  # docs/plans/performance.md, Batch 4), and every other app on the server
-  # starves. At 1.5 cores it passed 7,000 requests a second.
-  cores=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
-  tunnel_cpus=$((cores / 4))
-  [ "$tunnel_cpus" -ge 1 ] || tunnel_cpus=1
+  tunnel_cpus=$(front_cpus)
   step "Writing $HOUSTON_DIR/compose.yml"
   cat >"$HOUSTON_DIR/compose.yml" <<EOF
 # Written by the Houston installer; rerunning it rewrites this file.
@@ -550,6 +564,7 @@ start() {
   docker run --rm --user root --entrypoint chown -v houston_houston-config:/houston "$IMAGE" 1000:1000 /houston
   step "Starting Houston"
   compose up -d --remove-orphans >/dev/null 2>&1 || compose up -d --remove-orphans
+  cap_proxy
 
   # The runners run the host's houston CLI, mounted as a file, and a running
   # container keeps the binary it started with. So they're recreated to pick

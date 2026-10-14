@@ -56,3 +56,29 @@ Not on the server (changing the driver recreates kamal-proxy, a moment's outage 
 - `local` stores it for no less than `json-file`.
 - Not storing it at all saves about 11 µs a request on this machine (some 20 on the server, at its speed): an eighth of what the proxy and Docker cost together. And there'd be no `docker logs kamal-proxy` to look in when something goes wrong. Nothing in Houston reads that log; a person does.
 - So it stays as it is. What the proxy costs is the proxy's: no setting of its own, or of Docker's, takes much off it.
+
+## Measured: a real overload, the cap holding (2026-10-14)
+The first flood didn't overload anything, so this one made sure it would: twelve-dollar held to 0.2 of a core (about 1,500 requests a second through the front), then 6,000 a second at it through Cloudflare for 30 s, 512 connections, from the server. Watched every ~3 s; ready to stop the flood had vccmenu failed through the tunnel three times running (it never did).
+
+| | the first 20 s | the last 10 s |
+| --- | --- | --- |
+| the tunnel | ~0.5 of a core | 1.8 to 1.96: at its cap |
+| kamal-proxy (no cap) | ~0.5 | 1.7 to 2.0 |
+| the app | 0.2 (its all) | 0.2 |
+| the server's busy cores | 2.7 of 8 | 5.3 of 8 |
+| vccmenu, through the tunnel | 33 to 54 ms | 37 to 96 ms |
+| equip, through the tunnel | 31 to 65 ms | 38 to 156 ms |
+| vccmenu, straight to its container | 0.2 to 0.3 ms | 0.3 ms |
+
+- The cap held: the tunnel ran into it and stayed there.
+- kamal-proxy did what the tunnel did: with its app overloaded it climbed to 2 cores, and nothing stopped it going further. So it gets the same share (below).
+- The other apps kept answering, slower through the tunnel they share, untouched straight to their containers.
+
+## kamal-proxy's share
+Kamal starts kamal-proxy (at an app's first deploy), with no limit, and Houston doesn't start it. `docker update --cpus` changes a running container's limit without restarting it, so Houston sets it twice over: the installer, when the proxy is there (`cap_proxy`), and every deploy that's done (`capProxy` in `internal/deploy`), so one Kamal has just started has it too. The same share as the tunnel's: a quarter of the cores, at least one. Best effort: a deploy that can't set it says so and stands.
+
+| AC | Test |
+| --- | --- |
+| A deploy that's done sets kamal-proxy to a quarter of the cores, at least one (1, 2, 8, 48) | `internal/deploy.TestDeployCapsKamalProxy` |
+| Docker can't say the cores, says nonsense, or can't set it: the deploy is GO, and says so | `internal/deploy.TestDeployCapsKamalProxyBestEffort` |
+| The installer sets it when the proxy's there, and asks nothing when it isn't | `install/test/install-tunnel-cpus.sh` |

@@ -492,9 +492,29 @@ func (r *run) deploy(tookOver bool) int {
 	if r.ctx.Err() != nil {
 		return r.stop()
 	}
+	r.capProxy()
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
 	r.report.finish("go", "")
 	return 0
+}
+
+// capProxy gives kamal-proxy a quarter of the server's cores, at least one,
+// as the installer gives the tunnel (docs/plans/tunnel-cpus.md). Kamal
+// starts the proxy, with no limit, and overloaded it spins on what it can't
+// pass, taking the machine from every other app. A deploy sets it each time,
+// so a proxy Kamal has just started has it too. docker update changes a
+// running container's limit without restarting it. It's the deploy's last
+// care, not its condition: what goes wrong is said, and the deploy stands.
+func (r *run) capProxy() {
+	out, err := r.d.Docker.Output("info", "--format", "{{.NCPU}}")
+	cores, convErr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || convErr != nil || cores < 1 {
+		r.report.logf("couldn't set kamal-proxy's share of the cores: docker info didn't say the server's (%q%s)\n", strings.TrimSpace(string(out)), errText(err))
+		return
+	}
+	if _, err := r.d.Docker.Output("update", "--cpus", strconv.Itoa(max(1, cores/4)), "kamal-proxy"); err != nil {
+		r.report.logf("couldn't set kamal-proxy's share of the cores%s\n", errText(err))
+	}
 }
 
 // snapshot asks Mission Control for the pre-deploy snapshot of the version

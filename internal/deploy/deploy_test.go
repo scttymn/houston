@@ -78,6 +78,10 @@ type fakeDocker struct {
 	hold func(what string) time.Duration
 	// emit is extra output a call writes.
 	emit func(what string) string
+	// cores is what docker info says the server has ("" for 8); infoErr
+	// and updateErr make docker info and docker update fail.
+	cores              string
+	infoErr, updateErr bool
 }
 
 type dockerCall struct {
@@ -111,6 +115,19 @@ func (f *fakeDocker) Output(args ...string) ([]byte, error) {
 		}
 		return nil, nil
 	case "run":
+		return nil, nil
+	case "info": // docker info --format {{.NCPU}}
+		if f.infoErr {
+			return nil, errors.New("exit status 1")
+		}
+		if f.cores == "" {
+			return []byte("8\n"), nil
+		}
+		return []byte(f.cores + "\n"), nil
+	case "update":
+		if f.updateErr {
+			return nil, errors.New("exit status 1")
+		}
 		return nil, nil
 	case "stop", "start":
 		if f.onOutput != nil {
@@ -1478,5 +1495,58 @@ func TestDeployWarmsUp(t *testing.T) {
 	h = newHarness(t, withDomain)
 	if code := h.run(); code != 0 || strings.Contains(h.stdout.String(), "warm") {
 		t.Errorf("no client, no warm-up: %d\n%s", code, h.stdout.String())
+	}
+}
+
+// updates are the docker update calls a deploy made.
+func (f *fakeDocker) updates() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var u [][]string
+	for _, args := range f.outputs {
+		if args[0] == "update" {
+			u = append(u, args)
+		}
+	}
+	return u
+}
+
+// A deploy that's done gives kamal-proxy a quarter of the server's cores, at
+// least one: Kamal starts the proxy with none, and overloaded it spins on
+// what it can't pass (2 of 8 cores, the tunnel pinned at its own cap:
+// docs/plans/tunnel-cpus.md), taking the machine from every other app.
+func TestDeployCapsKamalProxy(t *testing.T) {
+	for cores, want := range map[string]string{"8": "2", "2": "1", "1": "1", "48": "12"} {
+		h := newHarness(t, shopCompose)
+		h.docker.cores = cores
+		if code := h.run(); code != 0 {
+			t.Fatalf("%s cores: exit %d\n%s", cores, code, h.stderr.String())
+		}
+		if got := h.docker.updates(); !reflect.DeepEqual(got, [][]string{{"update", "--cpus", want, "kamal-proxy"}}) {
+			t.Errorf("%s cores: docker update calls %v, want --cpus %s kamal-proxy", cores, got, want)
+		}
+	}
+}
+
+// The proxy's cap is the deploy's last care, not its condition: when Docker
+// can't say the cores, or can't set the cap, the deploy is still GO, and
+// says so.
+func TestDeployCapsKamalProxyBestEffort(t *testing.T) {
+	for name, set := range map[string]func(*fakeDocker){
+		"no cores":  func(f *fakeDocker) { f.infoErr = true },
+		"no update": func(f *fakeDocker) { f.updateErr = true },
+		"nonsense":  func(f *fakeDocker) { f.cores = "many" },
+	} {
+		h := newHarness(t, shopCompose)
+		set(h.docker)
+		if code := h.run(); code != 0 {
+			t.Fatalf("%s: exit %d\n%s", name, code, h.stderr.String())
+		}
+		if final := h.mission.final(); final.Status != "go" {
+			t.Errorf("%s: final report = %+v", name, final)
+		}
+		if !strings.Contains(h.mission.log(), "kamal-proxy's share of the cores") {
+			t.Errorf("%s: the log doesn't say the proxy wasn't capped:\n%s", name, h.mission.log())
+		}
 	}
 }
