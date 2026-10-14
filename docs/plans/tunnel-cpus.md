@@ -82,3 +82,19 @@ Kamal starts kamal-proxy (at an app's first deploy), with no limit, and Houston 
 | A deploy that's done sets kamal-proxy to a quarter of the cores, at least one (1, 2, 8, 48) | `internal/deploy.TestDeployCapsKamalProxy` |
 | Docker can't say the cores, says nonsense, or can't set it: the deploy is GO, and says so | `internal/deploy.TestDeployCapsKamalProxyBestEffort` |
 | The installer sets it when the proxy's there, and asks nothing when it isn't | `install/test/install-tunnel-cpus.sh` |
+
+## Evidence: both caps, on the server, after v0.5.6 (2026-10-14)
+- **A deploy sets kamal-proxy's cap.** kamal-proxy set to 3 cores by hand (`docker update --cpus 3`; `--cpus 0` doesn't clear a cap, it leaves it), then twelve-dollar redeployed, the same commit: GO, and kamal-proxy at 2 cores after, not restarted (started 2026-10-01).
+- **The installer's `cap_proxy`** ran in the update to v0.5.6, but kamal-proxy already had 2 cores (set by hand), so the server can't show it working; its container test does.
+- **Both caps under the same overload as before** (twelve-dollar held to 0.2 of a core, 6,000 requests a second through Cloudflare for 30 s, 512 connections, from the server):
+
+| | before kamal-proxy had a cap | with both |
+| --- | ---: | ---: |
+| the tunnel, at most | 1.96 cores | 2.0 (its cap) |
+| kamal-proxy, at most | 2.0, nothing stopping it | 1.92, capped at 2 |
+| the server's busy cores, at most (the load's own among them) | 5.3 of 8 | 5.4 of 8 |
+| vccmenu, through the tunnel | 37 to 96 ms | 33 to 229 ms |
+| equip, through the tunnel | 38 to 156 ms | 30 to 415 ms |
+| vccmenu, straight to its container | 0.3 ms | 0.3 ms |
+
+Both held to their caps, and the other apps answered throughout: untouched straight to their containers, slower through the tunnel and proxy every app shares, both at their caps. This overload only takes kamal-proxy to about 2 cores, so its cap didn't have to hold it back: showing that would take a bigger flood, harder on the live apps. Whether the slower answers through the tunnel this time are the proxy's cap or one run against another, one run each doesn't say.
