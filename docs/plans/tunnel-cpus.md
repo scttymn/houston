@@ -35,6 +35,24 @@ twelve-dollar (gantry v0.15.1, 1 CPU), loaded from the server through kamal-prox
 
 The route was put back as deployed after (`kamal-proxy list`: running, its target unchanged).
 
-## Not yet
-- The cap on the live server, and the flood through the tunnel that shows the other apps keep answering.
-- The request log: storing it with Docker's `local` driver, or not at all, means recreating kamal-proxy, a moment's outage for every app. Measured first, on a throwaway machine.
+## Measured: the cap on the live server (2026-10-14)
+`docker update --cpus 2 houston-cloudflared-1` (what the installer will write), then 10,000 requests a second at twelve-dollar for 20 s, from the server out to Cloudflare and back through the tunnel, gzip asked for as a browser does. Watched every ~3 s: the server's busy cores, each container's CPU, and another live app (vccmenu) through the tunnel and straight to its container.
+
+- The runaway didn't come back: the tunnel peaked at 0.8 of a core (under its cap of 2), kamal-proxy 0.6, the app 0.5, the server at most 3.6 of 8 cores busy.
+- vccmenu answered throughout: through the tunnel in 30 to 40 ms (once 114 ms), straight to its container in under half a millisecond.
+- 145,658 of the 200,000 requests failed, p50 9.3 s, with the server mostly idle: what held the flood back was outside the server (between it and Cloudflare, or at Cloudflare: not looked into).
+
+So the cap is on and harmed nothing, and whether it holds a runaway is unproven: there was none to hold. It stays on the live tunnel until the container is recreated; the next release's installer writes it for good.
+
+## Measured: storing the proxy's log (2026-10-14)
+Not on the server (changing the driver recreates kamal-proxy, a moment's outage for every app): on an M5, in Docker, kamal-proxy v0.9.2 on one core in front of gantry's bench app on another, its route set as Houston's deploys set it, 8,000 requests a second for 20 s, three runs a driver. "Docker" is dockerd, containerd and every container's shim, so it has a floor that isn't the log's.
+
+| The proxy's log driver | kamal-proxy | Docker |
+| --- | ---: | ---: |
+| `json-file` (now) | 62.5–65.8 µs | 22.3–23.9 µs |
+| `local` | 62.4–63.0 µs | 23.8–24.2 µs |
+| `none` | 61.2–61.7 µs | 12.3–12.8 µs |
+
+- `local` stores it for no less than `json-file`.
+- Not storing it at all saves about 11 µs a request on this machine (some 20 on the server, at its speed): an eighth of what the proxy and Docker cost together. And there'd be no `docker logs kamal-proxy` to look in when something goes wrong. Nothing in Houston reads that log; a person does.
+- So it stays as it is. What the proxy costs is the proxy's: no setting of its own, or of Docker's, takes much off it.
