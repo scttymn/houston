@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +100,8 @@ func TestPointDomain(t *testing.T) {
 			made = append(made, r.Name)
 		}
 	}
-	if strings.Join(made, " ") != "www.shop.example.com example.com" {
+	slices.Sort(made) // the domains are a map's, in no order
+	if strings.Join(made, " ") != "example.com www.shop.example.com" {
 		t.Errorf("made %v", made)
 	}
 	if got := f.Records("zcom"); got[2].Type != "MX" || got[3].Type != "TXT" {
