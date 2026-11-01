@@ -158,16 +158,24 @@ type Records struct {
 	Zone   string
 }
 
-// Find is name's record, or nil.
+// beside are the types that sit beside a CNAME at a zone's apex (Cloudflare
+// flattens it there): a domain's mail and verification records aren't its
+// address, so they're never in the way.
+var beside = map[string]bool{"MX": true, "TXT": true, "CAA": true, "NS": true, "SRV": true}
+
+// Find is name's record, or nil: its address, passing over what sits
+// beside one.
 func (r Records) Find(ctx context.Context, name string) (*Record, error) {
 	var found []Record
 	if err := r.Client.Get(ctx, "/zones/"+r.Zone+"/dns_records", url.Values{"name": {name}}, &found); err != nil {
 		return nil, err
 	}
-	if len(found) == 0 {
-		return nil, nil
+	for i := range found {
+		if !beside[found[i].Type] {
+			return &found[i], nil
+		}
 	}
-	return &found[0], nil
+	return nil, nil
 }
 
 // Point makes name a proxied CNAME to the tunnel, commented comment: it

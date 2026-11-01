@@ -70,6 +70,13 @@ func TestPointDomain(t *testing.T) {
 	f.Zone("zpend", "pending.dev", "pending")
 	f.Record("zcom", cloudflare.Record{Name: "old.example.com", Comment: "managed-by:houston project:blog"})
 	f.Record("zcom", cloudflare.Record{Name: "hand.example.com", Comment: "made by hand"})
+	// An apex with its mail, but no address: the CNAME goes beside them.
+	f.Record("zcom", cloudflare.Record{Type: "MX", Name: "example.com", Content: "smtp.google.com"})
+	f.Record("zcom", cloudflare.Record{Type: "TXT", Name: "example.com", Content: "v=spf1 include:_spf.google.com ~all"})
+	// An apex still on its old host.
+	f.Zone("zold", "old.dev", "active")
+	f.Record("zold", cloudflare.Record{Type: "MX", Name: "old.dev", Content: "smtp.google.com"})
+	f.Record("zold", cloudflare.Record{Type: "A", Name: "old.dev", Content: "198.51.100.7"})
 
 	for domain, want := range map[string]models.DomainState{
 		"shop.svnmns.com":      {State: "WILDCARD"},
@@ -79,6 +86,8 @@ func TestPointDomain(t *testing.T) {
 		"shop.notsvnmns.com":   {State: "ZONE NOT IN CLOUDFLARE YET", Reason: "Add notsvnmns.com to Cloudflare (adding a zone is manual), then deploy again"},
 		"old.example.com":      {State: "NO-GO", Reason: "old.example.com belongs to project blog"},
 		"hand.example.com":     {State: "NO-GO", Reason: "hand.example.com has a record Houston didn't create for shop; remove it in Cloudflare to move the domain here"},
+		"example.com":          {State: "DNS OK"},
+		"old.dev":              {State: "NO-GO", Reason: "old.dev has a record Houston didn't create for shop; remove it in Cloudflare to move the domain here"},
 	} {
 		if got := d.PointDomain(ctx, shop, domain); got != want {
 			t.Errorf("%s: %+v, want %+v", domain, got, want)
@@ -90,8 +99,14 @@ func TestPointDomain(t *testing.T) {
 			made = append(made, r.Name)
 		}
 	}
-	if strings.Join(made, " ") != "www.shop.example.com" {
+	if strings.Join(made, " ") != "www.shop.example.com example.com" {
 		t.Errorf("made %v", made)
+	}
+	if got := f.Records("zcom"); got[2].Type != "MX" || got[3].Type != "TXT" {
+		t.Errorf("the apex's mail records changed: %+v", got)
+	}
+	if got := f.Records("zold"); len(got) != 2 || got[1].Content != "198.51.100.7" {
+		t.Errorf("the old host's address changed: %+v", got)
 	}
 	// The zone is the domain's nearest parent, never a TLD alone.
 	for _, call := range f.Calls() {

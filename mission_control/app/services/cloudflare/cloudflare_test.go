@@ -42,6 +42,24 @@ func TestRecords(t *testing.T) {
 	}
 }
 
+// A zone's apex has mail and verification records beside its address:
+// they aren't in the way of a CNAME there, so Find passes over them.
+func TestFindPassesOverMailRecords(t *testing.T) {
+	ctx := context.Background()
+	f := cloudflaretest.New(t)
+	records := cloudflare.Records{Client: f.Client(), Zone: "z1"}
+	for _, typ := range []string{"MX", "TXT", "CAA", "NS", "SRV"} {
+		f.Record("z1", cloudflare.Record{Type: typ, Name: "example.com", Content: typ + " content"})
+	}
+	if r, err := records.Find(ctx, "example.com"); r != nil || err != nil {
+		t.Fatalf("mail and verification records found: %+v %v", r, err)
+	}
+	f.Record("z1", cloudflare.Record{Type: "A", Name: "example.com", Content: "1.2.3.4"})
+	if r, err := records.Find(ctx, "example.com"); err != nil || r == nil || r.Type != "A" {
+		t.Fatalf("the address: %+v %v", r, err)
+	}
+}
+
 // Cloudflare's no is its own words; no JSON is the HTTP status; no answer
 // says it couldn't reach it.
 func TestErrors(t *testing.T) {
