@@ -92,7 +92,7 @@ Then make an API token in Mission Control (**Settings › API tokens**) and log 
 houston login https://admin.<base>      # asks for the token (hidden)
 ```
 
-If Cloudflare Access guards `admin.<base>`, add `--access-client-id` and `--access-client-secret` (an Access service token). For `houston console --server`, add `--ssh houston@<server address>`.
+If Cloudflare Access guards `admin.<base>`, add `--access-client-id` and `--access-client-secret` (an Access service token). For `houston console --server` and `houston exec --server`, add `--ssh houston@<server address>`.
 
 ## 4. Set up a project
 
@@ -195,6 +195,7 @@ houston deploy --server --follow --project app
   5. the switch
   6. the `post_deploy` hook
 - **What's running:** `houston status`, `houston deploys --project app`, `houston logs --server`, `houston console --server`.
+- **A command in the running app:** `houston exec --server <command> [args]` runs it in the app's container on the server, over SSH on the LAN, and streams its output to your terminal only, never a log (so it's how to read a one-time code, such as gantry's `houston exec --server /app task auth:setup-code`). It exits with the command's code, allocates a terminal only when stdin is one, and takes `--project <name>` outside the project's folder. Houston's flags go before the command.
 - **By hand on the server:** as the `houston` user, `houston deploy` in a clean checkout.
 - **Status words:** GO, QUEUED, IN FLIGHT, NO-GO (the previous version still serves), HOLD (something blocks the next deploy, such as a secret with no value), STANDBY (linked, never deployed).
 

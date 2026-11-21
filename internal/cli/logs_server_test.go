@@ -58,7 +58,7 @@ func TestConsoleServer(t *testing.T) {
 	if code != 3 {
 		t.Errorf("exit %d, want the console's 3\n%s", code, errOut)
 	}
-	remote := `docker exec -it "$(docker ps -q --filter label=service=phoenixapp --filter label=role=web | head -n1)" sh -c 'echo '\''hi'\''; id'`
+	remote := serverAppLookup("phoenixapp") + `exec docker exec -i -t "$c" 'sh' '-c' 'echo '\''hi'\''; id'`
 	if want := []string{"ssh", "-t", "houston@192.168.1.20", remote}; !reflect.DeepEqual(ssh.args, want) {
 		t.Errorf("ssh args =\n%q\nwant\n%q", ssh.args, want)
 	}

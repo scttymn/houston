@@ -103,7 +103,9 @@ With the human's OK:
 houston deploy --server --follow --project <name>   # exit 0 on GO, 1 on NO-GO
 houston status --project <name>                     # GO, the running commit, domains, the last backup
 houston logs --server --project <name>
+houston exec --server --project <name> <command> [args]   # in the running app on the server; exits with the command's code
 ```
+- `exec --server` connects over SSH on the LAN (`houston login --ssh houston@<LAN address>`, or `HOUSTON_SSH`); the human authorizes their key once with `ssh-copy-id`. Its output reaches only your terminal. When it prints a one-time credential (gantry's `/app task auth:setup-code`), have the **HUMAN** run it themselves, so the code never enters this chat.
 - After this, every push to the deploy branch deploys by itself.
 - `houston rebuild --server --follow --project <name>` deploys the head again without Docker's layer cache: for a change to the server the files don't show (an unchanged commit reuses every cached build step).
 - **A deploy:** a snapshot of the running version, the image built, the release hook, then the switch, only once the new version answers its health check. So a NO-GO leaves the old version serving.

@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/scttymn/houston/internal/server"
 )
 
 // runSSH runs ssh attached to the terminal and returns its exit code. Tests
@@ -39,7 +41,7 @@ func runLogsServer(file, projectFlag string, follow bool, tail int, stdout, stde
 }
 
 // runConsoleServer runs the console command in the running app container on
-// the server, over SSH to houston@<LAN address> (LAN-only for now).
+// the server (runInServerApp).
 func runConsoleServer(file string, stderr io.Writer) int {
 	p, ok := loadProject(file, stderr)
 	if !ok {
@@ -54,15 +56,44 @@ func runConsoleServer(file string, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
+	return runInServerApp(client, p.Name, "console --server", true, []string{"sh", "-c", console.Server}, stderr)
+}
+
+// runExecServer implements `houston exec --server CMD [ARGS...]`
+// (docs/plans/exec-server.md): the command in the project's running app
+// container on the server. Its output goes only to this terminal (it can be
+// a one-time credential), and its exit code is the command's.
+func runExecServer(file, projectFlag string, command []string, stderr io.Writer) int {
+	client, name, code := remote(file, projectFlag, true, stderr)
+	if code != 0 {
+		return code
+	}
+	return runInServerApp(client, name, "exec --server", stdinIsTerminal(), command, stderr)
+}
+
+// runInServerApp runs argv in project name's running app container on the
+// server, over SSH to houston@<LAN address> (LAN-only for now). Every word is
+// quoted for the remote shell. tty: ask ssh and docker for a terminal.
+// what names the command in the no-target message.
+func runInServerApp(client *server.Client, name, what string, tty bool, argv []string, stderr io.Writer) int {
 	target := client.SSHTarget(os.Getenv)
 	if target == "" {
-		fmt.Fprintln(stderr, "houston: console --server connects over SSH on the LAN. Say where: houston login --ssh houston@<server's LAN address> <url>\n"+
+		fmt.Fprintln(stderr, "houston: "+what+" connects over SSH on the LAN. Say where: houston login --ssh houston@<server's LAN address> <url>\n"+
 			"(or HOUSTON_SSH), and authorize your key once: ssh-copy-id houston@<server's LAN address>")
 		return exitUsage
 	}
-	container := fmt.Sprintf(`"$(docker ps -q --filter label=service=%s --filter label=role=web | head -n1)"`, p.Name)
-	remoteCmd := "docker exec -it " + container + " sh -c " + singleQuote(console.Server)
-	return runSSH([]string{"ssh", "-t", target, remoteCmd})
+	words := make([]string, len(argv))
+	for i, a := range argv {
+		words[i] = singleQuote(a)
+	}
+	dockerExec, sshTTY := "docker exec -i", "-T"
+	if tty {
+		dockerExec, sshTTY = "docker exec -i -t", "-t"
+	}
+	remoteCmd := `c="$(docker ps -q --filter ` + singleQuote("label=service="+name) + ` --filter label=role=web | head -n1)"; ` +
+		`[ -n "$c" ] || { echo ` + singleQuote("houston: "+name+" isn't running on the server") + ` >&2; exit 1; }; ` +
+		`exec ` + dockerExec + ` "$c" ` + strings.Join(words, " ")
+	return runSSH([]string{"ssh", sshTTY, target, remoteCmd})
 }
 
 // singleQuote quotes s for a POSIX shell.

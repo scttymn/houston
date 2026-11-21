@@ -97,17 +97,37 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	})
 	initCmd.Flags().StringVar(&initName, "name", "", "the project's name, without asking (when init writes compose.yml)")
 	root.AddCommand(initCmd)
+	var execOnServer bool
+	var execProject string
 	execCmd := &cobra.Command{
-		Use:   "exec CMD [ARGS...]",
-		Short: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running",
-		Args:  cobra.MinimumNArgs(1),
+		Use:   "exec [--server [--project NAME]] CMD [ARGS...]",
+		Short: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running (--server: in the app running on the server, over SSH on the LAN)",
+		Long: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running.\n\n" +
+			"--server runs it in the app running on the server instead, over SSH to houston@<LAN address> (houston login --ssh, or HOUSTON_SSH).\n" +
+			"Its output goes only to this terminal, and a terminal is allocated only when stdin is one, so it pipes and scripts.\n\n" +
+			"Houston's flags go before CMD; everything after CMD is the command's. The exit code is the command's.",
+		Example: "  houston exec ls -la\n" +
+			"  houston exec --server /app task auth:setup-code\n" +
+			"  houston exec --server --project myapp /app task auth:setup-code   # outside the project's folder",
+		DisableFlagsInUseLine: true,
+		Args:                  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code = runExec(file, args, stderr, d)
+			switch {
+			case execOnServer:
+				code = runExecServer(file, execProject, args, stderr)
+			case execProject != "":
+				fmt.Fprintln(stderr, "houston: --project goes with --server (a local exec runs in this folder's project)")
+				code = exitUsage
+			default:
+				code = runExec(file, args, stderr, d)
+			}
 			return nil
 		},
 	}
 	// Flags after the command are the command's: houston exec ls -la.
 	execCmd.Flags().SetInterspersed(false)
+	execCmd.Flags().BoolVar(&execOnServer, "server", false, "in the app running on the server (SSH to houston@<LAN address>); output only to this terminal, exit code the command's")
+	execCmd.Flags().StringVar(&execProject, "project", "", "with --server: the project (default: the compose file's name)")
 	root.AddCommand(execCmd)
 	var asJSON bool
 	inspect := command("inspect", "Show what Houston reads from the compose file (what Mission Control is told)", func() int {
@@ -150,7 +170,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	}
 	login.Flags().StringVar(&accessID, "access-client-id", "", "a Cloudflare Access service token's client ID, if Access guards admin.<base>")
 	login.Flags().StringVar(&accessSecret, "access-client-secret", "", "its client secret")
-	login.Flags().StringVar(&loginSSH, "ssh", "", "for console --server: houston@<the server's LAN address>")
+	login.Flags().StringVar(&loginSSH, "ssh", "", "for console --server and exec --server: houston@<the server's LAN address>")
 	root.AddCommand(login, command("logout", "Forget the saved server and token", func() int {
 		return runLogout(stdout, stderr)
 	}))
