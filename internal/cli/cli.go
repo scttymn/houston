@@ -107,8 +107,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 			"Its output goes only to this terminal, and a terminal is allocated only when stdin is one, so it pipes and scripts.\n\n" +
 			"Houston's flags go before CMD; everything after CMD is the command's. The exit code is the command's.",
 		Example: "  houston exec ls -la\n" +
-			"  houston exec --server task auth:setup-code\n" +
-			"  houston exec --server --project myapp task auth:setup-code   # outside the project's folder",
+			"  houston exec --server /app task auth:setup-code\n" +
+			"  houston exec --server --project myapp /app task auth:setup-code   # outside the project's folder",
 		DisableFlagsInUseLine: true,
 		Args:                  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
