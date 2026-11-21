@@ -38,6 +38,13 @@ func (f *fakeSSH) run(args []string) int {
 	return f.exit
 }
 
+// serverAppLookup is console --server's remote shell start: the project's
+// running app container, or a message and exit 1 when there's none.
+func serverAppLookup(name string) string {
+	return `c="$(docker ps -q --filter 'label=service=` + name + `' --filter label=role=web | head -n1)"; ` +
+		`[ -n "$c" ] || { echo 'houston: ` + name + ` isn'\''t running on the server' >&2; exit 1; }; `
+}
+
 func TestConsoleServer(t *testing.T) {
 	remoteServer(t, nil)
 	ssh := &fakeSSH{exit: 3}

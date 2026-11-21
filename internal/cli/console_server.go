@@ -61,14 +61,19 @@ func runConsoleServer(file string, stderr io.Writer) int {
 
 // runExecServer implements `houston exec --server CMD [ARGS...]`
 // (docs/plans/exec-server.md): the command in the project's running app
-// container on the server. Its output goes only to this terminal (it can be
-// a one-time credential), and its exit code is the command's.
-func runExecServer(file, projectFlag string, command []string, stderr io.Writer) int {
+// container, through Mission Control's API with the saved login, so from
+// anywhere. Its output goes only to this terminal (it can be a one-time
+// credential); the exit code is the command's.
+func runExecServer(file, projectFlag string, command []string, stdout, stderr io.Writer) int {
 	client, name, code := remote(file, projectFlag, true, stderr)
 	if code != 0 {
 		return code
 	}
-	return runInServerApp(client, name, "exec --server", stdinIsTerminal(), command, stderr)
+	code, err := client.Exec(context.Background(), name, command, stdout, stderr)
+	if err != nil {
+		return remoteFailed(err, stderr)
+	}
+	return code
 }
 
 // runInServerApp runs argv in project name's running app container on the

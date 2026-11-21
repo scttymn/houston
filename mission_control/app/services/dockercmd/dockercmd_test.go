@@ -96,6 +96,20 @@ func TestDownload(t *testing.T) {
 
 // A stream's output (stdout and stderr) goes to its writer as it comes,
 // and it stops when its reader goes away.
+// StreamApart: stdout and stderr each to its own writer, the exit code,
+// and a deadline that stops it (as timeout's 124).
+func TestStreamApart(t *testing.T) {
+	var out, errOut strings.Builder
+	r := sh.StreamApart(context.Background(), []string{"-c", `echo out; echo err >&2; exit 3`}, Opts{}, &out, &errOut)
+	if r.OK || r.Code != 3 || r.Output != "" || out.String() != "out\n" || errOut.String() != "err\n" {
+		t.Errorf("= %+v, stdout %q, stderr %q", r, out.String(), errOut.String())
+	}
+	r = sh.StreamApart(context.Background(), []string{"-c", `sleep 30`}, Opts{Timeout: 100 * time.Millisecond}, &out, &errOut)
+	if r.Code != TimedOut {
+		t.Errorf("= %+v, want the timeout's code", r)
+	}
+}
+
 func TestStream(t *testing.T) {
 	var out strings.Builder
 	r := sh.Stream(context.Background(), []string{"-c", `echo out; echo err >&2; exit 3`}, Opts{}, &out)

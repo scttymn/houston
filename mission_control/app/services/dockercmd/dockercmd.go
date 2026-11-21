@@ -183,6 +183,9 @@ type Downloader interface {
 	// is written to w: a page's live output. Its Result has no output. It
 	// stops when ctx ends: the reader went away.
 	Stream(ctx context.Context, args []string, o Opts, w io.Writer) Result
+	// StreamApart is Stream with stdout and stderr kept apart, each to its
+	// writer as it comes (from two goroutines: the writers share no lock).
+	StreamApart(ctx context.Context, args []string, o Opts, stdout, stderr io.Writer) Result
 	// Download starts a command whose stdout is a file: a Download once its
 	// first bytes are in, or the Result of a command that ended before
 	// writing any (its stderr as the output).
@@ -196,6 +199,16 @@ func (c CLI) Stream(ctx context.Context, args []string, o Opts, w io.Writer) Res
 	cmd := c.command(ctx, args, o)
 	out := &lockedWriter{w: w}
 	cmd.Stdout, cmd.Stderr = out, out
+	return result(ctx, cmd.Run(), "")
+}
+
+// StreamApart runs docker with args, stdout to one writer and stderr to the
+// other as they come.
+func (c CLI) StreamApart(ctx context.Context, args []string, o Opts, stdout, stderr io.Writer) Result {
+	ctx, cancel := deadline(ctx, o)
+	defer cancel()
+	cmd := c.command(ctx, args, o)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	return result(ctx, cmd.Run(), "")
 }
 

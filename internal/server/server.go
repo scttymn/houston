@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/scttymn/houston/internal/execstream"
 )
 
 // ErrRefused: Mission Control refused the API token.
@@ -735,6 +737,47 @@ func (cl *Client) Logs(ctx context.Context, project string, follow bool, tail in
 	}
 	_, err = io.Copy(w, res.Body)
 	return err
+}
+
+// ErrNoExec is a server whose Mission Control has no exec route: a
+// Houston older than exec --server.
+var ErrNoExec = errors.New("this server's Houston doesn't have exec --server yet; update it: houston update")
+
+// Exec runs command (the program and its arguments, sent as a list, never
+// joined) in project's running app container, through Mission Control
+// (docs/plans/exec-server.md). Its stdout and stderr go to stdout and
+// stderr as they come; the int is its exit code. No stdin, no terminal, and
+// no timeout of the client's own: Mission Control stops it after an hour.
+func (cl *Client) Exec(ctx context.Context, project string, command []string, stdout, stderr io.Writer) (int, error) {
+	data, err := json.Marshal(map[string]any{"command": command})
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cl.c.URL+"/api/v1/projects/"+url.PathEscape(project)+"/exec", bytes.NewReader(data))
+	if err != nil {
+		return 0, err
+	}
+	cl.headers(req)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", execstream.ContentType+", application/json")
+	res, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("can't reach %s: %w", cl.c.URL, err)
+	}
+	defer res.Body.Close()
+	ours := res.Header.Get(execstream.Header) != ""
+	switch {
+	case res.StatusCode == http.StatusUnauthorized:
+		return 0, ErrRefused
+	case !ours && (res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusMethodNotAllowed):
+		return 0, ErrNoExec
+	case res.StatusCode != http.StatusOK:
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+		return 0, fmt.Errorf("%s", message(body))
+	case !ours || res.Header.Get("Content-Type") != execstream.ContentType:
+		return 0, fmt.Errorf("%s didn't answer as Mission Control's exec route (a proxy's page, or Cloudflare Access?)", cl.c.URL)
+	}
+	return execstream.Read(res.Body, stdout, stderr)
 }
 
 // SnapshotDownload is a snapshot's zip as it arrives: Filename is the

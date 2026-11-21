@@ -105,7 +105,7 @@ houston status --project <name>                     # GO, the running commit, do
 houston logs --server --project <name>
 houston exec --server --project <name> <command> [args]   # in the running app on the server; exits with the command's code
 ```
-- `exec --server` connects over SSH on the LAN (`houston login --ssh houston@<LAN address>`, or `HOUSTON_SSH`); the human authorizes their key once with `ssh-copy-id`. Its output reaches only your terminal. When it prints a one-time credential (gantry's `/app task auth:setup-code`), have the **HUMAN** run it themselves, so the code never enters this chat.
+- `exec --server` needs only `houston login` (or `HOUSTON_SERVER` and `HOUSTON_API_TOKEN`), and works from anywhere. It runs the command without a shell, stdin or terminal, so pass the program and its arguments as they are, and nothing interactive. Mission Control never logs or keeps its output. "doesn't have exec --server yet" means the server's Houston is older: ask the **HUMAN** before `houston update`. When it prints a one-time credential (gantry's `/app task auth:setup-code`), have the **HUMAN** run it themselves, so the code never enters this chat.
 - After this, every push to the deploy branch deploys by itself.
 - `houston rebuild --server --follow --project <name>` deploys the head again without Docker's layer cache: for a change to the server the files don't show (an unchanged commit reuses every cached build step).
 - **A deploy:** a snapshot of the running version, the image built, the release hook, then the switch, only once the new version answers its health check. So a NO-GO leaves the old version serving.

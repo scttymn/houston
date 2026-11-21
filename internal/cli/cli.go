@@ -101,10 +101,11 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	var execProject string
 	execCmd := &cobra.Command{
 		Use:   "exec [--server [--project NAME]] CMD [ARGS...]",
-		Short: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running (--server: in the app running on the server, over SSH on the LAN)",
+		Short: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running (--server: in the app running on the server, through Mission Control)",
 		Long: "Run a command in the app, as houston dev runs it here: in its container, or a one-off one when it isn't running.\n\n" +
-			"--server runs it in the app running on the server instead, over SSH to houston@<LAN address> (houston login --ssh, or HOUSTON_SSH).\n" +
-			"Its output goes only to this terminal, and a terminal is allocated only when stdin is one, so it pipes and scripts.\n\n" +
+			"--server runs it in the app running on the server instead, through Mission Control's API with houston login's token, so from anywhere.\n" +
+			"It runs without a shell, a terminal or stdin (not interactive: for that, console --server), and Mission Control stops it after an hour.\n" +
+			"Its stdout and stderr come back as they're written, to this terminal only: Mission Control never logs or keeps them.\n\n" +
 			"Houston's flags go before CMD; everything after CMD is the command's. The exit code is the command's.",
 		Example: "  houston exec ls -la\n" +
 			"  houston exec --server /app task auth:setup-code\n" +
@@ -114,7 +115,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 		RunE: func(_ *cobra.Command, args []string) error {
 			switch {
 			case execOnServer:
-				code = runExecServer(file, execProject, args, stderr)
+				code = runExecServer(file, execProject, args, stdout, stderr)
 			case execProject != "":
 				fmt.Fprintln(stderr, "houston: --project goes with --server (a local exec runs in this folder's project)")
 				code = exitUsage
@@ -126,7 +127,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	}
 	// Flags after the command are the command's: houston exec ls -la.
 	execCmd.Flags().SetInterspersed(false)
-	execCmd.Flags().BoolVar(&execOnServer, "server", false, "in the app running on the server (SSH to houston@<LAN address>); output only to this terminal, exit code the command's")
+	execCmd.Flags().BoolVar(&execOnServer, "server", false, "in the app running on the server, through Mission Control (houston login); no stdin or terminal")
 	execCmd.Flags().StringVar(&execProject, "project", "", "with --server: the project (default: the compose file's name)")
 	root.AddCommand(execCmd)
 	var asJSON bool
@@ -170,7 +171,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, d docker.Run
 	}
 	login.Flags().StringVar(&accessID, "access-client-id", "", "a Cloudflare Access service token's client ID, if Access guards admin.<base>")
 	login.Flags().StringVar(&accessSecret, "access-client-secret", "", "its client secret")
-	login.Flags().StringVar(&loginSSH, "ssh", "", "for console --server and exec --server: houston@<the server's LAN address>")
+	login.Flags().StringVar(&loginSSH, "ssh", "", "for console --server: houston@<the server's LAN address>")
 	root.AddCommand(login, command("logout", "Forget the saved server and token", func() int {
 		return runLogout(stdout, stderr)
 	}))
