@@ -206,6 +206,7 @@ func (a *App) Router() *web.Router {
 		s.Handle("POST /projects/{name}/copy/cancel", remote.CancelCopy)
 		s.Handle("POST /projects/{name}/copy/undo", remote.UndoCopy)
 		s.Handle("GET /projects/{name}/logs", remote.Logs)
+		s.Handle("POST /projects/{name}/exec", remote.Exec)
 		s.Handle("GET /projects/{name}/snapshots", remote.Snapshots)
 		s.Handle("GET /projects/{name}/snapshots/{id}/download", remote.DownloadSnapshot)
 	})

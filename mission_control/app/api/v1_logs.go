@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -33,11 +34,9 @@ func (c V1) Logs(w http.ResponseWriter, r *http.Request) error {
 		return web.Status(http.StatusUnprocessableEntity, errors.New("tail must be 1–"+strconv.Itoa(maxTail)))
 	}
 	ctx := r.Context()
-	ps := c.DockerCLI.Run(ctx, []string{"ps", "--filter", "label=service=" + p.Name, "--filter", "label=role=web", "--format", "{{.Names}}"}, dockercmd.Opts{})
-	container, _, _ := strings.Cut(ps.Output, "\n")
-	container = strings.TrimSpace(container)
-	if !ps.OK || container == "" {
-		return web.Status(http.StatusNotFound, errors.New(p.Name+" isn't running"))
+	container, err := c.appContainer(ctx, p.Name)
+	if err != nil {
+		return err
 	}
 	args := []string{"logs", "--timestamps", "--tail", tail}
 	var o dockercmd.Opts
@@ -50,6 +49,18 @@ func (c V1) Logs(w http.ResponseWriter, r *http.Request) error {
 	w.WriteHeader(http.StatusOK)
 	c.DockerCLI.Stream(ctx, args, o, flushing{w})
 	return nil
+}
+
+// appContainer is the name of project's running app container, the newest
+// one; a 404 when none is running.
+func (c V1) appContainer(ctx context.Context, project string) (string, error) {
+	ps := c.DockerCLI.Run(ctx, []string{"ps", "--filter", "label=service=" + project, "--filter", "label=role=web", "--format", "{{.Names}}"}, dockercmd.Opts{})
+	container, _, _ := strings.Cut(ps.Output, "\n")
+	container = strings.TrimSpace(container)
+	if !ps.OK || container == "" {
+		return "", web.Status(http.StatusNotFound, errors.New(project+" isn't running"))
+	}
+	return container, nil
 }
 
 // flushing sends each write on at once.

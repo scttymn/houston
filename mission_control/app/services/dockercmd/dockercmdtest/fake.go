@@ -35,6 +35,7 @@ func (c Call) String() string {
 type rule struct {
 	prefix []string
 	result dockercmd.Result
+	stderr string // StreamApart's stderr; the result's output is its stdout
 	wait   time.Duration
 }
 
@@ -51,6 +52,14 @@ func (f *Fake) On(result dockercmd.Result, args ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rules = append(f.rules, rule{prefix: args, result: result})
+}
+
+// OnApart answers a StreamApart starting with args with stdout, stderr and
+// exit code (0 succeeds).
+func (f *Fake) OnApart(stdout, stderr string, code int, args ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rules = append(f.rules, rule{prefix: args, result: dockercmd.Result{OK: code == 0, Output: stdout, Code: code}, stderr: stderr})
 }
 
 // Slow makes a command starting with args take d first.
@@ -83,6 +92,11 @@ func (f *Fake) Ran() []string {
 }
 
 func (f *Fake) answer(ctx context.Context, c Call, o dockercmd.Opts) dockercmd.Result {
+	r, _ := f.answerApart(ctx, c, o)
+	return r
+}
+
+func (f *Fake) answerApart(ctx context.Context, c Call, o dockercmd.Opts) (dockercmd.Result, string) {
 	f.mu.Lock()
 	f.calls = append(f.calls, c)
 	var found *rule
@@ -94,7 +108,7 @@ func (f *Fake) answer(ctx context.Context, c Call, o dockercmd.Opts) dockercmd.R
 	}
 	f.mu.Unlock()
 	if found == nil {
-		return dockercmd.Result{OK: true}
+		return dockercmd.Result{OK: true}, ""
 	}
 	if found.wait > 0 {
 		timer := time.NewTimer(found.wait)
@@ -106,12 +120,12 @@ func (f *Fake) answer(ctx context.Context, c Call, o dockercmd.Opts) dockercmd.R
 		select {
 		case <-timer.C:
 		case <-deadline:
-			return dockercmd.Result{Code: dockercmd.TimedOut}
+			return dockercmd.Result{Code: dockercmd.TimedOut}, ""
 		case <-ctx.Done():
-			return dockercmd.Result{Code: dockercmd.TimedOut}
+			return dockercmd.Result{Code: dockercmd.TimedOut}, ""
 		}
 	}
-	return found.result
+	return found.result, found.stderr
 }
 
 func (f *Fake) Run(ctx context.Context, args []string, o dockercmd.Opts) dockercmd.Result {
@@ -126,6 +140,16 @@ func (f *Fake) Pipe(ctx context.Context, from, to []string, o dockercmd.Opts) do
 func (f *Fake) Stream(ctx context.Context, args []string, o dockercmd.Opts, w io.Writer) dockercmd.Result {
 	r := f.answer(ctx, Call{Args: args, Env: o.Env, Timeout: o.Timeout}, o)
 	io.WriteString(w, r.Output)
+	r.Output = ""
+	return r
+}
+
+// StreamApart answers as Run does, the answer's output to stdout and an
+// OnApart rule's stderr to stderr.
+func (f *Fake) StreamApart(ctx context.Context, args []string, o dockercmd.Opts, stdout, stderr io.Writer) dockercmd.Result {
+	r, errOut := f.answerApart(ctx, Call{Args: args, Env: o.Env, Timeout: o.Timeout}, o)
+	io.WriteString(stdout, r.Output)
+	io.WriteString(stderr, errOut)
 	r.Output = ""
 	return r
 }

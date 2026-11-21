@@ -1,169 +1,130 @@
 package cli
 
 import (
-	"os"
-	"os/exec"
+	"encoding/json"
+	"io"
+	"net/http"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-)
 
-// execServer is set up for one exec --server test: a logged-in server, an
-// SSH target, and ssh replaced by a recorder exiting with exit.
-func execServer(t *testing.T, exit int) *fakeSSH {
-	t.Helper()
-	remoteServer(t, nil)
-	t.Setenv("HOUSTON_SSH", "houston@192.168.1.20")
-	ssh := &fakeSSH{exit: exit}
-	was := runSSH
-	runSSH = ssh.run
-	t.Cleanup(func() { runSSH = was })
-	return ssh
-}
+	"github.com/scttymn/houston/internal/execstream"
+)
 
 // nowhere is a compose file path that doesn't exist: run outside a project.
 func nowhere(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "compose.yml")
 }
 
-// serverAppLookup is the remote shell's start: the project's running app
-// container, or a message and exit 1 when there's none.
-func serverAppLookup(name string) string {
-	return `c="$(docker ps -q --filter 'label=service=` + name + `' --filter label=role=web | head -n1)"; ` +
-		`[ -n "$c" ] || { echo 'houston: ` + name + ` isn'\''t running on the server' >&2; exit 1; }; `
+// execRoute is Mission Control's exec route for project: it records the
+// command it's sent and answers with frames.
+func execRoute(t *testing.T, project string, got *[]string, answer func(*execstream.Writer)) map[string]func(http.ResponseWriter, *http.Request) {
+	return map[string]func(http.ResponseWriter, *http.Request){
+		"/api/v1/projects/" + project + "/exec": func(w http.ResponseWriter, r *http.Request) {
+			var body struct{ Command []string }
+			data, _ := io.ReadAll(r.Body)
+			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer hou_x" || json.Unmarshal(data, &body) != nil {
+				t.Errorf("%s with %q, body %s", r.Method, r.Header.Get("Authorization"), data)
+			}
+			*got = body.Command
+			w.Header().Set(execstream.Header, "1")
+			w.Header().Set("Content-Type", execstream.ContentType)
+			answer(execstream.NewWriter(w, nil))
+		},
+	}
 }
 
-func TestExecServer_RunsInServerApp(t *testing.T) {
-	terminal(t, true)
-	ssh := execServer(t, 7)
+// noSSH fails the test if anything runs ssh.
+func noSSH(t *testing.T) {
+	was := runSSH
+	runSSH = func(args []string) int { t.Errorf("ssh ran: %q", args); return 0 }
+	t.Cleanup(func() { runSSH = was })
+}
 
-	code, stdout, errOut := run(&fakeDocker{}, "-f", nowhere(t), "exec", "--server", "--project", "svnmns", "task", "auth:setup-code")
+func TestExecServer_RunsThroughTheAPI(t *testing.T) {
+	noSSH(t)
+	t.Setenv("HOUSTON_SSH", "")
+	var got []string
+	remoteServer(t, execRoute(t, "svnmns", &got, func(w *execstream.Writer) {
+		io.WriteString(w.Stdout(), "CODE-4f9a\n")
+		io.WriteString(w.Stderr(), "a warning\n")
+		w.Exit(7)
+	}))
+	command := []string{"/app", "task", "auth:setup-code; touch pwned", "$(id)", "a b", ""}
+
+	code, stdout, errOut := run(&fakeDocker{}, append([]string{"-f", nowhere(t), "exec", "--server", "--project", "svnmns"}, command...)...)
 
 	if code != 7 {
 		t.Errorf("exit = %d, want the command's 7 (stderr: %s)", code, errOut)
 	}
-	remote := serverAppLookup("svnmns") + `exec docker exec -i -t "$c" 'task' 'auth:setup-code'`
-	if want := []string{"ssh", "-t", "houston@192.168.1.20", remote}; !reflect.DeepEqual(ssh.args, want) {
-		t.Errorf("ssh args =\n%q\nwant\n%q", ssh.args, want)
+	if !reflect.DeepEqual(got, command) {
+		t.Errorf("sent %q\nwant %q (as a list, never joined)", got, command)
 	}
-	if stdout != "" || errOut != "" {
-		t.Errorf("houston wrote output of its own: stdout %q, stderr %q", stdout, errOut)
-	}
-}
-
-func TestExecServer_PipedInputSkipsTTY(t *testing.T) {
-	terminal(t, false)
-	ssh := execServer(t, 0)
-
-	code, _, errOut := run(&fakeDocker{}, "-f", nowhere(t), "exec", "--server", "--project", "svnmns", "cat")
-
-	if code != 0 {
-		t.Errorf("exit = %d (stderr: %s)", code, errOut)
-	}
-	remote := serverAppLookup("svnmns") + `exec docker exec -i "$c" 'cat'`
-	if want := []string{"ssh", "-T", "houston@192.168.1.20", remote}; !reflect.DeepEqual(ssh.args, want) {
-		t.Errorf("ssh args =\n%q\nwant\n%q", ssh.args, want)
+	if stdout != "CODE-4f9a\n" || errOut != "a warning\n" {
+		t.Errorf("stdout %q, stderr %q: want the command's, apart, and nothing of Houston's", stdout, errOut)
 	}
 }
 
 func TestExecServer_ProjectFromComposeFile(t *testing.T) {
-	terminal(t, false)
-	ssh := execServer(t, 0)
+	var got []string
+	remoteServer(t, execRoute(t, "phoenixapp", &got, func(w *execstream.Writer) { w.Exit(0) }))
 	_, path := newProject(t, phoenix, nil)
 
 	// Flags after the command are the command's.
 	code, _, errOut := run(&fakeDocker{}, "-f", path, "exec", "--server", "ls", "-la", "--server")
 
-	if code != 0 || len(ssh.args) != 4 {
-		t.Fatalf("exit = %d, ssh = %q (stderr: %s)", code, ssh.args, errOut)
-	}
-	if want := serverAppLookup("phoenixapp") + `exec docker exec -i "$c" 'ls' '-la' '--server'`; ssh.args[3] != want {
-		t.Errorf("remote =\n%s\nwant\n%s", ssh.args[3], want)
+	if code != 0 || !reflect.DeepEqual(got, []string{"ls", "-la", "--server"}) {
+		t.Errorf("exit = %d, sent %q (stderr: %s)", code, got, errOut)
 	}
 }
 
-// The remote command, run by a real shell with a fake docker on PATH: every
-// argument arrives as itself, nothing runs that the arguments name.
-func TestExecServer_ArgumentsReachTheContainerIntact(t *testing.T) {
-	terminal(t, false)
-	ssh := execServer(t, 0)
-	args := []string{"echo 'hi'; id", "$(touch pwned)", "`touch pwned`", "a b", `"q"`, `\`, "", "-n", "*"}
-	_, _, errOut := run(&fakeDocker{}, append([]string{"-f", nowhere(t), "exec", "--server", "--project", "it's; touch pwned", "cmd"}, args...)...)
-	if len(ssh.args) != 4 {
-		t.Fatalf("ssh = %q (stderr: %s)", ssh.args, errOut)
+func TestExecServer_Failures(t *testing.T) {
+	html404 := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		io.WriteString(w, "<!doctype html><title>404</title>")
 	}
-
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "bin")
-	must(t, os.Mkdir(bin, 0o755))
-	// docker ps prints the container only for the project's exact label.
-	fake := `#!/bin/sh
-if [ "$1" = ps ]; then
-  [ "$4" = "label=service=it's; touch pwned" ] && echo cid
-  exit 0
-fi
-for a in "$@"; do printf '<%s>\n' "$a"; done
-`
-	must(t, os.WriteFile(filepath.Join(bin, "docker"), []byte(fake), 0o755))
-	sh := exec.Command("sh", "-c", ssh.args[3])
-	sh.Dir = dir
-	sh.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
-	out, err := sh.CombinedOutput()
-	if err != nil {
-		t.Fatalf("remote shell: %v\n%s", err, out)
-	}
-
-	want := "<exec>\n<-i>\n<cid>\n<cmd>\n"
-	for _, a := range args {
-		want += "<" + a + ">\n"
-	}
-	if string(out) != want {
-		t.Errorf("docker got\n%s\nwant\n%s", out, want)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
-		t.Error("an argument ran as a command")
+	for name, c := range map[string]struct {
+		handler func(http.ResponseWriter, *http.Request)
+		want    string
+	}{
+		"a server too old for exec": {html404, "doesn't have exec --server yet; update it: houston update"},
+		"not running": {func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(execstream.Header, "1")
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"svnmns isn't running"}`)
+		}, "houston: svnmns isn't running\n"},
+		"refused token": {func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			io.WriteString(w, `{"error":"the API token is missing, wrong or revoked"}`)
+		}, "run houston login"},
+		"cut off": {func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set(execstream.Header, "1")
+			w.Header().Set("Content-Type", execstream.ContentType)
+			io.WriteString(execstream.NewWriter(w, nil).Stdout(), "half")
+		}, "the connection ended before the command did"},
+		"not frames": {func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, "<html>a login page</html>")
+		}, "didn't answer as Mission Control's exec route"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){"/api/v1/projects/svnmns/exec": c.handler})
+			code, _, errOut := run(&fakeDocker{}, "-f", nowhere(t), "exec", "--server", "--project", "svnmns", "true")
+			if code != exitFailure || !strings.Contains(errOut, c.want) {
+				t.Errorf("exit = %d, stderr = %q; want 1 and %q", code, errOut, c.want)
+			}
+		})
 	}
 }
 
-func TestExecServer_AppNotRunningOnServer(t *testing.T) {
-	terminal(t, false)
-	ssh := execServer(t, 0)
-	run(&fakeDocker{}, "-f", nowhere(t), "exec", "--server", "--project", "svnmns", "true")
-	if len(ssh.args) != 4 {
-		t.Fatalf("ssh = %q", ssh.args)
-	}
-
-	bin := t.TempDir()
-	must(t, os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\n[ \"$1\" = ps ] && exit 0\necho ran exec\n"), 0o755))
-	sh := exec.Command("sh", "-c", ssh.args[3])
-	sh.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"))
-	out, err := sh.CombinedOutput()
-
-	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
-		t.Errorf("err = %v, want exit 1", err)
-	}
-	if string(out) != "houston: svnmns isn't running on the server\n" {
-		t.Errorf("output = %q", out)
-	}
-}
-
-func TestExecServer_NoSSHTarget(t *testing.T) {
-	ssh := execServer(t, 0)
-	t.Setenv("HOUSTON_SSH", "")
-
+func TestExecServer_NotLoggedIn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOUSTON_SERVER", "")
+	t.Setenv("HOUSTON_API_TOKEN", "")
 	code, _, errOut := run(&fakeDocker{}, "-f", nowhere(t), "exec", "--server", "--project", "svnmns", "true")
-
-	if code != exitUsage {
-		t.Errorf("exit = %d, want 2", code)
-	}
-	for _, s := range []string{"exec --server connects over SSH", "houston login --ssh", "ssh-copy-id"} {
-		if !strings.Contains(errOut, s) {
-			t.Errorf("stderr = %q, want %q", errOut, s)
-		}
-	}
-	if ssh.args != nil {
-		t.Errorf("ssh ran: %q", ssh.args)
+	if code != exitFailure || !strings.Contains(errOut, "houston login") {
+		t.Errorf("exit = %d, stderr = %q", code, errOut)
 	}
 }
 
@@ -177,14 +138,17 @@ func TestExecServer_Usage(t *testing.T) {
 		"--project, no --server": {[]string{"exec", "--project", "svnmns", "true"}, "--project goes with --server"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ssh := execServer(t, 0)
+			asked := false
+			remoteServer(t, map[string]func(http.ResponseWriter, *http.Request){
+				"/api/v1/projects/svnmns/exec": func(http.ResponseWriter, *http.Request) { asked = true },
+			})
 			d := &fakeDocker{}
 			code, _, errOut := run(d, append([]string{"-f", nowhere(t)}, c.args...)...)
 			if code != exitUsage || !strings.Contains(errOut, c.want) {
 				t.Errorf("exit = %d, stderr = %q; want 2 and %q", code, errOut, c.want)
 			}
-			if ssh.args != nil || d.calls() != 0 {
-				t.Errorf("ran something: ssh %q, docker %q %q", ssh.args, d.outputs, d.runs)
+			if asked || d.calls() != 0 {
+				t.Errorf("ran something: server asked %v, docker %q %q", asked, d.outputs, d.runs)
 			}
 		})
 	}
