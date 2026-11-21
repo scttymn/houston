@@ -18,6 +18,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
+	"github.com/distribution/reference"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -102,6 +103,7 @@ func Parse(path string, data []byte) (*Project, error) {
 	checkTopLevelVolumes(raw, &ps)
 	app := checkApp(model, &ps)
 	checkVolumeMounts(model, app, &ps)
+	checkShellValues(model, &ps)
 	hosts := serviceHosts(model, &ps)
 	vars := collectVariables(raw, hosts, &ps)
 
@@ -625,6 +627,46 @@ func checkVolumeMounts(model *types.Project, app string, ps *problems) {
 				ps.add(path, "give the volume at `%s` a name (e.g. `data:%s`) so its data survives deploys", v.Target, v.Target)
 			case v.Type != types.VolumeTypeBind && v.Type != types.VolumeTypeVolume:
 				ps.add(path, "Houston supports named volumes (and bind mounts on the app, for dev), not `%s`", v.Type)
+			}
+		}
+	}
+}
+
+// Volume names and mount paths Kamal can put on a command line: a name as
+// Docker allows, and an absolute path of plain characters.
+var (
+	volumeNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+	mountPathRE  = regexp.MustCompile(`^/[A-Za-z0-9._/@+-]*$`)
+	// imageVarRE is a variable reference in an image (${TAG}, ${TAG:-7},
+	// $TAG), which the Kamal config resolves or refuses later: a plain word
+	// stands in for it while the rest is checked. A default holds no shell
+	// syntax, and $(...) isn't a reference, so either still fails.
+	imageVarRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*(?::?[-?+][A-Za-z0-9_.-]*)?\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+)
+
+// checkShellValues refuses shell syntax where Kamal puts compose values on
+// a docker command line that runs through the server's shell, unescaped:
+// an accessory's image, and each named volume's name and mount path
+// (docs/plans/compose-shell-values.md). Whoever can push to a linked repo
+// would otherwise run commands on the server.
+func checkShellValues(model *types.Project, ps *problems) {
+	for _, name := range model.ServiceNames() {
+		svc := model.Services[name]
+		path := "services." + name
+		if svc.Image != "" {
+			if _, err := reference.ParseNormalizedNamed(imageVarRE.ReplaceAllString(svc.Image, "x")); err != nil {
+				ps.add(path+".image", "`%s` isn't an image name Docker accepts (like `redis:7` or `ghcr.io/owner/image:tag`): %v", svc.Image, err)
+			}
+		}
+		for _, v := range svc.Volumes {
+			if v.Type != types.VolumeTypeVolume {
+				continue
+			}
+			if v.Source != "" && !volumeNameRE.MatchString(v.Source) {
+				ps.add(path+".volumes", "volume name `%s` can only have letters, digits and `_.-`, starting with a letter or digit", v.Source)
+			}
+			if !mountPathRE.MatchString(v.Target) {
+				ps.add(path+".volumes", "mount path `%s` must be absolute, with only letters, digits and `._/@+-`", v.Target)
 			}
 		}
 	}
