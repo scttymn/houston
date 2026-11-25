@@ -91,8 +91,13 @@ func TestTLA_C5_FenceBeforeTakeover(t *testing.T) {
 	if stoppedAt.IsZero() || committed.IsZero() {
 		t.Fatalf("no fence (stopped %v, committed %v)", stoppedAt, committed)
 	}
-	if took := stoppedAt.Sub(committed); took > stale {
-		t.Errorf("fenced %v after its last heartbeat_at; Mission Control may take the deploy over after %v (StaleAfter), "+
-			"so two runners can hold the project for %v", took.Round(time.Millisecond), stale, (took - stale).Round(time.Millisecond))
+	// After a successful report, the stop must land within FenceAfter plus
+	// the next heartbeat interval plus a hung client timeout, which is
+	// under StaleAfter. The takeover threshold alone is too close to the
+	// old code's stop to catch it reliably.
+	bound := fence + every + timeout
+	if took := stoppedAt.Sub(committed); took > bound {
+		t.Errorf("fenced %v after its last heartbeat_at; want at most %v (FenceAfter + HeartbeatEvery + client timeout), under the %v takeover threshold",
+			took.Round(time.Millisecond), bound, stale)
 	}
 }

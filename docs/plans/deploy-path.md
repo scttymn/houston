@@ -372,7 +372,7 @@ Stuck-alive: Batch 4's deadline in houston deploy
 | # | Acceptance criterion | Test | Lens |
 |---|---|---|---|
 | 1 | A report answered 409 during Build → the run stops: no later step, its containers removed, exit 1 "taken over", no final report, no lock release | `internal/deploy` `TestDeployStopsWhenTakenOver` | At-least-once & ownership |
-| 2 | Reports failing for longer than `FenceAfter` → the run stops: containers removed, `kamal lock release`, exit 1 "lost touch with Mission Control"; `FenceAfter + HeartbeatEvery + mission.ClientTimeout` < 120 s | `TestDeployFencesItselfWhenMissionControlIsGone`, `TestReporterFencesFromRequestStart` | At-least-once (TOCTOU) |
+| 2 | Reports failing for longer than `FenceAfter` → the run stops: containers removed, `kamal lock release`, exit 1 "lost touch with Mission Control"; `FenceAfter + HeartbeatEvery + mission.ClientTimeout` < 120 s | `TestDeployFencesItselfWhenMissionControlIsGone`, `TestReporterFencesFromRequestStart`, `TestTLA_C5_FenceBeforeTakeover` | At-least-once (TOCTOU) |
 | 3 | The deadline passes during `kamal deploy` → the Kamal container is removed, `kamal lock release`, final `no_go` "timed out after …", exit 1 | `TestDeployDeadline` | Stuck-alive |
 | 4 | During a long step, heartbeats reach Mission Control at the interval | `TestDeployHeartbeats` | Contract |
 | 5 | 700 KiB of step output → every report's log ≤ 200 KiB, and together they equal the output | `TestDeployLogChunks` | Scale |
