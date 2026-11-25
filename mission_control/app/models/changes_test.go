@@ -167,3 +167,72 @@ func TestQueueHead(t *testing.T) {
 		t.Errorf("underway: %v", err)
 	}
 }
+
+// A restore asked for while the poll fetches refs must keep its snapshot's
+// commit: the later write must not treat the restore as a queued deploy and
+// rewrite it (TLA+ C7). What was seen stays, so the check after the restore
+// can still queue the push.
+func TestCheckForChangesLeavesRestoreQueuedDuringFetch(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	d, p := shopWith(t, `{}`)
+	snapshot := sha("9")
+	var restore models.Deploy
+	fetch := func(context.Context, models.Project) (map[string]string, string) {
+		var err error
+		restore, err = models.New(d.Write).CreateRestore(ctx, models.CreateRestoreParams{
+			ProjectID: p.ID, Number: 1, Sha: snapshot, Ref: "refs/heads/main",
+			Generation: p.DataGeneration + 1, HeartbeatAt: now, SourceSnapshotID: "snap-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return refs, ""
+	}
+	queued, err := models.CheckForChanges(ctx, d, fetch, p, now)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("queued %+v, %v", queued, err)
+	}
+	got, err := models.New(d.Read).DeployByID(ctx, restore.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "restore" || got.Sha != snapshot {
+		t.Errorf("queued restore is kind %s at %s; want restore at %s", got.Kind, got.Sha[:7], snapshot[:7])
+	}
+	var seen string
+	d.Read.QueryRow(`SELECT seen_refs FROM projects`).Scan(&seen)
+	if strings.Contains(seen, sha("a")) {
+		t.Errorf("seen %s; the check after the restore should queue the push", seen)
+	}
+}
+
+// The same window on deploy now: a restore asked for during the ref fetch
+// is refused, and keeps its snapshot's commit.
+func TestQueueHeadLeavesRestoreQueuedDuringFetch(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	d, p := shopWith(t, `{}`)
+	snapshot := sha("9")
+	var restore models.Deploy
+	fetch := func(context.Context, models.Project) (map[string]string, string) {
+		var err error
+		restore, err = models.New(d.Write).CreateRestore(ctx, models.CreateRestoreParams{
+			ProjectID: p.ID, Number: 1, Sha: snapshot, Ref: "refs/heads/main",
+			Generation: p.DataGeneration + 1, HeartbeatAt: now, SourceSnapshotID: "snap-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return refs, ""
+	}
+	queued, err := models.QueueHead(ctx, d, fetch, p, false, now)
+	if fmt.Sprint(err) != "a restore of shop is queued or in flight; deploy after it" {
+		t.Errorf("underway: %v (deploy %+v)", err, queued)
+	}
+	got, err := models.New(d.Read).DeployByID(ctx, restore.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != "restore" || got.Sha != snapshot {
+		t.Errorf("queued restore is kind %s at %s; want restore at %s", got.Kind, got.Sha[:7], snapshot[:7])
+	}
+}
