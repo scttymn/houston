@@ -37,9 +37,10 @@ const (
 	RestoreTimeout = 4 * time.Hour
 	HeartbeatEvery = 15 * time.Second
 	FenceAfter     = 60 * time.Second
-	// StaleAfter is how long Mission Control waits without a word before
-	// another runner may take the deploy over. A GO after the switch is
-	// retried this long, even after the run has been fenced.
+	// StaleAfter is how long Mission Control waits without a word, counted
+	// from the last heartbeat it took, before another runner may take the
+	// deploy over (models.StaleAfter). A GO after the switch is retried
+	// this long from finish; retries past that clock get a 409.
 	StaleAfter = 2 * time.Minute
 )
 
@@ -89,6 +90,7 @@ type Options struct {
 	Timeout        time.Duration // the whole deploy; zero: DefaultTimeout
 	HeartbeatEvery time.Duration // zero: HeartbeatEvery
 	FenceAfter     time.Duration // zero: FenceAfter
+	StaleAfter     time.Duration // GO retry window after the switch; zero: StaleAfter
 
 	// Claimed is a deploy houston runner already claimed: it isn't started
 	// again, and every failure finishes it NO-GO.
@@ -226,8 +228,8 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		hosts:    kamal.Hosts(p, target),
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
-		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now(),
-			retryEvery: orDefault(o.SnapshotEvery, 2*time.Second)}}
+		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, staleAfter: orDefault(o.StaleAfter, StaleAfter),
+			cancel: cancel, lastOK: time.Now(), retryEvery: orDefault(o.SnapshotEvery, 2*time.Second)}}
 	stopHeartbeat := r.report.heartbeat(every)
 	defer stopHeartbeat()
 	if restore {
@@ -487,10 +489,10 @@ func (r *run) deploy(tookOver bool) int {
 		}
 	}
 
-	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" {
+	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" && r.ctx.Err() == nil {
 		r.report.step("Post-deploy")
 		code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
-		if err != nil || code != 0 {
+		if (err != nil || code != 0) && r.ctx.Err() == nil {
 			r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
 		}
 	}
@@ -967,6 +969,7 @@ type reporter struct {
 	deploy     mission.Deploy
 	out        io.Writer
 	fenceAfter time.Duration
+	staleAfter time.Duration // GO retry window after the switch; zero: StaleAfter
 	retryEvery time.Duration // between tries of a report that must get through
 	cancel     context.CancelCauseFunc
 
@@ -1033,35 +1036,13 @@ func (r *reporter) finish(status, msg string) {
 	}
 	p := mission.Progress{Status: status, Error: msg}
 	if status == "go" {
-		r.confirmFinal(p)
+		r.confirmedUntil(p, r.staleAfter)
 		return
 	}
 	r.send(p)
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
-}
-
-// confirmFinal sends a final GO until Mission Control takes it, or
-// StaleAfter has passed. It does not stop when the run's context ends:
-// a fence or deadline after the switch must still record GO.
-func (r *reporter) confirmFinal(p mission.Progress) bool {
-	until := time.Now().Add(StaleAfter)
-	for {
-		if r.send(p) {
-			r.mu.Lock()
-			r.closed = true
-			r.mu.Unlock()
-			return true
-		}
-		if r.isClosed() || time.Now().After(until) {
-			r.mu.Lock()
-			r.closed = true
-			r.mu.Unlock()
-			return false
-		}
-		time.Sleep(orDefault(r.retryEvery, 2*time.Second))
-	}
 }
 
 // heartbeat sends progress every interval (the log so far, or nothing), so
@@ -1129,15 +1110,7 @@ func (r *reporter) isClosed() bool {
 }
 
 func (r *reporter) post(p mission.Progress) bool {
-	ctx := r.ctx
-	if p.Status == "go" {
-		// The run may already have been fenced or have hit its deadline.
-		// The GO must still get through; the HTTP client bounds the call.
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-	}
-	err := r.mission.Report(ctx, r.deploy, p)
+	err := r.mission.Report(r.ctx, r.deploy, p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {

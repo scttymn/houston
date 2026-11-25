@@ -109,7 +109,7 @@ func TestV1Deploys(t *testing.T) {
 	steps, _ := json.Marshal(got["steps"])
 	if got["number"] != 23.0 || got["log"] != "héllo\nworld\n" || got["log_size"] != 13.0 || got["log_next"] != 13.0 ||
 		string(steps) != `[{"name":"Test","state":"done"},{"name":"Secrets","state":"done"},{"name":"Build","state":"current"},{"name":"Snapshot","state":"pending"},`+
-			`{"name":"Accessories","state":"pending"},{"name":"Release","state":"pending"},{"name":"Deploy","state":"pending"},{"name":"Post-deploy","state":"pending"}]` {
+			`{"name":"Accessories","state":"pending"},{"name":"Release","state":"pending"},{"name":"Deploy","state":"pending"},{"name":"Clean up","state":"pending"},{"name":"Post-deploy","state":"pending"}]` {
 		t.Errorf("latest: %s", w.Body.String())
 	}
 	// From inside the é: on to the next whole character.
@@ -144,7 +144,7 @@ func TestV1StepStates(t *testing.T) {
 	}
 	deploy(t, a, "shop", 1, "deploy", "no_go", 1, sha1, "", 0)
 	exec(t, a, `UPDATE deploys SET step = 'Release' WHERE number = 1`)
-	if got := states(1); got != "Test:skipped Secrets:done Build:done Snapshot:done Accessories:done Release:failed Deploy:pending Post-deploy:pending" {
+	if got := states(1); got != "Test:skipped Secrets:done Build:done Snapshot:done Accessories:done Release:failed Deploy:pending Clean up:pending Post-deploy:pending" {
 		t.Errorf("a hand deploy's NO-GO: %s", got)
 	}
 	deploy(t, a, "shop", 2, "restore", "go", 2, sha1, "", 0)
@@ -155,6 +155,12 @@ func TestV1StepStates(t *testing.T) {
 	queue(t, a, "shop", 3, "deploy", time.Now())
 	if got := states(3); !strings.HasPrefix(got, "Test:pending Secrets:pending") || strings.Contains(got, "done") {
 		t.Errorf("queued: %s", got)
+	}
+
+	deploy(t, a, "shop", 4, "deploy", "in_flight", 1, sha1, "", 0)
+	exec(t, a, `UPDATE deploys SET step = 'Clean up', runner = 'houston-runner-1' WHERE number = 4`)
+	if got := states(4); !strings.Contains(got, "Deploy:done") || !strings.Contains(got, "Clean up:current") || !strings.Contains(got, "Post-deploy:pending") {
+		t.Errorf("a deploy at the switch: %s", got)
 	}
 }
 

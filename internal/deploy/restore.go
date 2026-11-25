@@ -359,10 +359,18 @@ func (r *reporter) stepConfirmed(step string) bool {
 // as long as the fence allows (after that, the deploy may be taken over).
 // A final status closes the reporter, as finish does.
 func (r *reporter) confirmed(p mission.Progress) bool {
-	until := time.Now().Add(r.fenceAfter)
+	return r.confirmedUntil(p, r.fenceAfter)
+}
+
+// confirmedUntil is confirmed with a given retry window. A GO after the
+// switch uses StaleAfter. Reports use the caller's context, which a fence
+// or deadline does not cancel, so the retry can still get through.
+func (r *reporter) confirmedUntil(p mission.Progress, window time.Duration) bool {
+	until := time.Now().Add(orDefault(window, StaleAfter))
+	closeOnEnd := p.Status != ""
 	for {
 		if r.send(p) {
-			if p.Status != "" {
+			if closeOnEnd {
 				r.mu.Lock()
 				r.closed = true
 				r.mu.Unlock()
@@ -370,12 +378,22 @@ func (r *reporter) confirmed(p mission.Progress) bool {
 			return true
 		}
 		if r.isClosed() || time.Now().After(until) {
+			if closeOnEnd {
+				r.mu.Lock()
+				r.closed = true
+				r.mu.Unlock()
+			}
 			return false // taken over, or Mission Control is gone
 		}
 		select {
 		case <-r.ctx.Done():
+			if closeOnEnd {
+				r.mu.Lock()
+				r.closed = true
+				r.mu.Unlock()
+			}
 			return false
-		case <-time.After(r.retryEvery):
+		case <-time.After(orDefault(r.retryEvery, 2*time.Second)):
 		}
 	}
 }

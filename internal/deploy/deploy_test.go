@@ -526,6 +526,7 @@ func (h *harness) run() int {
 		Timeout:        h.timing.Timeout,
 		HeartbeatEvery: h.timing.HeartbeatEvery,
 		FenceAfter:     h.timing.FenceAfter,
+		StaleAfter:     h.timing.StaleAfter,
 		Claimed:        h.claimed,
 		Project:        h.project,
 		RunTests:       h.tests,

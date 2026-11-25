@@ -6,6 +6,8 @@ package deploy
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,7 +80,59 @@ func TestTLA_C2_NoNoGoAfterTrafficSwitched(t *testing.T) {
 	if !switched.Load() {
 		t.Fatal("kamal deploy never ran")
 	}
-	if final := h.mission.final(); final.Status != "go" {
-		t.Errorf("final status %q (%q); want go: kamal deploy had already switched traffic to %s", final.Status, final.Error, sha[:7])
+	if final := h.mission.final(); final.Status != "go" || !strings.Contains(final.Error, "lost touch") {
+		t.Errorf("final status %q (%q); want go after a fence past the switch: kamal deploy had already switched traffic to %s", final.Status, final.Error, sha[:7])
+	}
+}
+
+// If the GO report never arrives, the switch must still have been reported
+// after kamal deploy, so Mission Control can record switched_at.
+func TestTLA_SwitchIsReportedEvenIfGoIsLost(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.timing = Options{StaleAfter: 20 * time.Millisecond}
+	h.snapshotEvery = time.Millisecond
+	h.mission.reportErr = func(p mission.Progress) error {
+		if p.Status == "go" {
+			return errors.New("connection reset by peer")
+		}
+		return nil
+	}
+	h.run()
+	if !h.reported("Clean up") {
+		t.Error("kamal deploy switched traffic, but Clean up was never reported")
+	}
+}
+
+// A deadline that fires after the switch still finishes GO, with a note.
+func TestTLA_DeadlineAfterSwitchFinishesGo(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.timing = Options{Timeout: 500 * time.Millisecond, HeartbeatEvery: 5 * time.Millisecond}
+	h.docker.block = func(what string) bool { return what == "post_deploy" }
+	h.run()
+	if !h.reported("Clean up") {
+		t.Fatal("kamal deploy never reached the switch")
+	}
+	if final := h.mission.final(); final.Status != "go" || !strings.Contains(final.Error, "timed out") {
+		t.Errorf("final status %q (%q); want go after a deadline past the switch", final.Status, final.Error)
+	}
+}
+
+// A takeover after the switch is no longer this runner's to finish.
+func TestTLA_TakenOverAfterSwitchDoesNotReportGo(t *testing.T) {
+	h := newHarness(t, shopCompose)
+	h.mission.reportErr = func(p mission.Progress) error {
+		if p.Step == "Post-deploy" {
+			return fmt.Errorf("%w: deploy #4 is no longer in flight (abandoned)", mission.ErrTakenOver)
+		}
+		return nil
+	}
+	if code := h.run(); code != 1 {
+		t.Errorf("exit %d, want 1", code)
+	}
+	if !h.reported("Clean up") {
+		t.Error("kamal deploy switched traffic, but Clean up was never reported")
+	}
+	if final := h.mission.final(); final.Status == "go" {
+		t.Errorf("reported %q on a deploy that isn't ours anymore", final.Status)
 	}
 }
