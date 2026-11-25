@@ -1069,12 +1069,15 @@ func (r *reporter) isClosed() bool {
 }
 
 func (r *reporter) post(p mission.Progress) bool {
+	start := time.Now()
 	err := r.mission.Report(r.ctx, r.deploy, p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
 	case err == nil:
-		r.lastOK = time.Now()
+		// Mission Control may record heartbeat_at when the request starts.
+		// Using the reply time would let the fence land after a takeover.
+		r.lastOK = start
 		return true
 	case errors.Is(err, mission.ErrTakenOver):
 		r.closed = true
