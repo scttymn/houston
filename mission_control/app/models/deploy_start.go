@@ -87,7 +87,9 @@ type Started struct {
 }
 
 // StartDeploy starts p's next deploy, in tx. A silent in-flight deploy (no
-// word for StaleAfter) is finished as abandoned; a live one is Busy.
+// word for StaleAfter) is finished as abandoned, except a runner-claimed
+// one that never started work is put back on the queue when nothing else
+// is waiting; a live one is Busy.
 func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now time.Time) (Started, error) {
 	q := New(tx)
 	if err := refuseWhileDeleting(ctx, q, p); err != nil {
@@ -106,10 +108,13 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	case err == nil && current.HeartbeatAt.After(now.Add(-StaleAfter)):
 		return Started{}, Busy{Deploy: current}
 	case err == nil:
-		if cleanUp, err = abandon(ctx, q, current, now); err != nil {
+		var requeued bool
+		if cleanUp, requeued, err = abandon(ctx, q, current, now); err != nil {
 			return Started{}, err
 		}
-		tookOver = current.Number
+		if !requeued {
+			tookOver = current.Number
+		}
 	case !errors.Is(err, sql.ErrNoRows):
 		return Started{}, err
 	}
@@ -133,12 +138,29 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	return started, nil
 }
 
-// abandon finishes a silent in-flight deploy, and settles its copy when
-// it's a copy's: cleanUp is that copy when its new project goes.
-func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, err error) {
+// abandon finishes a silent in-flight deploy, or puts a runner-claimed
+// deploy that never started work back in the queue when nothing else is
+// waiting. cleanUp is the copy when a finished copy's new project goes.
+func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, requeued bool, err error) {
+	if d.Kind == "deploy" && d.Step == "" && d.Runner != "" {
+		_, qerr := q.QueuedDeploy(ctx, d.ProjectID)
+		switch {
+		case errors.Is(qerr, sql.ErrNoRows):
+			n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
+			if err != nil {
+				return 0, false, err
+			}
+			if n == 1 {
+				return 0, true, nil
+			}
+		case qerr != nil:
+			return 0, false, qerr
+		}
+	}
 	d.Status, d.Error = "no_go", "abandoned: no word from houston deploy since "+d.HeartbeatAt.UTC().Format(time.RFC3339)
 	if err := q.AbandonDeploy(ctx, AbandonDeployParams{ID: d.ID, Now: sql.NullTime{Time: now, Valid: true}, Error: d.Error}); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return SettleCopy(ctx, q, d, now)
+	cleanUp, err = SettleCopy(ctx, q, d, now)
+	return cleanUp, false, err
 }
