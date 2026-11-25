@@ -9,7 +9,7 @@ import (
 	"github.com/scttymn/houston/internal/mission"
 )
 
-// C5 (Lease.tla). Time scaled 1 s -> 1 ms: HeartbeatEvery 15, FenceAfter 60,
+// C5. Time scaled 1 s -> 1 ms: HeartbeatEvery 15, FenceAfter 60,
 // HTTP timeout 30, StaleAfter 120. The last report Mission Control takes is a
 // step report sent just after a heartbeat tick: it commits at T
 // (heartbeat_at = T) and its answer lands 29 ms later. Then Mission Control
