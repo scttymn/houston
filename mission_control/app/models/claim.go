@@ -15,9 +15,10 @@ var RunnerName = regexp.MustCompile(`^houston-runner-\d+$`)
 
 // ClaimNext hands the oldest claimable queued deploy to runner, in tx, or
 // nil. Silent in-flight deploys are finished first, except a runner-claimed
-// deploy that never started work is put back on the queue when nothing else
-// is waiting. A project with a live one keeps its queued deploy back. None
-// while the registry is cleaned, or the server updates.
+// deploy that never started work is put back on the queue once, when
+// nothing else is waiting. Restores and copies are still abandoned. A
+// project with a live one keeps its queued deploy back. None while the
+// registry is cleaned, or the server updates.
 // Without a deploy to hand over, it's only the copies' clean-ups those
 // finished need, when there are some.
 func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*Started, error) {
@@ -37,12 +38,16 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 	tookOver := map[int64]int64{}
 	var cleanUp []int64
 	for _, d := range stale {
-		id, requeued, err := abandon(ctx, q, d, now, true)
+		n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
 		if err != nil {
 			return nil, err
 		}
-		if requeued {
+		if n == 1 {
 			continue
+		}
+		id, err := abandon(ctx, q, d, now)
+		if err != nil {
+			return nil, err
 		}
 		tookOver[d.ProjectID] = d.Number
 		if id != 0 {

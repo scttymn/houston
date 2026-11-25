@@ -106,7 +106,7 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	case err == nil && current.HeartbeatAt.After(now.Add(-StaleAfter)):
 		return Started{}, Busy{Deploy: current}
 	case err == nil:
-		if cleanUp, _, err = abandon(ctx, q, current, now, false); err != nil {
+		if cleanUp, err = abandon(ctx, q, current, now); err != nil {
 			return Started{}, err
 		}
 		tookOver = current.Number
@@ -133,24 +133,12 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	return started, nil
 }
 
-// abandon finishes a silent in-flight deploy, or, when allowRequeue is set,
-// puts a runner-claimed deploy that never started work back in the queue
-// once, if nothing else is waiting. cleanUp is the copy when a finished
-// copy's new project goes.
-func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time, allowRequeue bool) (cleanUp int64, requeued bool, err error) {
-	if allowRequeue {
-		n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
-		if err != nil {
-			return 0, false, err
-		}
-		if n == 1 {
-			return 0, true, nil
-		}
-	}
+// abandon finishes a silent in-flight deploy, and settles its copy when
+// it's a copy's: cleanUp is that copy when its new project goes.
+func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, err error) {
 	d.Status, d.Error = "no_go", "abandoned: no word from houston deploy since "+d.HeartbeatAt.UTC().Format(time.RFC3339)
 	if err := q.AbandonDeploy(ctx, AbandonDeployParams{ID: d.ID, Now: sql.NullTime{Time: now, Valid: true}, Error: d.Error}); err != nil {
-		return 0, false, err
+		return 0, err
 	}
-	cleanUp, err = SettleCopy(ctx, q, d, now)
-	return cleanUp, false, err
+	return SettleCopy(ctx, q, d, now)
 }
