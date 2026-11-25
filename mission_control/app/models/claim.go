@@ -37,7 +37,7 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 	tookOver := map[int64]int64{}
 	var cleanUp []int64
 	for _, d := range stale {
-		id, requeued, err := abandon(ctx, q, d, now)
+		id, requeued, err := abandon(ctx, q, d, now, true)
 		if err != nil {
 			return nil, err
 		}

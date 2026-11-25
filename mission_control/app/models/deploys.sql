@@ -36,7 +36,9 @@ UPDATE deploys SET status = 'no_go', finished_at = @now, error = @error, updated
 
 -- name: ReturnToQueue :execrows
 -- A claimed deploy that never started work, put back so another runner can take it.
-UPDATE deploys SET status = 'queued', runner = '', token_digest = '', updated_at = @now
+UPDATE deploys SET status = 'queued',
+  log = log || 'requeued: ' || runner || ' went silent before starting' || char(10),
+  runner = '', token_digest = '', updated_at = @now
 WHERE id = @id AND status = 'in_flight' AND kind = 'deploy' AND step = '' AND runner != '';
 
 -- name: NextDeployNumber :one

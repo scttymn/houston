@@ -87,9 +87,7 @@ type Started struct {
 }
 
 // StartDeploy starts p's next deploy, in tx. A silent in-flight deploy (no
-// word for StaleAfter) is finished as abandoned, except a runner-claimed
-// one that never started work is put back on the queue when nothing else
-// is waiting; a live one is Busy.
+// word for StaleAfter) is finished as abandoned; a live one is Busy.
 func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now time.Time) (Started, error) {
 	q := New(tx)
 	if err := refuseWhileDeleting(ctx, q, p); err != nil {
@@ -108,13 +106,10 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	case err == nil && current.HeartbeatAt.After(now.Add(-StaleAfter)):
 		return Started{}, Busy{Deploy: current}
 	case err == nil:
-		var requeued bool
-		if cleanUp, requeued, err = abandon(ctx, q, current, now); err != nil {
+		if cleanUp, _, err = abandon(ctx, q, current, now, false); err != nil {
 			return Started{}, err
 		}
-		if !requeued {
-			tookOver = current.Number
-		}
+		tookOver = current.Number
 	case !errors.Is(err, sql.ErrNoRows):
 		return Started{}, err
 	}
@@ -138,11 +133,12 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 	return started, nil
 }
 
-// abandon finishes a silent in-flight deploy, or puts a runner-claimed
-// deploy that never started work back in the queue when nothing else is
-// waiting. cleanUp is the copy when a finished copy's new project goes.
-func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, requeued bool, err error) {
-	if d.Kind == "deploy" && d.Step == "" && d.Runner != "" {
+// abandon finishes a silent in-flight deploy, or, when allowRequeue is set,
+// puts a runner-claimed deploy that never started work back in the queue
+// once, if nothing else is waiting. cleanUp is the copy when a finished
+// copy's new project goes.
+func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time, allowRequeue bool) (cleanUp int64, requeued bool, err error) {
+	if allowRequeue && d.Kind == "deploy" && d.Step == "" && d.Runner != "" && !strings.Contains(d.Log, "requeued: ") {
 		_, qerr := q.QueuedDeploy(ctx, d.ProjectID)
 		switch {
 		case errors.Is(qerr, sql.ErrNoRows):

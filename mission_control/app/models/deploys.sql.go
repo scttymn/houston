@@ -765,7 +765,9 @@ func (q *Queries) RestoreServing(ctx context.Context, arg RestoreServingParams) 
 }
 
 const returnToQueue = `-- name: ReturnToQueue :execrows
-UPDATE deploys SET status = 'queued', runner = '', token_digest = '', updated_at = ?1
+UPDATE deploys SET status = 'queued',
+  log = log || 'requeued: ' || runner || ' went silent before starting' || char(10),
+  runner = '', token_digest = '', updated_at = ?1
 WHERE id = ?2 AND status = 'in_flight' AND kind = 'deploy' AND step = '' AND runner != ''
 `
 
