@@ -982,7 +982,7 @@ type reporter struct {
 	deploy     mission.Deploy
 	out        io.Writer
 	fenceAfter time.Duration
-	staleAfter time.Duration // GO retry window after the switch; zero: StaleAfter
+	staleAfter time.Duration // GO retry window after the switch, set at construction
 	retryEvery time.Duration // between tries of a report that must get through
 	cancel     context.CancelCauseFunc
 

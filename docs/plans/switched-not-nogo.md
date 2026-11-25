@@ -29,6 +29,9 @@ TLA+ review of Houston's deploy record (C1, C2). If the one GO report is lost, o
 | A regular deploy's Clean up or GO records `switched_at` and does not move the data generation | `TestReportDeploySwitch` |
 | The flight board shows Clean up in a deploy's steps, as current after Deploy | `TestV1StepStates` |
 | A later start finishes a silent switched deploy GO, not abandoned NO-GO | `TestStartDeployAbandonsSwitchedAsGo` |
+| A silent switched restore is finished GO the same way | `TestStartDeployAbandonsSwitchedRestoreAsGo` |
+| A silent copy that switched but has not handed over stays NO-GO, and its new project goes | `TestCopyAbandonedAfterSwitchWithoutHandover` |
+| A silent copy that has handed over is finished GO | `TestCopyAbandonedAfterHandoverFinishesGo` |
 
 ## Evidence (2026-11-24)
 
