@@ -37,6 +37,10 @@ const (
 	RestoreTimeout = 4 * time.Hour
 	HeartbeatEvery = 15 * time.Second
 	FenceAfter     = 60 * time.Second
+	// StaleAfter is how long Mission Control waits without a word before
+	// another runner may take the deploy over. A GO after the switch is
+	// retried this long, even after the run has been fenced.
+	StaleAfter = 2 * time.Minute
 )
 
 // Exit codes, as the rest of the CLI uses them.
@@ -456,6 +460,13 @@ func (r *run) deploy(tookOver bool) int {
 		return r.fail(fmt.Sprintf("kamal deploy failed (exit %d%s); the old version keeps serving", code, errText(err)))
 	}
 
+	// Traffic is on the new version. Tell Mission Control now, with
+	// retries: a lost GO or a fence after this must not leave the deploy
+	// in flight, then abandoned NO-GO, while the new version serves.
+	if !r.report.stepConfirmed("Clean up") {
+		r.report.logf("Mission Control didn't confirm the switch; the GO report will say so.\n")
+	}
+
 	// A copy's app passed its health check: the hosts it shares with the old
 	// project move to it, with no failed request (Mission Control does it).
 	if copy := r.report.deploy.Copy; r.report.deploy.IsCopy() {
@@ -490,7 +501,15 @@ func (r *run) deploy(tookOver bool) int {
 	}
 
 	if r.ctx.Err() != nil {
-		return r.stop()
+		if errors.Is(context.Cause(r.ctx), errTakenOver) {
+			return r.stop()
+		}
+		// Already serving: don't report NO-GO or release Kamal's lock.
+		r.capProxy()
+		note := r.afterSwitchNote()
+		r.report.logf("GO: %s is serving %s (%s)\n", r.p.Name, r.sha[:7], note)
+		r.report.finish("go", note)
+		return 0
 	}
 	r.capProxy()
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
@@ -910,6 +929,20 @@ func (r *run) stop() int {
 	return exitFailure
 }
 
+// afterSwitchNote is why the run ended after Kamal had already switched
+// traffic: the deploy still finishes GO, and the note is kept on the row.
+func (r *run) afterSwitchNote() string {
+	cause := context.Cause(r.ctx)
+	switch {
+	case errors.Is(cause, errLostTouch):
+		return fmt.Sprintf("lost touch with Mission Control for over %s after traffic had switched; the new version is serving", r.report.fenceAfter)
+	case errors.Is(cause, context.DeadlineExceeded):
+		return fmt.Sprintf("timed out after %s after traffic had switched; the new version is serving", r.timeout)
+	default:
+		return fmt.Sprintf("stopped after traffic had switched (%v); the new version is serving", cause)
+	}
+}
+
 func orDefault(d, def time.Duration) time.Duration {
 	if d > 0 {
 		return d
@@ -998,10 +1031,37 @@ func (r *reporter) finish(status, msg string) {
 	if len(msg) > 1000 {
 		msg = msg[:1000]
 	}
-	r.send(mission.Progress{Status: status, Error: msg})
+	p := mission.Progress{Status: status, Error: msg}
+	if status == "go" {
+		r.confirmFinal(p)
+		return
+	}
+	r.send(p)
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
+}
+
+// confirmFinal sends a final GO until Mission Control takes it, or
+// StaleAfter has passed. It does not stop when the run's context ends:
+// a fence or deadline after the switch must still record GO.
+func (r *reporter) confirmFinal(p mission.Progress) bool {
+	until := time.Now().Add(StaleAfter)
+	for {
+		if r.send(p) {
+			r.mu.Lock()
+			r.closed = true
+			r.mu.Unlock()
+			return true
+		}
+		if r.isClosed() || time.Now().After(until) {
+			r.mu.Lock()
+			r.closed = true
+			r.mu.Unlock()
+			return false
+		}
+		time.Sleep(orDefault(r.retryEvery, 2*time.Second))
+	}
 }
 
 // heartbeat sends progress every interval (the log so far, or nothing), so
@@ -1069,7 +1129,15 @@ func (r *reporter) isClosed() bool {
 }
 
 func (r *reporter) post(p mission.Progress) bool {
-	err := r.mission.Report(r.ctx, r.deploy, p)
+	ctx := r.ctx
+	if p.Status == "go" {
+		// The run may already have been fenced or have hit its deadline.
+		// The GO must still get through; the HTTP client bounds the call.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+	}
+	err := r.mission.Report(ctx, r.deploy, p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
