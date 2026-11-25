@@ -918,8 +918,8 @@ func TestDeployStopsWhenTakenOver(t *testing.T) {
 }
 
 func TestDeployFencesItselfWhenMissionControlIsGone(t *testing.T) {
-	if FenceAfter >= 120*time.Second {
-		t.Fatalf("FenceAfter = %s; it must be shorter than Mission Control's takeover threshold (Deploy::STALE_AFTER, 2 minutes)", FenceAfter)
+	if FenceAfter >= StaleAfter {
+		t.Fatalf("FenceAfter = %s; it must be shorter than Mission Control's takeover threshold (StaleAfter, %s)", FenceAfter, StaleAfter)
 	}
 	h := newHarness(t, shopCompose)
 	h.timing = Options{HeartbeatEvery: 5 * time.Millisecond, FenceAfter: 40 * time.Millisecond, Timeout: 2 * time.Second}

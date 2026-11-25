@@ -40,7 +40,8 @@ const (
 	// StaleAfter is how long Mission Control waits without a word, counted
 	// from the last heartbeat it took, before another runner may take the
 	// deploy over (models.StaleAfter). A GO after the switch is retried
-	// this long from finish; retries past that clock get a 409.
+	// this long from finish. A stale row still accepts reports until a
+	// later claim finishes it.
 	StaleAfter = 2 * time.Minute
 )
 
@@ -489,11 +490,19 @@ func (r *run) deploy(tookOver bool) int {
 		}
 	}
 
-	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" && r.ctx.Err() == nil {
-		r.report.step("Post-deploy")
-		code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
-		if (err != nil || code != 0) && r.ctx.Err() == nil {
-			r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
+	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" {
+		if r.ctx.Err() != nil {
+			r.report.logf("post_deploy hook didn't run: the run ended after the switch\n")
+		} else {
+			r.report.step("Post-deploy")
+			code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
+			if err != nil || code != 0 {
+				if r.ctx.Err() != nil {
+					r.report.logf("post_deploy hook was stopped; the deploy stands\n")
+				} else {
+					r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
+				}
+			}
 		}
 	}
 
@@ -510,12 +519,16 @@ func (r *run) deploy(tookOver bool) int {
 		r.capProxy()
 		note := r.afterSwitchNote()
 		r.report.logf("GO: %s is serving %s (%s)\n", r.p.Name, r.sha[:7], note)
-		r.report.finish("go", note)
+		if !r.report.finish("go", note) {
+			r.report.logf("Mission Control didn't confirm the GO; the new version is serving\n")
+		}
 		return 0
 	}
 	r.capProxy()
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
-	r.report.finish("go", "")
+	if !r.report.finish("go", "") {
+		r.report.logf("Mission Control didn't confirm the GO; the new version is serving\n")
+	}
 	return 0
 }
 
@@ -1030,19 +1043,19 @@ func (r *reporter) logf(format string, args ...any) { fmt.Fprintf(r, format, arg
 
 func (r *reporter) step(name string) { r.send(mission.Progress{Step: name}) }
 
-func (r *reporter) finish(status, msg string) {
+func (r *reporter) finish(status, msg string) bool {
 	if len(msg) > 1000 {
 		msg = msg[:1000]
 	}
 	p := mission.Progress{Status: status, Error: msg}
 	if status == "go" {
-		r.confirmedUntil(p, r.staleAfter)
-		return
+		return r.confirmedUntil(p, r.staleAfter)
 	}
-	r.send(p)
+	ok := r.send(p)
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
+	return ok
 }
 
 // heartbeat sends progress every interval (the log so far, or nothing), so

@@ -13,8 +13,8 @@ TLA+ review of Houston's deploy record (C1, C2). If the one GO report is lost, o
 ## Design
 
 - Right after `kamal deploy` succeeds, report the Switched step (`Clean up`) with retries. Mission Control records `switched_at` for every kind. Restores still move the data generation and adopt their compose.yml.
-- A fence or deadline after that finish is GO with a note. A takeover still stops without reporting.
-- The GO report is retried for `StaleAfter`. Reports already use the caller's context, which a fence or deadline does not cancel.
+- A fence or deadline after that, on a regular deploy, finishes GO with a note. A takeover still stops without reporting. A copy whose handover has not run still ends NO-GO, and its new project is removed.
+- The GO report is retried for `StaleAfter`. Reports already use the caller's context, which a fence or deadline does not cancel. If the runner is gone, the next claim finishes a switched row GO with a note, instead of abandoned NO-GO.
 - Flight board step lists include `Clean up` after Deploy (and after Deploy, before Handover, for a copy).
 
 ## Acceptance criteria → tests
@@ -28,6 +28,7 @@ TLA+ review of Houston's deploy record (C1, C2). If the one GO report is lost, o
 | A takeover after the switch does not report GO | `TestTLA_TakenOverAfterSwitchDoesNotReportGo` |
 | A regular deploy's Clean up or GO records `switched_at` and does not move the data generation | `TestReportDeploySwitch` |
 | The flight board shows Clean up in a deploy's steps, as current after Deploy | `TestV1StepStates` |
+| A later start finishes a silent switched deploy GO, not abandoned NO-GO | `TestStartDeployAbandonsSwitchedAsGo` |
 
 ## Evidence (2026-11-24)
 

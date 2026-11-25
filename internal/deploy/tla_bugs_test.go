@@ -22,6 +22,7 @@ import (
 // switched traffic as abandoned NO-GO.
 func TestTLA_C1_LostGoReportIsRetried(t *testing.T) {
 	h := newHarness(t, shopCompose)
+	h.snapshotEvery = time.Millisecond
 	var failedOnce atomic.Bool
 	h.mission.reportErr = func(p mission.Progress) error {
 		if p.Status == "go" && failedOnce.CompareAndSwap(false, true) {

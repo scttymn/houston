@@ -366,34 +366,25 @@ func (r *reporter) confirmed(p mission.Progress) bool {
 // switch uses StaleAfter. Reports use the caller's context, which a fence
 // or deadline does not cancel, so the retry can still get through.
 func (r *reporter) confirmedUntil(p mission.Progress, window time.Duration) bool {
-	until := time.Now().Add(orDefault(window, StaleAfter))
-	closeOnEnd := p.Status != ""
+	if p.Status != "" {
+		defer func() {
+			r.mu.Lock()
+			r.closed = true
+			r.mu.Unlock()
+		}()
+	}
+	until := time.Now().Add(window)
 	for {
 		if r.send(p) {
-			if closeOnEnd {
-				r.mu.Lock()
-				r.closed = true
-				r.mu.Unlock()
-			}
 			return true
 		}
 		if r.isClosed() || time.Now().After(until) {
-			if closeOnEnd {
-				r.mu.Lock()
-				r.closed = true
-				r.mu.Unlock()
-			}
 			return false // taken over, or Mission Control is gone
 		}
 		select {
 		case <-r.ctx.Done():
-			if closeOnEnd {
-				r.mu.Lock()
-				r.closed = true
-				r.mu.Unlock()
-			}
 			return false
-		case <-time.After(orDefault(r.retryEvery, 2*time.Second)):
+		case <-time.After(r.retryEvery):
 		}
 	}
 }
