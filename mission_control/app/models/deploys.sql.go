@@ -768,7 +768,9 @@ const returnToQueue = `-- name: ReturnToQueue :execrows
 UPDATE deploys SET status = 'queued',
   log = log || 'requeued: ' || runner || ' went silent before starting' || char(10),
   runner = '', token_digest = '', updated_at = ?1
-WHERE id = ?2 AND status = 'in_flight' AND kind = 'deploy' AND step = '' AND runner != ''
+WHERE deploys.id = ?2 AND deploys.status = 'in_flight' AND deploys.kind = 'deploy' AND deploys.step = '' AND deploys.runner != ''
+  AND instr(deploys.log, 'requeued: ') = 0
+  AND NOT EXISTS (SELECT 1 FROM deploys w WHERE w.project_id = deploys.project_id AND w.status = 'queued')
 `
 
 type ReturnToQueueParams struct {

@@ -138,19 +138,13 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 // once, if nothing else is waiting. cleanUp is the copy when a finished
 // copy's new project goes.
 func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time, allowRequeue bool) (cleanUp int64, requeued bool, err error) {
-	if allowRequeue && d.Kind == "deploy" && d.Step == "" && d.Runner != "" && !strings.Contains(d.Log, "requeued: ") {
-		_, qerr := q.QueuedDeploy(ctx, d.ProjectID)
-		switch {
-		case errors.Is(qerr, sql.ErrNoRows):
-			n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
-			if err != nil {
-				return 0, false, err
-			}
-			if n == 1 {
-				return 0, true, nil
-			}
-		case qerr != nil:
-			return 0, false, qerr
+	if allowRequeue {
+		n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
+		if err != nil {
+			return 0, false, err
+		}
+		if n == 1 {
+			return 0, true, nil
 		}
 	}
 	d.Status, d.Error = "no_go", "abandoned: no word from houston deploy since "+d.HeartbeatAt.UTC().Format(time.RFC3339)

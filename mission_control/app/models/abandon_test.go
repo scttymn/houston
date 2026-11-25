@@ -189,3 +189,63 @@ func TestStartDeployAbandonsAStaleClaim(t *testing.T) {
 		t.Errorf("queued after StartDeploy: %v; want no queued row, so the old push cannot override the hand deploy", err)
 	}
 }
+
+func TestClaimNextAbandonsAStaleHandDeploy(t *testing.T) {
+	ctx, t0 := context.Background(), time.Now()
+	d, p := shopWith(t, `{}`)
+	var started models.Started
+	if err := d.Tx(ctx, func(tx *db.Tx) (err error) {
+		started, err = models.StartDeploy(ctx, tx, p, sha("a"), "refs/heads/main", t0)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := claimAt(t, d, "houston-runner-1", t0.Add(models.StaleAfter+time.Second))
+	got := deployByID(t, d, started.Deploy.ID)
+	if second != nil {
+		t.Errorf("claim got deploy #%d runner %s; want a stale hand deploy left abandoned, not handed to a runner", second.Deploy.Number, second.Deploy.Runner)
+	}
+	if got.Status != "no_go" || got.Runner != "" || !strings.HasPrefix(got.Error, "abandoned: ") {
+		t.Errorf("stale hand deploy: status %s runner %q error %q; want no_go abandoned, no runner", got.Status, got.Runner, got.Error)
+	}
+}
+
+func addProject(t *testing.T, d *db.DB, id int64, name string) models.Project {
+	t.Helper()
+	if _, err := d.Write.Exec(`INSERT INTO projects (id, name, app_service, services, health, port, repo_url, deploy_rule) VALUES (?, ?, 'web', '["web"]', '/', 80, 'git@x:y.git', '{}')`, id, name); err != nil {
+		t.Fatal(err)
+	}
+	p, err := models.New(d.Read).ProjectByID(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestRequeueClearsTheTokenOfAWaitingClaim(t *testing.T) {
+	t0 := time.Now()
+	d, shop := shopWith(t, `{}`)
+	blog := addProject(t, d, 2, "blog")
+	queuePush(t, d, shop, sha("a"), "refs/heads/main", t0)
+	queuePush(t, d, blog, sha("b"), "refs/heads/main", t0)
+	shopClaim := claimAt(t, d, "houston-runner-1", t0)
+	blogClaim := claimAt(t, d, "houston-runner-2", t0)
+	if shopClaim == nil || blogClaim == nil {
+		t.Fatal("both projects should have been claimed")
+	}
+	next := claimAt(t, d, "houston-runner-3", t0.Add(models.StaleAfter+time.Second))
+	if next == nil || next.Deploy.ID != shopClaim.Deploy.ID {
+		t.Fatalf("first stale claim should have been handed over; got %+v", next)
+	}
+	waiting := deployByID(t, d, blogClaim.Deploy.ID)
+	if waiting.Status != "queued" || waiting.Runner != "" {
+		t.Errorf("blog after the same claim: status %s runner %q; want queued with the token cleared", waiting.Status, waiting.Runner)
+	}
+	if waiting.OwnedBy(blogClaim.Token) {
+		t.Errorf("the old blog runner's token still matches the waiting row")
+	}
+	handed := claimAt(t, d, "houston-runner-4", t0.Add(models.StaleAfter+2*time.Second))
+	if handed == nil || handed.Deploy.ID != blogClaim.Deploy.ID || !handed.Deploy.OwnedBy(handed.Token) || handed.Deploy.OwnedBy(blogClaim.Token) {
+		t.Errorf("next claim %+v; want the waiting blog push with a new token", handed)
+	}
+}
