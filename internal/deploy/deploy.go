@@ -1075,7 +1075,8 @@ func (r *reporter) post(p mission.Progress) bool {
 	defer r.mu.Unlock()
 	switch {
 	case err == nil:
-		// Mission Control may record heartbeat_at when the request starts.
+		// lastOK is the request start, which is never after the heartbeat_at
+		// this report writes (Mission Control stamps it after reading the body).
 		// Using the reply time would let the fence land after a takeover.
 		r.lastOK = start
 		return true
