@@ -242,7 +242,7 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 
 A runner that claims a push and then stays quiet through git fetch, or never hears the claim answer, used to be marked NO-GO after 2 minutes. The push was lost because `seen_refs` had already moved, so the poll would not queue it again.
 
-`ClaimNext` calls `ReturnToQueue` for a runner-claimed deploy with an empty step, that has not already been requeued, when nothing else is waiting. The row goes back on the queue with its token cleared and a log line naming the silent runner. The same claim, or a later one that sees that log line, hands the row out with `took_over` set, so the runner still releases Kamal's lock. A newer push on the same row drops the log line, so the new commit still gets one retry. A second silence, a hand deploy, a restore, a copy, or a deploy that already reported a step is still abandoned.
+`ClaimNext` calls `ReturnToQueue` for a runner-claimed deploy with an empty step, that has not already been requeued, when nothing else is waiting. The row goes back on the queue with its token cleared and a log line naming the silent runner. The same claim, or a later one that sees that log line, hands the row out with `took_over` set, so the runner still releases Kamal's lock. A newer push on the same row drops the log line, so the new commit still gets one retry. A second silence, a hand deploy, a restore, a copy, or a deploy that already reported a step is still abandoned. An empty step means Mission Control has not heard a step, not that the runner never started; `took_over` and the Sync token check cover a lost first step report.
 
 #### Acceptance criteria → tests
 

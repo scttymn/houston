@@ -46,7 +46,6 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 			return nil, err
 		}
 		if n == 1 {
-			tookOver[d.ProjectID] = d.Number
 			continue
 		}
 		id, err := abandon(ctx, q, d, now)
@@ -108,15 +107,16 @@ func hasRequeueMarker(log string) bool {
 // withoutRequeueMarker drops requeue lines so a newer push on the same row
 // still gets one retry of its own.
 func withoutRequeueMarker(log string) string {
-	if !hasRequeueMarker(log) {
-		return log
-	}
-	var b strings.Builder
-	for _, line := range strings.SplitAfter(log, "\n") {
-		if strings.HasPrefix(line, requeuedLogPrefix) {
+	for {
+		i := strings.Index(log, requeuedLogPrefix)
+		if i < 0 {
+			return log
+		}
+		rest := log[i:]
+		if n := strings.IndexByte(rest, '\n'); n >= 0 {
+			log = log[:i] + rest[n+1:]
 			continue
 		}
-		b.WriteString(line)
+		return log[:i]
 	}
-	return b.String()
 }

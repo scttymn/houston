@@ -316,6 +316,13 @@ func TestNewerPushOnARequeuedRowStillGetsOneRetry(t *testing.T) {
 	if claimAt(t, d, "houston-runner-3", t0.Add(models.StaleAfter+time.Second)) == nil {
 		t.Fatal("expected shop to be handed to the next runner")
 	}
+	waiting, err := models.New(d.Read).QueuedDeploy(context.Background(), blog.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Write.Exec(`UPDATE deploys SET log = ? WHERE id = ?`, "partial"+waiting.Log, waiting.ID); err != nil {
+		t.Fatal(err)
+	}
 	queuePush(t, d, blog, sha("c"), "refs/heads/main", t0.Add(models.StaleAfter+time.Second))
 	queued, err := models.New(d.Read).QueuedDeploy(context.Background(), blog.ID)
 	if err != nil {
