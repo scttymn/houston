@@ -152,6 +152,38 @@ func TestReportRestoreSwitch(t *testing.T) {
 	}
 }
 
+// A deploy records the switch when Kamal has moved traffic (the Clean up
+// step, or a GO whose switch report was lost), and does not move the
+// project's data generation: that's a restore's.
+func TestReportDeploySwitch(t *testing.T) {
+	a, h := synced(t)
+	s := start(t, h, "shop")
+	var generation int
+	project := func() {
+		a.DB.Read.QueryRow(`SELECT data_generation FROM projects WHERE name = 'shop'`).Scan(&generation)
+	}
+	project()
+	wantGen := generation
+
+	is(t, report(h, s.ID, s.Token, `{"step":"Clean up"}`), 200, `{"number":1,"status":"in_flight"}`)
+	if d := deployRow(t, a, s.ID); !d.SwitchedAt.Valid {
+		t.Error("Clean up left switched_at empty")
+	}
+	report(h, s.ID, s.Token, `{"status":"go"}`)
+	if project(); generation != wantGen {
+		t.Errorf("a deploy moved the generation to %d", generation)
+	}
+
+	lost := start(t, h, "shop")
+	report(h, lost.ID, lost.Token, `{"status":"go"}`)
+	if d := deployRow(t, a, lost.ID); !d.SwitchedAt.Valid {
+		t.Error("GO left switched_at empty")
+	}
+	if project(); generation != wantGen {
+		t.Errorf("a deploy GO moved the generation to %d", generation)
+	}
+}
+
 // A project's first GO points its names; later ones leave them to sync.
 func TestReportFirstGoPointsDNS(t *testing.T) {
 	a, h, f := throughCloudflare(t)

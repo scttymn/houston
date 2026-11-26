@@ -355,12 +355,12 @@ Stuck-alive: Batch 4's deadline in houston deploy
 ### Design (short)
 - **One run context.** Every docker command runs under it. It ends on:
   - **taken over:** any report answered 409, meaning another deploy owns the record
-  - **lost touch:** no report has succeeded for **60 s** (`FenceAfter`)
+  - **lost touch:** a failed report returns, and the last successful report's request started more than **60 s** ago (`FenceAfter`)
   - **the deadline:** `--timeout`, default 30 min
 - **Heartbeat:** every **15 s** (`HeartbeatEvery`), the reporter sends whatever log has built up, or an empty progress report, so Mission Control's `heartbeat_at` moves during a long step.
   - Log chunks are ≤ 200 KiB (Mission Control takes up to 256 KiB).
   - The reporter is safe for the step output and the heartbeat to use at once (a mutex).
-- **Self-fencing** closes the race where Mission Control is unreachable but the deploy is still working. A takeover needs **120 s** of silence (`Deploy::STALE_AFTER`); the old process stops itself at **60 s** of failed reports. So the new owner's `kamal lock release` never frees a lock that a live Kamal still holds. A test pins `FenceAfter < 120 s`.
+- **Self-fencing** closes the race where Mission Control is unreachable but the deploy is still working. A takeover needs **120 s** of silence (`models.StaleAfter`). The runner records last contact from when a successful report starts. Mission Control stamps that report's `heartbeat_at` after it reads the body, so the request start is never later than that stamp. It stops at the first failed report after **60 s** (`FenceAfter`). A hung report can take the client's **30 s** timeout to return, and the next heartbeat can be **15 s** later, so once a progress report has succeeded, the stop can land up to **105 s** after that `heartbeat_at`, 15 s before a takeover. A test pins `FenceAfter + HeartbeatEvery + mission.ClientTimeout` under 120 s. The first `heartbeat_at` is written by `StartDeploy` or `Claim`, before the reporter exists; that gap is not closed here.
 - **Stopping:** cancelling kills the docker CLI process, but not its container. So houston removes its own containers (`houston-kamal-<name>`, `<name>-release-<sha7>`), with a fresh context. Then, by cause:
   - **taken over:** exit 1 with "taken over"; no final report (it isn't ours) and no lock release (the new owner releases it).
   - **lost touch / deadline:** `kamal lock release` (we held it), a best-effort final `no_go` report, and exit 1.
@@ -372,7 +372,7 @@ Stuck-alive: Batch 4's deadline in houston deploy
 | # | Acceptance criterion | Test | Lens |
 |---|---|---|---|
 | 1 | A report answered 409 during Build → the run stops: no later step, its containers removed, exit 1 "taken over", no final report, no lock release | `internal/deploy` `TestDeployStopsWhenTakenOver` | At-least-once & ownership |
-| 2 | Reports failing for longer than `FenceAfter` → the run stops: containers removed, `kamal lock release`, exit 1 "lost touch with Mission Control"; `FenceAfter` < 120 s | `TestDeployFencesItselfWhenMissionControlIsGone` | At-least-once (TOCTOU) |
+| 2 | Reports failing for longer than `FenceAfter` → the run stops: containers removed, `kamal lock release`, exit 1 "lost touch with Mission Control"; `FenceAfter + HeartbeatEvery + mission.ClientTimeout` < 120 s | `TestDeployFencesItselfWhenMissionControlIsGone`, `TestReporterFencesFromRequestStart`, `TestTLA_C5_FenceBeforeTakeover` | At-least-once (TOCTOU) |
 | 3 | The deadline passes during `kamal deploy` → the Kamal container is removed, `kamal lock release`, final `no_go` "timed out after …", exit 1 | `TestDeployDeadline` | Stuck-alive |
 | 4 | During a long step, heartbeats reach Mission Control at the interval | `TestDeployHeartbeats` | Contract |
 | 5 | 700 KiB of step output → every report's log ≤ 200 KiB, and together they equal the output | `TestDeployLogChunks` | Scale |
@@ -536,3 +536,11 @@ None blocking Batch 1. Recorded for Batch 2:
   - A restore retries too, and output split mid-line is read right.
   - Mutation check: 9, each caught. Two conditions the mutations showed were redundant were cut: stripping colour codes (Kamal runs without a terminal), and a second check of the pull step.
   - `bin/go test ./...`, `bin/test-integration` and gofmt are clean.
+
+## Found later: the lease fence could land after a takeover (2026-11-24)
+- **What happened:** Mission Control writes `heartbeat_at` when it accepts a report (`api/report.go`, the `now` taken after reading the body). The runner used to set `lastOK` when the reply arrived. A slow reply delayed that stamp. The fence is checked only when a later report returns, so a hang of the 30 s client timeout plus a 15 s heartbeat could put the stop about 15 s after the 120 s takeover threshold.
+- **The fix:** `reporter.post` records `lastOK` from when the request starts. The client's start is never after the `heartbeat_at` that report writes (Mission Control stamps it after reading the body). With the existing timings, once a progress report has succeeded, the stop is at most 105 s after that `heartbeat_at`. The first `heartbeat_at` comes from `StartDeploy` or `Claim`, before the reporter exists. A claimed deploy also fetches and syncs in that gap. Closing it is a separate change (C10).
+- **Tests:**
+  - `TestReporterFencesFromRequestStart`: a report that succeeds after 40 ms, then one that fails at once, with a 30 ms fence, must stop for lost touch. This fails if `lastOK` is the reply time.
+  - `TestTLA_C5_FenceBeforeTakeover`: the scaled path (15/60/30/120 ms) with a late reply and then hung posts. The runner must stop before the takeover threshold.
+  - `TestDeployFencesItselfWhenMissionControlIsGone` pins `FenceAfter + HeartbeatEvery + mission.ClientTimeout < 120 s`.

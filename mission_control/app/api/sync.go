@@ -55,7 +55,7 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 	}
 	q := models.New(c.DB.Read)
 	if s.ClaimedDeploy != nil {
-		if err := c.claimMatches(ctx, s, token); err != nil {
+		if err := c.claimMatches(ctx, q, s, token); err != nil {
 			return err
 		}
 	}
@@ -89,6 +89,11 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 	var project models.Project
 	var dropped []string
 	err = c.DB.Tx(ctx, func(tx *db.Tx) error {
+		if s.ClaimedDeploy != nil {
+			if err := c.claimMatches(ctx, models.New(tx), s, token); err != nil {
+				return err
+			}
+		}
 		project, dropped, err = s.Save(ctx, tx, now)
 		return err
 	})
@@ -133,10 +138,9 @@ func (c Controller) Sync(w http.ResponseWriter, r *http.Request) error {
 }
 
 // claimMatches checks a runner's sync against the deploy it claimed: the
-// repo's compose.yml must name that deploy's project, so one repo can't
-// sync as another project.
-func (c Controller) claimMatches(ctx context.Context, s models.Sync, token string) error {
-	q := models.New(c.DB.Read)
+// token must own it, it must still be in flight, and the repo's compose.yml
+// must name that deploy's project, so one repo can't sync as another project.
+func (c Controller) claimMatches(ctx context.Context, q *models.Queries, s models.Sync, token string) error {
 	claimed, err := q.DeployByID(ctx, *s.ClaimedDeploy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return web.Status(http.StatusUnprocessableEntity, errors.New("no such deploy"))
@@ -146,6 +150,13 @@ func (c Controller) claimMatches(ctx context.Context, s models.Sync, token strin
 	}
 	if !claimed.OwnedBy(token) {
 		return web.Status(http.StatusForbidden, errors.New("that token isn't this deploy's"))
+	}
+	if !claimed.InFlight() {
+		why := claimed.Error
+		if why == "" {
+			why = claimed.Status
+		}
+		return web.Status(http.StatusConflict, fmt.Errorf("deploy #%d is no longer in flight (%s); it was finished or taken over", claimed.Number, why))
 	}
 	project, err := q.ProjectByID(ctx, claimed.ProjectID)
 	if err != nil {

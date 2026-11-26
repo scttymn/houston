@@ -226,6 +226,25 @@ func TestSyncClaimedDeploy(t *testing.T) {
 	}
 }
 
+// A runner whose claimed deploy was abandoned still holds the token, but
+// Sync is refused: the deploy is no longer in flight, so that checkout
+// must not save project config.
+func TestSyncRefusesAnAbandonedClaim(t *testing.T) {
+	a, h := runnerAPI(t)
+	post(h, "POST", "/api/projects/sync", payload(map[string]any{"variables": []any{}}), nil)
+	id := deploy(t, a, "shop", 1, "deploy", "in_flight", 1, sha1, "the-token", 0)
+	exec(t, a, `UPDATE deploys SET status = 'no_go', error = 'abandoned: no word from houston deploy since 2026-11-24T00:00:00Z' WHERE id = ?`, id)
+	token := http.Header{"X-Houston-Deploy-Token": {"the-token"}}
+	body := payload(map[string]any{"claimed_deploy": id, "services": []string{"web", "db", "cache"}, "variables": []any{}})
+	is(t, post(h, "POST", "/api/projects/sync", body, token), 409,
+		`{"error":"deploy #1 is no longer in flight (abandoned: no word from houston deploy since 2026-11-24T00:00:00Z); it was finished or taken over"}`)
+	var services string
+	a.DB.Read.QueryRow(`SELECT services FROM projects WHERE name = 'shop'`).Scan(&services)
+	if services != `["web","db"]` {
+		t.Errorf("the abandoned claim changed the project: %s", services)
+	}
+}
+
 // A restore's sync only checks its snapshot's compose.yml, and keeps it for
 // the switch: nothing is stored on the project now.
 func TestSyncRestoreCheck(t *testing.T) {

@@ -526,6 +526,7 @@ func (h *harness) run() int {
 		Timeout:        h.timing.Timeout,
 		HeartbeatEvery: h.timing.HeartbeatEvery,
 		FenceAfter:     h.timing.FenceAfter,
+		StaleAfter:     h.timing.StaleAfter,
 		Claimed:        h.claimed,
 		Project:        h.project,
 		RunTests:       h.tests,
@@ -916,9 +917,33 @@ func TestDeployStopsWhenTakenOver(t *testing.T) {
 	}
 }
 
+func TestReporterFencesFromRequestStart(t *testing.T) {
+	var n atomic.Int32
+	m := &fakeMission{reportErr: func(p mission.Progress) error {
+		if n.Add(1) == 1 {
+			time.Sleep(40 * time.Millisecond)
+			return nil
+		}
+		return errors.New("connection refused")
+	}}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	r := &reporter{ctx: ctx, mission: m, cancel: cancel, lastOK: time.Now(), fenceAfter: 30 * time.Millisecond}
+	if !r.post(mission.Progress{Step: "build"}) {
+		t.Fatal("the delayed report should succeed")
+	}
+	if r.post(mission.Progress{}) {
+		t.Fatal("the failed report should not get through")
+	}
+	if !errors.Is(context.Cause(ctx), errLostTouch) {
+		t.Fatalf("cause %v, want lost touch: lastOK must be the request start, not the reply", context.Cause(ctx))
+	}
+}
+
 func TestDeployFencesItselfWhenMissionControlIsGone(t *testing.T) {
-	if FenceAfter >= 120*time.Second {
-		t.Fatalf("FenceAfter = %s; it must be shorter than Mission Control's takeover threshold (Deploy::STALE_AFTER, 2 minutes)", FenceAfter)
+	if gap := FenceAfter + HeartbeatEvery + mission.ClientTimeout; gap >= StaleAfter {
+		t.Fatalf("FenceAfter (%s) + HeartbeatEvery (%s) + mission.ClientTimeout (%s) = %s; must be shorter than Mission Control's takeover threshold (StaleAfter, %s)",
+			FenceAfter, HeartbeatEvery, mission.ClientTimeout, gap, StaleAfter)
 	}
 	h := newHarness(t, shopCompose)
 	h.timing = Options{HeartbeatEvery: 5 * time.Millisecond, FenceAfter: 40 * time.Millisecond, Timeout: 2 * time.Second}

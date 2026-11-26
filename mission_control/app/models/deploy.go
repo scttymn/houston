@@ -35,11 +35,12 @@ func (d Deploy) StatusWords() string { return strings.ReplaceAll(d.Status, "_", 
 
 // A deploy's steps: houston deploy's, after the runner's Test; a restore's
 // (the runner reports Switched once Kamal has switched traffic); a copy's
-// first deploy's, with the old project's data and the handover.
+// first deploy's, with the old project's data and the handover. Deploys and
+// copies also report Switched, right after Deploy, before post-deploy work.
 var (
-	DeploySteps  = []string{"Test", "Secrets", "Build", "Snapshot", "Accessories", "Release", "Deploy", "Post-deploy"}
+	DeploySteps  = []string{"Test", "Secrets", "Build", "Snapshot", "Accessories", "Release", "Deploy", Switched, "Post-deploy"}
 	RestoreSteps = []string{"Prepare", "Image", "Accessories", "Restore data", "Safety snapshot", "Switch", Switched}
-	CopySteps    = []string{"Test", "Secrets", "Build", "Snapshot", "Accessories", "Copy data", "Release", "Deploy", "Handover", "Post-deploy"}
+	CopySteps    = []string{"Test", "Secrets", "Build", "Snapshot", "Accessories", "Copy data", "Release", "Deploy", Switched, "Handover", "Post-deploy"}
 )
 
 // Steps are its kind's steps.

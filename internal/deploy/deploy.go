@@ -37,6 +37,12 @@ const (
 	RestoreTimeout = 4 * time.Hour
 	HeartbeatEvery = 15 * time.Second
 	FenceAfter     = 60 * time.Second
+	// StaleAfter is how long Mission Control waits without a word, counted
+	// from the last heartbeat it took, before another runner may take the
+	// deploy over (models.StaleAfter). A GO after the switch is retried
+	// this long from finish. A stale row still accepts reports until a
+	// later claim finishes it.
+	StaleAfter = 2 * time.Minute
 )
 
 // Exit codes, as the rest of the CLI uses them.
@@ -85,6 +91,7 @@ type Options struct {
 	Timeout        time.Duration // the whole deploy; zero: DefaultTimeout
 	HeartbeatEvery time.Duration // zero: HeartbeatEvery
 	FenceAfter     time.Duration // zero: FenceAfter
+	StaleAfter     time.Duration // GO retry window after the switch; zero: StaleAfter
 
 	// Claimed is a deploy houston runner already claimed: it isn't started
 	// again, and every failure finishes it NO-GO.
@@ -222,8 +229,8 @@ func Run(ctx context.Context, o Options, d Deps) int {
 		hosts:    kamal.Hosts(p, target),
 		image:    "127.0.0.1:5000/" + p.Name + ":" + sha,
 		kamalDir: filepath.Join(dir, ".houston", "kamal"),
-		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, cancel: cancel, lastOK: time.Now(),
-			retryEvery: orDefault(o.SnapshotEvery, 2*time.Second)}}
+		report: &reporter{ctx: ctx, mission: d.Mission, deploy: dep, out: o.Stdout, fenceAfter: fence, staleAfter: orDefault(o.StaleAfter, StaleAfter),
+			cancel: cancel, lastOK: time.Now(), retryEvery: orDefault(o.SnapshotEvery, 2*time.Second)}}
 	stopHeartbeat := r.report.heartbeat(every)
 	defer stopHeartbeat()
 	if restore {
@@ -456,6 +463,13 @@ func (r *run) deploy(tookOver bool) int {
 		return r.fail(fmt.Sprintf("kamal deploy failed (exit %d%s); the old version keeps serving", code, errText(err)))
 	}
 
+	// Traffic is on the new version. Tell Mission Control now, with
+	// retries: a lost GO or a fence after this must not leave the deploy
+	// in flight, then abandoned NO-GO, while the new version serves.
+	if !r.report.stepConfirmed("Clean up") {
+		r.report.logf("Mission Control didn't confirm the switch; the GO report will say so.\n")
+	}
+
 	// A copy's app passed its health check: the hosts it shares with the old
 	// project move to it, with no failed request (Mission Control does it).
 	if copy := r.report.deploy.Copy; r.report.deploy.IsCopy() {
@@ -477,10 +491,18 @@ func (r *run) deploy(tookOver bool) int {
 	}
 
 	if hook := r.p.Houston.Hooks.PostDeploy; hook != "" {
-		r.report.step("Post-deploy")
-		code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
-		if err != nil || code != 0 {
-			r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
+		if r.ctx.Err() != nil {
+			r.report.logf("post_deploy hook didn't run: the run ended after the switch\n")
+		} else {
+			r.report.step("Post-deploy")
+			code, err := r.d.Docker.Stream(r.ctx, r.dir, nil, r.report, "exec", r.p.Name+"-web-"+r.sha, "sh", "-c", hook)
+			if err != nil || code != 0 {
+				if r.ctx.Err() != nil {
+					r.report.logf("post_deploy hook was stopped; the deploy stands\n")
+				} else {
+					r.report.logf("post_deploy hook failed (exit %d%s); the deploy stands\n", code, errText(err))
+				}
+			}
 		}
 	}
 
@@ -490,11 +512,23 @@ func (r *run) deploy(tookOver bool) int {
 	}
 
 	if r.ctx.Err() != nil {
-		return r.stop()
+		if errors.Is(context.Cause(r.ctx), errTakenOver) {
+			return r.stop()
+		}
+		// Already serving: don't report NO-GO or release Kamal's lock.
+		r.capProxy()
+		note := r.afterSwitchNote()
+		r.report.logf("GO: %s is serving %s (%s)\n", r.p.Name, r.sha[:7], note)
+		if !r.report.finish("go", note) {
+			r.report.logf("Mission Control didn't confirm the GO; the new version is serving\n")
+		}
+		return 0
 	}
 	r.capProxy()
 	r.report.logf("GO: %s is serving %s\n", r.p.Name, r.sha[:7])
-	r.report.finish("go", "")
+	if !r.report.finish("go", "") {
+		r.report.logf("Mission Control didn't confirm the GO; the new version is serving\n")
+	}
 	return 0
 }
 
@@ -910,6 +944,20 @@ func (r *run) stop() int {
 	return exitFailure
 }
 
+// afterSwitchNote is why the run ended after Kamal had already switched
+// traffic: the deploy still finishes GO, and the note is kept on the row.
+func (r *run) afterSwitchNote() string {
+	cause := context.Cause(r.ctx)
+	switch {
+	case errors.Is(cause, errLostTouch):
+		return fmt.Sprintf("lost touch with Mission Control for over %s after traffic had switched; the new version is serving", r.report.fenceAfter)
+	case errors.Is(cause, context.DeadlineExceeded):
+		return fmt.Sprintf("timed out after %s after traffic had switched; the new version is serving", r.timeout)
+	default:
+		return fmt.Sprintf("stopped after traffic had switched (%v); the new version is serving", cause)
+	}
+}
+
 func orDefault(d, def time.Duration) time.Duration {
 	if d > 0 {
 		return d
@@ -934,6 +982,7 @@ type reporter struct {
 	deploy     mission.Deploy
 	out        io.Writer
 	fenceAfter time.Duration
+	staleAfter time.Duration // GO retry window after the switch, set at construction
 	retryEvery time.Duration // between tries of a report that must get through
 	cancel     context.CancelCauseFunc
 
@@ -994,14 +1043,19 @@ func (r *reporter) logf(format string, args ...any) { fmt.Fprintf(r, format, arg
 
 func (r *reporter) step(name string) { r.send(mission.Progress{Step: name}) }
 
-func (r *reporter) finish(status, msg string) {
+func (r *reporter) finish(status, msg string) bool {
 	if len(msg) > 1000 {
 		msg = msg[:1000]
 	}
-	r.send(mission.Progress{Status: status, Error: msg})
+	p := mission.Progress{Status: status, Error: msg}
+	if status == "go" {
+		return r.confirmedUntil(p, r.staleAfter)
+	}
+	ok := r.send(p)
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
+	return ok
 }
 
 // heartbeat sends progress every interval (the log so far, or nothing), so
@@ -1069,12 +1123,16 @@ func (r *reporter) isClosed() bool {
 }
 
 func (r *reporter) post(p mission.Progress) bool {
+	start := time.Now()
 	err := r.mission.Report(r.ctx, r.deploy, p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
 	case err == nil:
-		r.lastOK = time.Now()
+		// lastOK is the request start, which is never after the heartbeat_at
+		// this report writes (Mission Control stamps it after reading the body).
+		// Using the reply time would let the fence land after a takeover.
+		r.lastOK = start
 		return true
 	case errors.Is(err, mission.ErrTakenOver):
 		r.closed = true

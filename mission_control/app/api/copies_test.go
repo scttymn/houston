@@ -403,6 +403,50 @@ func TestCopyAbandoned(t *testing.T) {
 }
 
 // A clean-up the new project's restore holds up is tried again.
+
+// A copy that switched but has not handed over hosts is still abandoned
+// NO-GO, and its new project goes.
+func TestCopyAbandonedAfterSwitchWithoutHandover(t *testing.T) {
+	a, h, _, id, token := copying(t)
+	report(h, id, token, `{"step":"Clean up"}`)
+	if d := deployRow(t, a, id); !d.SwitchedAt.Valid {
+		t.Fatal("Clean up left switched_at empty")
+	}
+	exec(t, a, `UPDATE deploys SET heartbeat_at = ? WHERE id = ?`, time.Now().Add(-time.Hour), id)
+	if w := claim(h, `{"runner":"houston-runner-1","wait":0}`); w.Code != 204 {
+		t.Fatalf("claim = %d %s", w.Code, w.Body.String())
+	}
+	if d := deployRow(t, a, id); d.Status != "no_go" || !strings.HasPrefix(d.Error, "abandoned: no word") {
+		t.Errorf("deploy %+v", d)
+	}
+	if c := copyRow(t, a); c.Status != "no_go" || !strings.HasPrefix(c.Error, "abandoned: no word") {
+		t.Errorf("copy %+v", c)
+	}
+	if pending, _ := a.Jobs.Pending(t.Context()); len(pending) != 1 || pending[0].Name != "copy_cleanup" {
+		t.Errorf("pending %+v", pending)
+	}
+}
+
+// A copy that has handed over hosts and then gone silent is finished GO.
+func TestCopyAbandonedAfterHandoverFinishesGo(t *testing.T) {
+	a, h, _, id, token := copying(t)
+	report(h, id, token, `{"step":"Clean up"}`)
+	exec(t, a, `UPDATE project_copies SET handed_over = '["shop.example.com"]', handed_over_at = CURRENT_TIMESTAMP`)
+	exec(t, a, `UPDATE deploys SET heartbeat_at = ? WHERE id = ?`, time.Now().Add(-time.Hour), id)
+	if w := claim(h, `{"runner":"houston-runner-1","wait":0}`); w.Code != 204 {
+		t.Fatalf("claim = %d %s", w.Code, w.Body.String())
+	}
+	if d := deployRow(t, a, id); d.Status != "go" || !strings.Contains(d.Error, "after traffic had switched") {
+		t.Errorf("deploy %+v", d)
+	}
+	if c := copyRow(t, a); c.Status != "go" {
+		t.Errorf("copy %+v", c)
+	}
+	if pending, _ := a.Jobs.Pending(t.Context()); len(pending) != 0 {
+		t.Errorf("pending %+v", pending)
+	}
+}
+
 func TestCopyCleanUpWaits(t *testing.T) {
 	a, h, _, id, token := copying(t)
 	exec(t, a, `INSERT INTO backup_runs (project_id, location_id, operation, kind, reason, deploy_number, status, heartbeat_at)

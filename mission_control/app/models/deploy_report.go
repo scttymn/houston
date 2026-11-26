@@ -14,9 +14,9 @@ const (
 	LogCap = 4 << 20
 	// ChunkCap is the most a report may add to it at once.
 	ChunkCap = 256 << 10
-	// Switched is the step a restore reports once Kamal has switched traffic
-	// to its generation: the runner removes the old one only after Mission
-	// Control has taken it.
+	// Switched is the step a runner reports once Kamal has switched traffic
+	// to the new version. A restore removes the old generation only after
+	// Mission Control has taken it.
 	Switched = "Clean up"
 
 	truncated = "\n[log truncated: Houston keeps the first 4 MiB of a deploy's log]\n"
@@ -68,20 +68,22 @@ func Report(ctx context.Context, tx *db.Tx, d Deploy, p Progress, now time.Time)
 			return Reported{}, err
 		}
 	}
-	if d.Restore() && (p.Step != nil && *p.Step == Switched || p.Status != nil && *p.Status == "go") {
+	if (p.Step != nil && *p.Step == Switched) || (p.Status != nil && *p.Status == "go") {
 		if err := q.MarkSwitched(ctx, MarkSwitchedParams{SwitchedAt: sql.NullTime{Time: now, Valid: true}, ID: d.ID}); err != nil {
 			return Reported{}, err
 		}
-		// Only ever forward, in one statement: no stale read of the project.
-		moved, err := q.MoveGenerationForward(ctx, MoveGenerationForwardParams{ID: d.ProjectID, Generation: d.Generation, Now: now})
-		if err != nil {
-			return Reported{}, err
-		}
-		if moved == 1 {
-			// One that can't be applied is logged by the caller, never
-			// failed: it's past the switch, and the next deploy's sync
-			// applies its own.
-			out.Adopted, _ = Adopt(ctx, tx, d, now)
+		if d.Restore() {
+			// Only ever forward, in one statement: no stale read of the project.
+			moved, err := q.MoveGenerationForward(ctx, MoveGenerationForwardParams{ID: d.ProjectID, Generation: d.Generation, Now: now})
+			if err != nil {
+				return Reported{}, err
+			}
+			if moved == 1 {
+				// One that can't be applied is logged by the caller, never
+				// failed: it's past the switch, and the next deploy's sync
+				// applies its own.
+				out.Adopted, _ = Adopt(ctx, tx, d, now)
+			}
 		}
 	}
 	if p.Log != nil && *p.Log != "" {
