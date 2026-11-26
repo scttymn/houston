@@ -81,6 +81,42 @@ func TestStartDeploy(t *testing.T) {
 	}
 }
 
+// A silent deploy that already switched traffic is finished GO, not abandoned
+// NO-GO: the new version is serving.
+func TestStartDeployAbandonsSwitchedAsGo(t *testing.T) {
+	a, h := synced(t)
+	first := start(t, h, "shop")
+	report(h, first.ID, first.Token, `{"step":"Clean up"}`)
+	if d := deployRow(t, a, first.ID); !d.SwitchedAt.Valid {
+		t.Fatal("Clean up left switched_at empty")
+	}
+	exec(t, a, `UPDATE deploys SET heartbeat_at = ? WHERE id = ?`, time.Now().Add(-3*time.Minute), first.ID)
+	stale := deployRow(t, a, first.ID).HeartbeatAt.UTC().Format(time.RFC3339)
+	second := start(t, h, "shop")
+	if second.TookOver == nil || *second.TookOver != first.Number {
+		t.Errorf("second %+v", second)
+	}
+	old := deployRow(t, a, first.ID)
+	if old.Status != "go" || !old.FinishedAt.Valid || old.Error != "no word from houston deploy since "+stale+" after traffic had switched; the new version is serving" {
+		t.Errorf("the switched one %+v", old)
+	}
+}
+
+// A silent restore that already switched traffic is also finished GO.
+func TestStartDeployAbandonsSwitchedRestoreAsGo(t *testing.T) {
+	a, h := synced(t)
+	id := deploy(t, a, "shop", 2, "restore", "in_flight", 2, sha1, "rt", 0)
+	report(h, id, "rt", `{"step":"Clean up"}`)
+	exec(t, a, `UPDATE deploys SET heartbeat_at = ? WHERE id = ?`, time.Now().Add(-3*time.Minute), id)
+	second := start(t, h, "shop")
+	if second.TookOver == nil || *second.TookOver != 2 {
+		t.Errorf("second %+v", second)
+	}
+	if d := deployRow(t, a, id); d.Status != "go" || !strings.Contains(d.Error, "after traffic had switched") {
+		t.Errorf("the switched restore %+v", d)
+	}
+}
+
 // A deploy starts only for a synced project, with a full commit and a ref,
 // and not while the registry is cleaned.
 func TestStartDeployRefuses(t *testing.T) {

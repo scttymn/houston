@@ -526,6 +526,7 @@ func (h *harness) run() int {
 		Timeout:        h.timing.Timeout,
 		HeartbeatEvery: h.timing.HeartbeatEvery,
 		FenceAfter:     h.timing.FenceAfter,
+		StaleAfter:     h.timing.StaleAfter,
 		Claimed:        h.claimed,
 		Project:        h.project,
 		RunTests:       h.tests,
@@ -940,10 +941,9 @@ func TestReporterFencesFromRequestStart(t *testing.T) {
 }
 
 func TestDeployFencesItselfWhenMissionControlIsGone(t *testing.T) {
-	const staleAfter = 2 * time.Minute // models.StaleAfter
-	if gap := FenceAfter + HeartbeatEvery + mission.ClientTimeout; gap >= staleAfter {
-		t.Fatalf("FenceAfter (%s) + HeartbeatEvery (%s) + mission.ClientTimeout (%s) = %s; must be shorter than Mission Control's takeover threshold (models.StaleAfter, %s)",
-			FenceAfter, HeartbeatEvery, mission.ClientTimeout, gap, staleAfter)
+	if gap := FenceAfter + HeartbeatEvery + mission.ClientTimeout; gap >= StaleAfter {
+		t.Fatalf("FenceAfter (%s) + HeartbeatEvery (%s) + mission.ClientTimeout (%s) = %s; must be shorter than Mission Control's takeover threshold (StaleAfter, %s)",
+			FenceAfter, HeartbeatEvery, mission.ClientTimeout, gap, StaleAfter)
 	}
 	h := newHarness(t, shopCompose)
 	h.timing = Options{HeartbeatEvery: 5 * time.Millisecond, FenceAfter: 40 * time.Millisecond, Timeout: 2 * time.Second}
