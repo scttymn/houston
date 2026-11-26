@@ -144,6 +144,13 @@ func QueueDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, fre
 	if err := refuseWhileDeleting(ctx, q, p); err != nil {
 		return Deploy{}, err
 	}
+	// A restore or copy queued or in flight owns what's deployed next.
+	// Re-check in this write: the caller may have looked before a fetch.
+	if underway, err := q.RestoreOrCopyUnderway(ctx, p.ID); err != nil {
+		return Deploy{}, err
+	} else if underway {
+		return Deploy{}, Refused{"a restore of " + p.Name + " is queued or in flight; deploy after it"}
+	}
 	queued, err := q.QueuedDeploy(ctx, p.ID)
 	if err == nil {
 		log := queued.Log
@@ -198,6 +205,11 @@ func CheckForChanges(ctx context.Context, d *db.DB, refs RefReader, p Project, n
 		// one read the project: compare with what's seen now, in the write.
 		current, err := New(tx).ProjectByID(ctx, p.ID)
 		if err != nil {
+			return err
+		}
+		// A restore or copy may have been asked for during the ref fetch.
+		// Leave what was seen, so the check after it queues the push.
+		if underway, err := New(tx).RestoreOrCopyUnderway(ctx, current.ID); err != nil || underway {
 			return err
 		}
 		refs := make([]string, 0, len(wanted))
