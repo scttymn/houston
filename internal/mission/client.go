@@ -41,6 +41,9 @@ type BusyError struct {
 
 func (e *BusyError) Error() string { return e.Message }
 
+// ClientTimeout is how long one Mission Control request may take.
+const ClientTimeout = 30 * time.Second
+
 // Client is Mission Control's local API.
 type Client struct {
 	URL   string
@@ -49,7 +52,7 @@ type Client struct {
 }
 
 func New(baseURL, token string) *Client {
-	return &Client{URL: strings.TrimRight(baseURL, "/"), token: token, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{URL: strings.TrimRight(baseURL, "/"), token: token, http: &http.Client{Timeout: ClientTimeout}}
 }
 
 // FromEnvironment reads HOUSTON_URL (default http://127.0.0.1:3000) and the

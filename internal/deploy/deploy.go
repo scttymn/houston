@@ -1123,12 +1123,16 @@ func (r *reporter) isClosed() bool {
 }
 
 func (r *reporter) post(p mission.Progress) bool {
+	start := time.Now()
 	err := r.mission.Report(r.ctx, r.deploy, p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
 	case err == nil:
-		r.lastOK = time.Now()
+		// lastOK is the request start, which is never after the heartbeat_at
+		// this report writes (Mission Control stamps it after reading the body).
+		// Using the reply time would let the fence land after a takeover.
+		r.lastOK = start
 		return true
 	case errors.Is(err, mission.ErrTakenOver):
 		r.closed = true
