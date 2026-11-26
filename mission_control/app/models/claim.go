@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/scttymn/gantry/db"
@@ -18,8 +19,9 @@ var RunnerName = regexp.MustCompile(`^houston-runner-\d+$`)
 // deploy that never started work is put back on the queue once, when
 // nothing else is waiting. That next hand-off still sets TookOver, so the
 // runner releases Kamal's lock. Restores and copies are still abandoned. A
-// project with a live one keeps its queued deploy back. None while the
-// registry is cleaned, or the server updates.
+// project with a live one keeps its queued deploy back. A later claim of a
+// waiting requeued row also sets TookOver, from the requeue line in the log.
+// None while the registry is cleaned, or the server updates.
 // Without a deploy to hand over, it's only the copies' clean-ups those
 // finished need, when there are some.
 func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*Started, error) {
@@ -87,5 +89,34 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 	if _, err := SettleCopy(ctx, q, d, now); err != nil {
 		return nil, err
 	}
-	return &Started{Deploy: d, Token: token, TookOver: tookOver[d.ProjectID], CleanUp: cleanUp}, nil
+	took := tookOver[d.ProjectID]
+	if took == 0 && hasRequeueMarker(d.Log) {
+		took = d.Number
+	}
+	return &Started{Deploy: d, Token: token, TookOver: took, CleanUp: cleanUp}, nil
+}
+
+// requeuedLogPrefix is written into a deploy's log when a silent unstarted
+// claim is put back on the queue. A later claim that sees it sets TookOver
+// so the runner releases Kamal's lock.
+const requeuedLogPrefix = "requeued: "
+
+func hasRequeueMarker(log string) bool {
+	return strings.Contains(log, requeuedLogPrefix)
+}
+
+// withoutRequeueMarker drops requeue lines so a newer push on the same row
+// still gets one retry of its own.
+func withoutRequeueMarker(log string) string {
+	if !hasRequeueMarker(log) {
+		return log
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(log, "\n") {
+		if strings.HasPrefix(line, requeuedLogPrefix) {
+			continue
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }

@@ -295,4 +295,44 @@ func TestRequeueClearsTheTokenOfAWaitingClaim(t *testing.T) {
 	if handed == nil || handed.Deploy.ID != blogClaim.Deploy.ID || !handed.Deploy.OwnedBy(handed.Token) || handed.Deploy.OwnedBy(blogClaim.Token) {
 		t.Errorf("next claim %+v; want the waiting blog push with a new token", handed)
 	}
+	if handed == nil || handed.TookOver != blogClaim.Deploy.Number {
+		took := int64(0)
+		if handed != nil {
+			took = handed.TookOver
+		}
+		t.Errorf("later claim took_over=%d; want #%d so the runner releases Kamal's lock", took, blogClaim.Deploy.Number)
+	}
+}
+
+func TestNewerPushOnARequeuedRowStillGetsOneRetry(t *testing.T) {
+	t0 := time.Now()
+	d, shop := shopWith(t, `{}`)
+	blog := addProject(t, d, 2, "blog")
+	queuePush(t, d, shop, sha("a"), "refs/heads/main", t0)
+	queuePush(t, d, blog, sha("b"), "refs/heads/main", t0)
+	if claimAt(t, d, "houston-runner-1", t0) == nil || claimAt(t, d, "houston-runner-2", t0) == nil {
+		t.Fatal("both projects should have been claimed")
+	}
+	if claimAt(t, d, "houston-runner-3", t0.Add(models.StaleAfter+time.Second)) == nil {
+		t.Fatal("expected shop to be handed to the next runner")
+	}
+	queuePush(t, d, blog, sha("c"), "refs/heads/main", t0.Add(models.StaleAfter+time.Second))
+	queued, err := models.New(d.Read).QueuedDeploy(context.Background(), blog.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Sha != sha("c") {
+		t.Fatalf("queued blog sha %s; want the newer push", queued.Sha)
+	}
+	if strings.Contains(queued.Log, "requeued: ") {
+		t.Errorf("newer push kept the old requeue marker in log %q; that would spend the new commit's one retry", queued.Log)
+	}
+	first := claimAt(t, d, "houston-runner-4", t0.Add(models.StaleAfter+2*time.Second))
+	if first == nil || first.Deploy.Sha != sha("c") {
+		t.Fatalf("claimed %+v; want the newer blog push", first)
+	}
+	retry := claimAt(t, d, "houston-runner-5", first.Deploy.HeartbeatAt.Add(models.StaleAfter+time.Second))
+	if retry == nil || retry.Deploy.ID != first.Deploy.ID || retry.Deploy.Sha != sha("c") {
+		t.Errorf("newer push was not requeued after one silence: %+v", retry)
+	}
 }

@@ -746,6 +746,16 @@ func TestDeployAfterTakeoverReleasesKamalsLock(t *testing.T) {
 	if !strings.Contains(h.mission.log(), "#3") {
 		t.Error("the log should say which deploy was taken over")
 	}
+
+	h = newHarness(t, shopCompose)
+	h.mission.deploy.Number, h.mission.deploy.TookOver = 4, 4
+	if code := h.run(); code != 0 {
+		t.Fatalf("same-number takeover exit %d\n%s", code, h.stderr.String())
+	}
+	log := h.mission.log()
+	if !strings.Contains(log, "earlier claim of deploy #4") || strings.Contains(log, "Took over deploy #4") {
+		t.Errorf("log %q; want the earlier-claim wording, not that the deploy took over itself", log)
+	}
 }
 
 func TestDeploySecretsTravelAsEnvironmentOnly(t *testing.T) {
