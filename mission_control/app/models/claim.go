@@ -16,7 +16,8 @@ var RunnerName = regexp.MustCompile(`^houston-runner-\d+$`)
 // ClaimNext hands the oldest claimable queued deploy to runner, in tx, or
 // nil. Silent in-flight deploys are finished first, except a runner-claimed
 // deploy that never started work is put back on the queue once, when
-// nothing else is waiting. Restores and copies are still abandoned. A
+// nothing else is waiting. That next hand-off still sets TookOver, so the
+// runner releases Kamal's lock. Restores and copies are still abandoned. A
 // project with a live one keeps its queued deploy back. None while the
 // registry is cleaned, or the server updates.
 // Without a deploy to hand over, it's only the copies' clean-ups those
@@ -43,6 +44,7 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 			return nil, err
 		}
 		if n == 1 {
+			tookOver[d.ProjectID] = d.Number
 			continue
 		}
 		id, err := abandon(ctx, q, d, now)

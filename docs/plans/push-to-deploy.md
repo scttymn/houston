@@ -195,7 +195,7 @@ Work under the lock: only deploys + projects rows; git ls-remote runs before the
 - **`POST /api/runner/jobs/claim`** `{runner, wait}` (runner token, never through the tunnel, as in step 3's API).
   - `runner` must match `^houston-runner-\d+$`. `wait` is seconds, 0–25, default 25: a long poll that checks every second.
   - In one IMMEDIATE transaction:
-    - Finish any stale in-flight deploy (no heartbeat for 2 minutes) as abandoned, as `Deploy.start!` does.
+    - Finish any stale in-flight deploy (no heartbeat for 2 minutes) as abandoned, as `StartDeploy` does, except a runner-claimed deploy that never started work (`step` still empty) is put back on the queue once, with its token cleared, when nothing else is waiting. Restores, copies, hand deploys, deploys that already reported a step, and deploys that have already been requeued are still abandoned. The next hand-off still sets `took_over`, so the runner releases Kamal's lock.
     - Pick the oldest queued deploy whose project has no in-flight deploy.
     - Flip it to `in_flight` with a fresh token (digest stored), `heartbeat_at` now, and `runner` set, using `update_all … WHERE status = 'queued'`. It's claimed only if that updated one row.
   - **Response 200:**
@@ -214,7 +214,7 @@ Enqueue site: Deploy.queue! (ChangeCheck)
 Exclusive claim: UPDATE deploys SET status='in_flight', token_digest=… WHERE id=? AND status='queued' (1 row = ours), inside BEGIN IMMEDIATE
 Enter preconditions: status queued, and the project has no fresh in_flight deploy (stale ones are finished first, same transaction)
 Duplicate delivery: two runners claim at once → each deploy is handed out once (row count check)
-Process kill mid-work: heartbeat stops → the next claim finishes it as abandoned after 2 min and hands the queued one out with took_over (Kamal's lock released by the runner)
+Process kill mid-work: heartbeat stops → the next claim finishes it as abandoned after 2 min, or puts a runner-claimed deploy that never started work back on the queue once, and hands the next job out with took_over (Kamal's lock released by the runner)
 Ownership at finalize: unchanged from step 3 (token + in_flight checked in the writing transaction)
 Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (Batch 4)
 ```
@@ -224,7 +224,8 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 |---|---|---|---|
 | 1 | A claim hands out the oldest queued deploy: 200 with deploy (token ≥ 43 chars, digest stored), project (repo, branch, compose path, deploy key) and known_hosts; the deploy is in flight with `runner` and `heartbeat_at` | `integration/api_claims_test.rb` `test "a runner claims the oldest queued deploy"` | Contract |
 | 2 | Nothing queued → 204 after `wait` (0 in tests); a project with a fresh in-flight deploy keeps its queued one back while another project's is handed out | `test "nothing to claim"` | Preconditions |
-| 3 | A stale in-flight deploy is finished as abandoned, and its project's queued deploy is handed out with `took_over` | `test "a silent runner's deploy is taken over at claim"` | Crash & repair |
+| 3 | A stale in-flight deploy that already started work, or a restore, copy, or hand deploy, is finished as abandoned, and its project's queued deploy is handed out with `took_over` | `TestStaleClaimThatAlreadyStartedIsAbandoned`, `TestStaleClaimIsAbandonedWhenAnotherDeployIsQueued`, `test "a silent runner's deploy is taken over at claim"` | Crash & repair |
+| 3a | A stale runner-claimed deploy that never started work is put back on the queue once and handed to the next runner with `took_over` | `TestTLA_C10_AbandonedClaimLosesThePush` | Crash & repair |
 | 4 | The flip is conditional: `Deploy.claim!` on a deploy that stopped being queued (claimed by another runner between the pick and the update) returns nil and changes nothing | `models/deploy_test.rb` `test "a deploy is claimed once"` | Concurrency (TOCTOU) |
 | 5 | A bad runner name, `wait` > 25 or negative → 422; no token → 401; `Cf-Ray` → 404; nothing claimed | `test "claims are guarded"` | Authz, Contract |
 | 6 | Runners are recorded; the strip shows RUNNERS 1/2 with one seen in the last minute and `HOUSTON_RUNNERS=2`; no item when unset | `controllers/projects_controller_test.rb` `test "the header counts runners"` | Signals |
@@ -236,6 +237,31 @@ Stuck-alive: houston deploy's deadline; the runner's own deadline for step 00 (B
 - **Mutations, each caught:** the flip without its `status = 'queued'` condition (row 4); a busy project's queued deploy handed out (row 2); silent deploys never taken over at claim (row 3); every recorded host key handed to a runner (row 7).
 - **A choice made on the way:** a deploy run by hand has no runner and never runs step 00, so its page shows Test as **SKIPPED**, not DONE.
 - **Deploy note for Batch 5:** a claim long-polls for up to 25 s on a Puma thread. Rails' default is 3 threads (`RAILS_MAX_THREADS`), so two idle runners would hold two of them, and the UI and webhooks would share the last. The installer must raise `RAILS_MAX_THREADS`; the SQLite pool follows it (`database.yml`).
+
+### Later: requeue an unstarted claim (C10/C4)
+
+A runner that claims a push and then stays quiet through git fetch, or never hears the claim answer, used to be marked NO-GO after 2 minutes. The push was lost because `seen_refs` had already moved, so the poll would not queue it again.
+
+`ClaimNext` calls `ReturnToQueue` for a runner-claimed deploy with an empty step, that has not already been requeued, when nothing else is waiting. The row goes back on the queue with its token cleared and a log line naming the silent runner. The same claim can then hand that row to the next runner with `took_over` set, so the runner still releases Kamal's lock. A second silence, a hand deploy, a restore, a copy, or a deploy that already reported a step is still abandoned.
+
+#### Acceptance criteria → tests
+
+| Criterion | Test |
+| --- | --- |
+| A stale unstarted claim is handed to the next runner, with a new token and `took_over` set | `TestTLA_C10_AbandonedClaimLosesThePush` |
+| A later queued push is claimed instead, and the stale one is abandoned | `TestStaleClaimIsAbandonedWhenAnotherDeployIsQueued` |
+| A deploy that already reported a step is abandoned | `TestStaleClaimThatAlreadyStartedIsAbandoned` |
+| A stale restore is abandoned, not requeued | `TestStaleRestoreClaimIsAbandoned` |
+| A stale copy is abandoned and settled, not requeued | `TestStaleCopyClaimIsAbandoned` |
+| A second silence after a requeue is abandoned | `TestStaleClaimIsAbandonedOnTheSecondSilence` |
+| A hand deploy after a stale claim abandons the claim and does not leave it queued | `TestStartDeployAbandonsAStaleClaim` |
+| A stale hand deploy is abandoned, not handed to a runner | `TestClaimNextAbandonsAStaleHandDeploy` |
+| A waiting requeued row from another project no longer matches the old token | `TestRequeueClearsTheTokenOfAWaitingClaim` |
+
+#### Evidence (2026-11-26)
+
+- `TestTLA_C10_AbandonedClaimLosesThePush` failed first on main: the next runner got nothing after the first claim went stale. It passes after the fix, and now also requires `took_over` so the next runner releases Kamal's lock.
+- `go test ./...` and `go vet ./...` passed.
 
 ## Batch 4: `houston runner`
 

@@ -67,8 +67,8 @@ func TestTLA_C10_AbandonedClaimLosesThePush(t *testing.T) {
 		t.Errorf("the next runner did not get the same push of %s: id=%d sha=%s runner=%s", sha("a")[:7], second.Deploy.ID, second.Deploy.Sha, second.Deploy.Runner)
 		return
 	}
-	if second.Token == "" || second.Token == first.Token || second.TookOver != 0 {
-		t.Errorf("reclaimed deploy kept the old token or was marked taken over: token equal=%v took_over=%d", second.Token == first.Token, second.TookOver)
+	if second.Token == "" || second.Token == first.Token || second.TookOver != first.Deploy.Number {
+		t.Errorf("reclaimed deploy kept the old token or did not set took_over: token equal=%v took_over=%d, want #%d so the runner releases Kamal's lock", second.Token == first.Token, second.TookOver, first.Deploy.Number)
 	}
 	if second.Deploy.OwnedBy(first.Token) || !second.Deploy.OwnedBy(second.Token) {
 		t.Errorf("the first runner's token still matches the reclaimed row, or the new token does not")
@@ -138,6 +138,53 @@ func TestStaleRestoreClaimIsAbandoned(t *testing.T) {
 	}
 	if got.Status != "no_go" || got.Kind != "restore" || !strings.HasPrefix(got.Error, "abandoned: ") {
 		t.Errorf("stale restore: %+v; want no_go abandoned", got)
+	}
+}
+
+func TestStaleCopyClaimIsAbandoned(t *testing.T) {
+	ctx, t0 := context.Background(), time.Now()
+	d, shop := shopWith(t, `{}`)
+	store := addProject(t, d, 2, "store")
+	var copy models.ProjectCopy
+	if err := d.Tx(ctx, func(tx *db.Tx) error {
+		q := models.New(tx)
+		dep, err := q.CreateCopyDeploy(ctx, models.CreateCopyDeployParams{
+			ProjectID: store.ID, Sha: sha("a"), Ref: "refs/heads/main", HeartbeatAt: t0,
+		})
+		if err != nil {
+			return err
+		}
+		copy, err = q.CreateCopy(ctx, models.CreateCopyParams{
+			ProjectID:     sql.NullInt64{Int64: store.ID, Valid: true},
+			FromProjectID: sql.NullInt64{Int64: shop.ID, Valid: true},
+			DeployID:      sql.NullInt64{Int64: dep.ID, Valid: true},
+			FromName:      "shop",
+			ToName:        "store",
+			Sha:           sha("a"),
+			RequestedBy:   "test",
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := claimAt(t, d, "houston-runner-1", t0)
+	if first == nil || first.Deploy.Kind != "copy" {
+		t.Fatalf("claimed %+v; want the copy", first)
+	}
+	second := claimAt(t, d, "houston-runner-2", t0.Add(models.StaleAfter+time.Second))
+	got := deployByID(t, d, first.Deploy.ID)
+	if second != nil && second.Deploy.ID != 0 {
+		t.Errorf("next claim got deploy #%d kind %s; want the copy left abandoned, not requeued", second.Deploy.Number, second.Deploy.Kind)
+	}
+	if got.Status != "no_go" || got.Kind != "copy" || !strings.HasPrefix(got.Error, "abandoned: ") {
+		t.Errorf("stale copy deploy: %+v; want no_go abandoned", got)
+	}
+	settled, err := models.New(d.Read).CopyByID(ctx, copy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.Status != "no_go" || !strings.HasPrefix(settled.Error, "abandoned: ") {
+		t.Errorf("copy row %+v; want no_go abandoned", settled)
 	}
 }
 
