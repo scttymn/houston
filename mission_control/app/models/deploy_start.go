@@ -134,9 +134,30 @@ func StartDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, now
 }
 
 // abandon finishes a silent in-flight deploy, and settles its copy when
-// it's a copy's: cleanUp is that copy when its new project goes.
+// it's a copy's: cleanUp is that copy when its new project goes. A deploy
+// that already switched traffic is finished GO: the new version is serving.
+// A copy that has not handed over hosts stays NO-GO, so the new project goes.
 func abandon(ctx context.Context, q *Queries, d Deploy, now time.Time) (cleanUp int64, err error) {
-	d.Status, d.Error = "no_go", "abandoned: no word from houston deploy since "+d.HeartbeatAt.UTC().Format(time.RFC3339)
+	finishGO := d.SwitchedAt.Valid
+	if finishGO && d.Kind == "copy" {
+		c, err := q.CopyByDeploy(ctx, sql.NullInt64{Int64: d.ID, Valid: true})
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+		if err == nil && !c.HandedOverAt.Valid {
+			finishGO = false
+		}
+	}
+	heard := "no word from houston deploy since " + d.HeartbeatAt.UTC().Format(time.RFC3339)
+	if finishGO {
+		d.Status, d.Error = "go", heard+" after traffic had switched; the new version is serving"
+		if _, err := q.SaveProgress(ctx, SaveProgressParams{Step: d.Step, Error: d.Error, ProposedName: d.ProposedName, Status: "go",
+			FinishedAt: sql.NullTime{Time: now, Valid: true}, HeartbeatAt: now, UpdatedAt: now, ID: d.ID}); err != nil {
+			return 0, err
+		}
+		return SettleCopy(ctx, q, d, now)
+	}
+	d.Status, d.Error = "no_go", "abandoned: "+heard
 	if err := q.AbandonDeploy(ctx, AbandonDeployParams{ID: d.ID, Now: sql.NullTime{Time: now, Valid: true}, Error: d.Error}); err != nil {
 		return 0, err
 	}
