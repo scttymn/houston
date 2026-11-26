@@ -238,7 +238,9 @@ func Run(ctx context.Context, o Options, d Deps) int {
 	} else {
 		r.report.logf("Deploy #%d of %s: %s (%s)\n", dep.Number, p.Name, sha[:7], ref)
 	}
-	if dep.TookOver > 0 {
+	if dep.TookOver == dep.Number && dep.Number > 0 {
+		r.report.logf("The earlier claim of deploy #%d had gone silent.\n", dep.Number)
+	} else if dep.TookOver > 0 {
 		r.report.logf("Took over deploy #%d, which had gone silent.\n", dep.TookOver)
 	}
 	domains := make([]string, 0, len(synced.Domains))

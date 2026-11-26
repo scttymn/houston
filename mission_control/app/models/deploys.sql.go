@@ -764,6 +764,29 @@ func (q *Queries) RestoreServing(ctx context.Context, arg RestoreServingParams) 
 	return i, err
 }
 
+const returnToQueue = `-- name: ReturnToQueue :execrows
+UPDATE deploys SET status = 'queued',
+  log = log || 'requeued: ' || runner || ' went silent before starting' || char(10),
+  runner = '', token_digest = '', updated_at = ?1
+WHERE deploys.id = ?2 AND deploys.status = 'in_flight' AND deploys.kind = 'deploy' AND deploys.step = '' AND deploys.runner != ''
+  AND instr(deploys.log, 'requeued: ') = 0
+  AND NOT EXISTS (SELECT 1 FROM deploys w WHERE w.project_id = deploys.project_id AND w.status = 'queued')
+`
+
+type ReturnToQueueParams struct {
+	Now time.Time
+	ID  int64
+}
+
+// A claimed deploy that never started work, put back so another runner can take it.
+func (q *Queries) ReturnToQueue(ctx context.Context, arg ReturnToQueueParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, returnToQueue, arg.Now, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const runningDeploySummary = `-- name: RunningDeploySummary :one
 SELECT id, project_id, number, kind, status, sha, ref, fresh, generation, step, error, CAST('' AS TEXT) AS log, runner, proposed_name,
   token_digest, heartbeat_at, finished_at, switched_at, source_location_id, source_snapshot_id, sync_payload, created_at, updated_at

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/scttymn/gantry/db"
@@ -14,9 +15,13 @@ import (
 var RunnerName = regexp.MustCompile(`^houston-runner-\d+$`)
 
 // ClaimNext hands the oldest claimable queued deploy to runner, in tx, or
-// nil. Silent in-flight deploys are finished first; a project with a live
-// one keeps its queued deploy back. None while the registry is cleaned, or
-// the server updates.
+// nil. Silent in-flight deploys are finished first, except a runner-claimed
+// deploy that never started work is put back on the queue once, when
+// nothing else is waiting. That next hand-off still sets TookOver, so the
+// runner releases Kamal's lock. Restores and copies are still abandoned. A
+// project with a live one keeps its queued deploy back. A later claim of a
+// waiting requeued row also sets TookOver, from the requeue line in the log.
+// None while the registry is cleaned, or the server updates.
 // Without a deploy to hand over, it's only the copies' clean-ups those
 // finished need, when there are some.
 func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*Started, error) {
@@ -36,6 +41,13 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 	tookOver := map[int64]int64{}
 	var cleanUp []int64
 	for _, d := range stale {
+		n, err := q.ReturnToQueue(ctx, ReturnToQueueParams{Now: now, ID: d.ID})
+		if err != nil {
+			return nil, err
+		}
+		if n == 1 {
+			continue
+		}
 		id, err := abandon(ctx, q, d, now)
 		if err != nil {
 			return nil, err
@@ -76,5 +88,35 @@ func ClaimNext(ctx context.Context, tx *db.Tx, runner string, now time.Time) (*S
 	if _, err := SettleCopy(ctx, q, d, now); err != nil {
 		return nil, err
 	}
-	return &Started{Deploy: d, Token: token, TookOver: tookOver[d.ProjectID], CleanUp: cleanUp}, nil
+	took := tookOver[d.ProjectID]
+	if took == 0 && hasRequeueMarker(d.Log) {
+		took = d.Number
+	}
+	return &Started{Deploy: d, Token: token, TookOver: took, CleanUp: cleanUp}, nil
+}
+
+// requeuedLogPrefix is written into a deploy's log when a silent unstarted
+// claim is put back on the queue. A later claim that sees it sets TookOver
+// so the runner releases Kamal's lock.
+const requeuedLogPrefix = "requeued: "
+
+func hasRequeueMarker(log string) bool {
+	return strings.Contains(log, requeuedLogPrefix)
+}
+
+// withoutRequeueMarker drops requeue lines so a newer push on the same row
+// still gets one retry of its own.
+func withoutRequeueMarker(log string) string {
+	for {
+		i := strings.Index(log, requeuedLogPrefix)
+		if i < 0 {
+			return log
+		}
+		rest := log[i:]
+		if n := strings.IndexByte(rest, '\n'); n >= 0 {
+			log = log[:i] + rest[n+1:]
+			continue
+		}
+		return log[:i]
+	}
 }

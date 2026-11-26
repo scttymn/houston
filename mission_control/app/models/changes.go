@@ -154,6 +154,9 @@ func QueueDeploy(ctx context.Context, tx *db.Tx, p Project, sha, ref string, fre
 	queued, err := q.QueuedDeploy(ctx, p.ID)
 	if err == nil {
 		log := queued.Log
+		if queued.Sha != sha || queued.Ref != ref {
+			log = withoutRequeueMarker(log)
+		}
 		if !(fresh && queued.Sha == sha && queued.Ref == ref) {
 			log += "A newer push switched to " + sha[:min(7, len(sha))] + " (" + ref + ").\n"
 		}

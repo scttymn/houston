@@ -34,6 +34,15 @@ SELECT * FROM deploys WHERE project_id = ? AND status = 'in_flight';
 -- name: AbandonDeploy :exec
 UPDATE deploys SET status = 'no_go', finished_at = @now, error = @error, updated_at = @now WHERE id = @id;
 
+-- name: ReturnToQueue :execrows
+-- A claimed deploy that never started work, put back so another runner can take it.
+UPDATE deploys SET status = 'queued',
+  log = log || 'requeued: ' || runner || ' went silent before starting' || char(10),
+  runner = '', token_digest = '', updated_at = @now
+WHERE deploys.id = @id AND deploys.status = 'in_flight' AND deploys.kind = 'deploy' AND deploys.step = '' AND deploys.runner != ''
+  AND instr(deploys.log, 'requeued: ') = 0
+  AND NOT EXISTS (SELECT 1 FROM deploys w WHERE w.project_id = deploys.project_id AND w.status = 'queued');
+
 -- name: NextDeployNumber :one
 SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM deploys WHERE project_id = ?;
 
